@@ -1,0 +1,13 @@
+{
+  "name": "pline-v3-test-codex-monitor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "health": "node src/monitor.js health",
+    "smoke": "node src/monitor.js create_smoke_file",
+    "claim-once": "node src/monitor.js claim-once",
+    "poll": "node src/monitor.js poll",
+    "selftest": "node src/monitor.js selftest",
+    "test": "node test/monitor.test.mjs"
+  }
+}

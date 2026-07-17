@@ -1,0 +1,28 @@
+name = "pline-v3-test-line-gateway"
+main = "src/index.js"
+compatibility_date = "2026-07-17"
+
+workers_dev = true
+
+[vars]
+NODE_ENV = "test"
+PROJECT_ROOT = "/Users/phoebe/Documents/菲比 LINE 智能助理_03"
+WORKER_NAME = "pline-v3-test-line-gateway"
+CF_KV_RUNTIME_NAMESPACE = "pline-v3-test-runtime"
+CF_KV_IDEMPOTENCY_NAMESPACE = "pline-v3-test-idempotency"
+CF_D1_DATABASE = "pline-v3-test-db"
+N8N_WEBHOOK_URL = "https://n8nphy.app.n8n.cloud/webhook/pline-v3-test-ai-agent"
+
+[[kv_namespaces]]
+binding = "RUNTIME_KV"
+id = "10cdfe018b3942b483faeaca6e517ae5"
+
+[[kv_namespaces]]
+binding = "IDEMPOTENCY_KV"
+id = "1f857def085d466abed722e9222002e3"
+
+# Required before live TEST execution:
+# LINE_CHANNEL_SECRET
+# LINE_CHANNEL_ACCESS_TOKEN
+# LINE_TEST_ADMIN_USER_IDS
+# N8N_SHARED_SECRET

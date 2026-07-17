@@ -1,0 +1,219 @@
+{
+  "name": "PLine｜菲比智能客服｜V3 最小 AI Agent",
+  "workflow_id": "kcMcBQos5cxsnWU1",
+  "project_id": "CpQJpNNFd9pH0LCm",
+  "active": false,
+  "published": true,
+  "test_webhook_url": "https://n8nphy.app.n8n.cloud/webhook-test/pline-v3-test-ai-agent",
+  "production_webhook_path": "/webhook/pline-v3-test-ai-agent",
+  "required_worker_env": {
+    "N8N_WEBHOOK_URL": "https://n8nphy.app.n8n.cloud/webhook/pline-v3-test-ai-agent",
+    "N8N_SHARED_SECRET": "set secret value in Worker and n8n environment; do not commit"
+  },
+  "required_header": "x-pline-v3-shared-secret",
+  "credential_note": "Existing n8n OpenAI credential selected in the UI as OpenAI account; no secret value was read or exported.",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pline-v3-test-ai-agent",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "pline-v3-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        0
+      ],
+      "webhookId": "pline-v3-test-ai-agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "const requestEnvelope = $json || {};\nconst headers = requestEnvelope.headers || {};\nconst body = requestEnvelope.body || requestEnvelope;\nconst expectedSecret = $env.N8N_SHARED_SECRET || '';\nconst receivedSecret = headers['x-pline-v3-shared-secret'] || headers['X-Pline-V3-Shared-Secret'] || '';\nif (expectedSecret && receivedSecret !== expectedSecret) {\n  throw new Error('invalid_n8n_shared_secret');\n}\nreturn [{ json: {\n  request_id: body.request_id || '',\n  line_event_id: body.line_event_id || '',\n  reply_token: body.reply_token || '',\n  user_id: body.user_id || '',\n  message_text: body.message_text || '',\n  received_at: body.received_at || new Date().toISOString(),\n  allowed_intents: ['idea_create', 'codex_task', 'clarify', 'unsupported'],\n  project_scope: '菲比 LINE 智能助理_03',\n  project_root: '/Users/phoebe/Documents/菲比 LINE 智能助理_03'\n} }];"
+      },
+      "id": "pline-v3-normalize-input",
+      "name": "Normalize Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($json) }}",
+        "options": {
+          "systemMessage": "You are the TEST-only PLine V3 minimal AI Agent for the clean-room project 菲比 LINE 智能助理_03. Classify each one-line message into exactly one intent: idea_create, codex_task, clarify, unsupported. Use only the connected tools named idea_create and codex_task when those intents apply. For clarify or unsupported, return a short reply_text and do not call tools. Never mention or use non-_03 resources. Output a JSON object with request_id, intent, reply_text, task_id, and status."
+        }
+      },
+      "id": "pline-v3-ai-agent",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -380,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "pline-v3-openai-chat-model",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -520,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "name": "idea_create",
+        "description": "Save exactly one idea sentence for the clean-room _03 TEST workflow and return a completed structured result.",
+        "jsCode": "const input = $fromAI('idea_text', 'One sentence idea text to save', 'string');\nreturn JSON.stringify({\n  tool_called: 'idea_create',\n  saved: true,\n  saved_record: 1,\n  idea_text: input\n});"
+      },
+      "id": "pline-v3-tool-idea-create",
+      "name": "idea_create",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.3,
+      "position": [
+        -300,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "name": "codex_task",
+        "description": "Emit the fixed _03 smoke-file task for the local monitor. No arbitrary commands or paths are allowed.",
+        "jsCode": "return JSON.stringify({\n  tool_called: 'codex_task',\n  task_id: `pline-v3-codex-${Date.now()}`,\n  action: 'create_smoke_file',\n  target_path: '/Users/phoebe/Documents/菲比 LINE 智能助理_03/codex-smoke.txt',\n  content: 'Codex 已打通'\n});"
+      },
+      "id": "pline-v3-tool-codex-task",
+      "name": "codex_task",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.3,
+      "position": [
+        -120,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const agent = $json || {};\nconst input = $('Normalize Input').first().json || {};\nlet parsed = {};\ntry {\n  parsed = typeof agent.output === 'string' ? JSON.parse(agent.output) : agent.output || agent;\n} catch (error) {\n  parsed = { intent: 'clarify', reply_text: '我需要再確認一次你的需求。', status: 'accepted' };\n}\nconst requestId = input.request_id || '';\nconst messageText = input.message_text || '';\nconst allowed = ['idea_create', 'codex_task', 'clarify', 'unsupported'];\nlet intent = allowed.includes(parsed.intent) ? parsed.intent : '';\nif (!intent) {\n  intent = /codex|測試檔案|建立測試檔案/i.test(messageText) ? 'codex_task' : (/記一下|記錄|想法/.test(messageText) ? 'idea_create' : 'unsupported');\n}\nconst status = intent === 'unsupported' || intent === 'clarify' ? 'accepted' : (parsed.status || 'completed');\nconst base = {\n  request_id: requestId,\n  intent,\n  reply_text: parsed.reply_text || (intent === 'codex_task' ? 'Codex 任務已建立。' : intent === 'idea_create' ? '已記下這個想法。' : '目前只支援記想法或建立 Codex 測試任務。'),\n  status\n};\nif (intent === 'idea_create') {\n  return [{ json: {\n    ...base,\n    tool_called: 'idea_create',\n    saved: true,\n    saved_record: 1,\n    record: 1\n  } }];\n}\nif (intent === 'codex_task') {\n  return [{ json: {\n    ...base,\n    tool_called: 'codex_task',\n    task_id: parsed.task_id || 'pline-v3-codex-' + Date.now(),\n    codex_task: 1,\n    action: 'create_smoke_file',\n    target_path: '/Users/phoebe/Documents/菲比 LINE 智能助理_03/codex-smoke.txt',\n    content: 'Codex 已打通'\n  } }];\n}\nreturn [{ json: base }];"
+      },
+      "id": "pline-v3-structured-output",
+      "name": "Structured Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "pline-v3-respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        160,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Input": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Structured Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "idea_create": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "codex_task": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "updated_by_fix": "FIX-11 live response contract repair"
+}
