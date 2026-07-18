@@ -21,9 +21,11 @@ import {
   normalizeTask,
   notifyCodexFinalizer,
   notifyIdeaFinalizer,
+  runner,
   runTask,
   saveIdeaJson,
   validateIdeaJson,
+  writeRunnerHeartbeat,
 } from "../src/monitor.js";
 
 assert.equal(FIXED_ACTION, "create_smoke_file");
@@ -47,6 +49,7 @@ assert.equal(ready.status, "ready");
 assert.equal(ready.codex_bin.path, fakeCodex);
 assert.equal(ready.task_prefix, "codex_task:v1");
 assert.deepEqual(ready.supported_actions, ["create_smoke_file", "save_idea_json"]);
+assert.deepEqual(ready.pending_prefixes, ["codex_task:v1:pending:", "idea_json:v1:pending:"]);
 
 assert.deepEqual(normalizeTask({}), {
   task_id: "pline-v3-test-smoke",
@@ -63,6 +66,7 @@ assert.deepEqual(normalizeTask({}), {
   content: "Codex 任務測試成功",
   idea: null,
   finalize_token: "",
+  final_reply_text: "",
   line_user_ref: "",
 });
 
@@ -115,6 +119,7 @@ assert.equal(completedTask.status, "completed");
 assert.equal(completedTask.created_at, codexCreatedAt);
 assert.equal(completedTask.codex_execution, true);
 assert.equal(completedTask.file_written, true);
+assert.equal(await taskKv.get(`${TASK_PREFIX}:pending:pline-v3-monitor-unit-task`), "");
 const completedResult = JSON.parse(await taskKv.get(`${TASK_PREFIX}:result:pline-v3-monitor-unit-task`));
 assert.deepEqual(completedResult, {
   task_id: "pline-v3-monitor-unit-task",
@@ -343,6 +348,140 @@ assert.equal(preserveRefClaim.ok, true);
 const preserveRefTask = JSON.parse(await preserveRefKv.get(`${IDEA_TASK_PREFIX}:task:idea-preserve-ref-${uniqueSuffix}`));
 assert.equal(preserveRefTask.finalize_token, "test-finalize-token");
 assert.equal(preserveRefTask.line_user_ref, "v1.encrypted.ref");
+assert.equal(preserveRefTask.final_reply_text, "");
+
+const runnerKv = createMemoryKv();
+await createSyntheticIdeaTask({
+  task_id: `idea-runner-${uniqueSuffix}`,
+  request_id: `pline-v3-runner-idea-${uniqueSuffix}`,
+  marker: "T1702R-20260718010102",
+  idea: {
+    ...idea,
+    idea_id: `idea-runner-${uniqueSuffix}`,
+    line_event_key: `${"d".repeat(54)}${uniqueSuffix}`,
+  },
+}, { kv: runnerKv });
+const runnerHeartbeat = join(tmpdir(), `pline-v3-runner-heartbeat-${uniqueSuffix}.json`);
+const runnerResult = await runner({
+  kv: runnerKv,
+  env: { CODEX_BIN: fakeCodex, PATH: "", IDEA_FINALIZE_DISABLED: "1" },
+  iterations: 2,
+  drainIterations: 5,
+  intervalMs: 0,
+  idleIntervalMs: 0,
+  heartbeatPath: runnerHeartbeat,
+});
+assert.equal(runnerResult.ok, true);
+assert.equal(runnerResult.drained, 1);
+assert.equal(runnerResult.mode, "durable_poll_loop");
+const runnerIdeaTask = JSON.parse(await runnerKv.get(`${IDEA_TASK_PREFIX}:task:idea-runner-${uniqueSuffix}`));
+assert.equal(["completed", "duplicate"].includes(runnerIdeaTask.status), true);
+assert.equal(await runnerKv.get(`${IDEA_TASK_PREFIX}:pending:idea-runner-${uniqueSuffix}`), "");
+const heartbeat = JSON.parse(await readFile(runnerHeartbeat, "utf8"));
+assert.equal(heartbeat.schema, "pline-v3-test-monitor-runner/v1");
+assert.equal(heartbeat.monitor, "pline-v3-test-codex-monitor");
+assert.equal(heartbeat.total_drained, 1);
+
+const cleanupKvBase = createMemoryKv();
+await cleanupKvBase.put(`${IDEA_TASK_PREFIX}:task:idea-a-terminal-${uniqueSuffix}`, JSON.stringify({
+  schema: "pline-v3-test-idea-task/v1",
+  status: "completed",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: `idea-a-terminal-${uniqueSuffix}`,
+  request_id: `pline-v3-terminal-cleanup-${uniqueSuffix}`,
+  marker: "T1702X-20260718010102",
+  action: SAVE_IDEA_ACTION,
+  target_dir: DROPBOX_IDEA_DIR,
+  finalize_token: "test-finalize-token",
+  line_user_ref: "v1.encrypted.ref",
+  final_reply_text: "幫妳記好了，這個想法已經收起來了 💡",
+  idea: {
+    ...idea,
+    idea_id: `idea-a-terminal-${uniqueSuffix}`,
+    line_event_key: `${"f".repeat(54)}${uniqueSuffix}`,
+  },
+  completed_at: "2026-07-18T00:00:00.000Z",
+  created_at: "2026-07-18T00:00:00.000Z",
+}));
+await cleanupKvBase.put(`${IDEA_TASK_PREFIX}:pending:idea-a-terminal-${uniqueSuffix}`, `${IDEA_TASK_PREFIX}:task:idea-a-terminal-${uniqueSuffix}`);
+await cleanupKvBase.put(`${IDEA_TASK_PREFIX}:pending:idea-b-missing-${uniqueSuffix}`, `${IDEA_TASK_PREFIX}:task:idea-b-missing-${uniqueSuffix}`);
+await cleanupKvBase.put(`${IDEA_TASK_PREFIX}:task:idea-c-bad-${uniqueSuffix}`, "{not-json");
+await cleanupKvBase.put(`${IDEA_TASK_PREFIX}:pending:idea-c-bad-${uniqueSuffix}`, `${IDEA_TASK_PREFIX}:task:idea-c-bad-${uniqueSuffix}`);
+await createSyntheticIdeaTask({
+  task_id: `idea-z-active-${uniqueSuffix}`,
+  request_id: `pline-v3-active-after-cleanup-${uniqueSuffix}`,
+  marker: "T1702Y-20260718010102",
+  idea: {
+    ...idea,
+    idea_id: `idea-z-active-${uniqueSuffix}`,
+    line_event_key: `${"0".repeat(54)}${uniqueSuffix}`,
+  },
+}, { kv: cleanupKvBase });
+const cleanupKv = withDeleteFailures(cleanupKvBase, new Set([
+  `${IDEA_TASK_PREFIX}:pending:idea-a-terminal-${uniqueSuffix}`,
+]));
+const cleanupResult = await drain({
+  kv: cleanupKv,
+  env: { CODEX_BIN: fakeCodex, PATH: "", IDEA_FINALIZE_DISABLED: "1" },
+  iterations: 5,
+  intervalMs: 0,
+  legacyScan: false,
+});
+assert.equal(cleanupResult.ok, true);
+assert.equal(cleanupResult.drained, 1);
+assert.equal(["completed", "duplicate"].includes(JSON.parse(await cleanupKvBase.get(`${IDEA_TASK_PREFIX}:task:idea-z-active-${uniqueSuffix}`)).status), true);
+assert.equal(await cleanupKvBase.get(`${IDEA_TASK_PREFIX}:pending:idea-z-active-${uniqueSuffix}`), "");
+assert.equal(await cleanupKvBase.get(`${IDEA_TASK_PREFIX}:pending:idea-b-missing-${uniqueSuffix}`), "");
+assert.equal(await cleanupKvBase.get(`${IDEA_TASK_PREFIX}:pending:idea-c-bad-${uniqueSuffix}`), "");
+assert.notEqual(await cleanupKvBase.get(`${IDEA_TASK_PREFIX}:pending:idea-a-terminal-${uniqueSuffix}`), "");
+const terminalWarningKeys = await cleanupKvBase.list(`evidence:v1:request:pline-v3-terminal-cleanup-${uniqueSuffix}:stage:`);
+assert.equal(terminalWarningKeys.some((key) => key.name.endsWith(":monitor_pending_index_cleanup_warning")), true);
+
+const staleKv = createMemoryKv();
+await staleKv.put(`${IDEA_TASK_PREFIX}:task:idea-stale-${uniqueSuffix}`, JSON.stringify({
+  schema: "pline-v3-test-idea-task/v1",
+  status: "claimed",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: `idea-stale-${uniqueSuffix}`,
+  request_id: `pline-v3-stale-idea-${uniqueSuffix}`,
+  marker: "T1702S-20260718010102",
+  action: SAVE_IDEA_ACTION,
+  target_dir: DROPBOX_IDEA_DIR,
+  finalize_token: "test-finalize-token",
+  line_user_ref: "v1.encrypted.ref",
+  final_reply_text: "幫妳記好了，這個想法已經收起來了 💡",
+  idea: {
+    ...idea,
+    idea_id: `idea-stale-${uniqueSuffix}`,
+    line_event_key: `${"e".repeat(54)}${uniqueSuffix}`,
+  },
+  claimed_at: "2026-07-18T00:00:00.000Z",
+  created_at: "2026-07-18T00:00:00.000Z",
+}));
+const staleClaim = await claimOnce({
+  kv: staleKv,
+  env: { CODEX_BIN: fakeCodex, PATH: "", IDEA_FINALIZE_DISABLED: "1" },
+  staleClaimMs: 1,
+});
+assert.equal(staleClaim.ok, true);
+assert.equal(staleClaim.claimed, true);
+const staleTask = JSON.parse(await staleKv.get(`${IDEA_TASK_PREFIX}:task:idea-stale-${uniqueSuffix}`));
+assert.equal(["completed", "duplicate"].includes(staleTask.status), true);
+assert.equal(staleTask.final_reply_text, "幫妳記好了，這個想法已經收起來了 💡");
+const staleEvidenceKeys = await staleKv.list(`evidence:v1:request:pline-v3-stale-idea-${uniqueSuffix}:stage:`);
+assert.equal(staleEvidenceKeys.some((key) => key.name.endsWith(":monitor_stale_claim_recovered")), true);
+
+const heartbeatPath = join(tmpdir(), `pline-v3-runner-heartbeat-write-${uniqueSuffix}.json`);
+await writeRunnerHeartbeat({
+  status: "ready",
+  loops: 1,
+  total_drained: 0,
+  last_result: { ok: true, reason: "drain_complete" },
+  updated_at: "2026-07-18T00:00:00.000Z",
+}, heartbeatPath);
+const heartbeatRecord = JSON.parse(await readFile(heartbeatPath, "utf8"));
+assert.equal(heartbeatRecord.status, "ready");
+assert.equal(JSON.stringify(heartbeatRecord).includes("U_SHOULD_NOT_STORE"), false);
 
 const finalizeCalls = [];
 globalThis.fetch = async (url, options) => {
@@ -411,6 +550,23 @@ function createMemoryKv() {
     },
     async put(key, value) {
       store.set(key, value);
+    },
+    async delete(key) {
+      store.delete(key);
+    },
+  };
+}
+
+function withDeleteFailures(kv, failKeys) {
+  return {
+    list: (...args) => kv.list(...args),
+    get: (...args) => kv.get(...args),
+    put: (...args) => kv.put(...args),
+    async delete(key) {
+      if (failKeys.has(key)) {
+        throw new Error("simulated_delete_failure");
+      }
+      return kv.delete(key);
     },
   };
 }

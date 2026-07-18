@@ -17,7 +17,7 @@ Date: 2026-07-18
 Reported live case:
 
 - Time label: `12:53`
-- User idea text: `記一下：我今天要喝2000cc的水`
+- User idea text: `記一下：[REDACTED_IDEA_CONTENT]`
 - Request id: `pline-v3-01KXSS4ZKDTPE9N9C9BDB1HAMF`
 - Worker received / signature / admin / idempotency / webhook HTTP `200`: present
 - n8n started: present
@@ -67,7 +67,7 @@ Synthetic input:
 ```json
 {
   "request_id": "pline-v3-01KXSS4ZKDTPE9N9C9BDB1HAMF",
-  "message_text": "記一下：我今天要喝2000cc的水"
+  "message_text": "記一下：[REDACTED_IDEA_CONTENT]
 }
 ```
 

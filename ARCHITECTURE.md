@@ -165,3 +165,19 @@ After Worker version `ca9001fa-cf03-43f7-9911-33f6301dd668`, TEST rerun proved c
 Worker version `493e4b8a-91da-479e-81e0-229fd1eb72c7` adds a Gate capability boundary before codex_task enqueue. The only enabled codex_task capability remains the fixed smoke task. Requests that require browser/Computer Use or another not-yet-enabled capability are marked `capability_not_yet_enabled`, receive a natural non-success final, and are not converted to `create_smoke_file`.
 
 Monitor adds bounded `drain` and targeted `claim-task` / `mark-capability-not-enabled` operations for `_03` live recovery. These operations still use fixed task actions and task-scoped finalizer callbacks; they do not introduce arbitrary command, arbitrary path, or browser automation capability.
+
+## Computer Use open_browser_page Gate Feasibility
+
+The current monitor process cannot call Codex MCP tools, `node_repl`, or the Computer Use skill. Therefore `open_browser_page` cannot be truthfully implemented as a background LINE-triggered Computer Use action without an additional bridge.
+
+The architecture must add an explicit, audited bridge before enabling this capability. Until then, supported monitor actions remain `create_smoke_file` and `save_idea_json`.
+## Durable Monitor Queue
+
+Worker now writes a small pending index whenever it creates a monitor task:
+
+- `idea_json:v1:pending:<task_id>` for `save_idea_json`
+- `codex_task:v1:pending:<task_id>` for fixed Codex smoke tasks
+
+The local monitor runs as a project-local launchd agent and drains only these pending indexes. It removes the index after terminal completion/failure/duplicate. A manual legacy scan is retained only for old pre-index tasks.
+
+This keeps LINE webhook handling fast while making Dropbox JSON finalization independent of TEST manually starting a monitor poll.

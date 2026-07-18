@@ -283,6 +283,15 @@
 - Remaining blocker is n8n production response/execution attribution, not Worker URL env.
 - Evidence: `FIX_EVIDENCE_WORKER_N8N_URL_ATTRIBUTION.md`.
 
+## 2026-07-18 - FIX Computer Use open_browser_page Feasibility
+
+- Checked `_03` Worker/monitor capability surface for the requested `open_browser_page` Gate.
+- Confirmed monitor is a normal local Node.js process and cannot directly call Codex MCP tools, `node_repl`, or Computer Use skill.
+- Confirmed current supported actions remain `create_smoke_file` and `save_idea_json`.
+- Did not add shell `open`, AppleScript browser automation, arbitrary command, or fake Computer Use implementation.
+- Gate blocked with reason `monitor_unable_to_call_codex_computer_use_tools`.
+- Evidence: `FIX_EVIDENCE_COMPUTER_USE_OPEN_BROWSER_PAGE.md`.
+
 ## 2026-07-18 - N8N Request ID Contract Recurrence Repair
 
 - Repaired live idea_create request_id contract recurrence in n8n workflow `kcMcBQos5cxsnWU1`.
@@ -322,3 +331,15 @@
 - Verified synthetic header-present production probe still returns nonempty idea_create contract with preserved request id.
 - Added no-secret evidence file `N8N_EVIDENCE_SHARED_SECRET_HARDENING.md`.
 - Computer Use minimal-open-page Gate remains paused until TEST/FIX verifies no-secret rejection and live Worker idea_create PASS.
+## 2026-07-18 - FIX Durable Monitor Queue Runner
+
+- Added a durable `_03` monitor runner command and project-local launchd plist for `pline-v3-test-codex-monitor`.
+- Added Worker pending queue indexes for `codex_task` and `save_idea_json`, so the runner no longer depends on TEST manually starting `poll`.
+- Recovered the 15:03 pending `save_idea_json` task, wrote Dropbox JSON `idea-20260718-150321-82487259686e.json`, and completed exactly-once LINE final evidence.
+- Deployed Worker version `187a2454-4b4a-464d-9175-88d43017a833`.
+
+### Follow-up
+
+- Fixed runner pending-index cleanup so terminal/missing/bad pending entries and delete failures cannot block later active tasks.
+- Recovered T2901 task `idea-4a47aede9a419394a2967bd0`; wrote Dropbox JSON `idea-20260718-152127-4a47aede9a41.json`; final evidence completed.
+- Worker redeploy was not required for this monitor-only follow-up.

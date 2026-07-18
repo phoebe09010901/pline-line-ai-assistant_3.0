@@ -98,7 +98,7 @@ Build the smallest dual-path LINE loop:
 - Date: 2026-07-18
 - Source: 菲比 LINE desktop screenshot / live field report.
 - Current status: `TEST diagnosed`; do not mark a live Gate PASS from the N8N synthetic validation.
-- Reported `idea_create` risk: input `記一下：[redacted idea content] 1153` showed no LINE reply.
+- Reported `idea_create` risk: input `記一下：[REDACTED_IDEA_CONTENT]` showed no LINE reply.
 - Reported `codex_task` risk: input `請 Codex 幫我用computer use開啟一個新的網頁` received only the processing reply, with no computer action and no completed/failed final.
 - Capability note: arbitrary Computer Use / opening a webpage is not enabled in the current fixed minimal smoke-task Gate; it should be marked `capability_not_yet_enabled` and receive a truthful non-success final, not remain processing.
 - LINE read-state observation: no visible `已讀`; track separately from webhook HTTP `200`, LINE event receipt, and final push evidence.
@@ -175,7 +175,7 @@ Build the smallest dual-path LINE loop:
 - FIX-06 confirmed Wrangler tail/logs readability.
 - FIX-06 evidence file: `CLOUDFLARE_TEST_EVIDENCE_FIX_06.md`.
 - TEST-03 used Computer Use to control the logged-in LINE app and confirmed the target chat window was `菲比智能客服 測試_03`.
-- TEST-03 Gate 1 run 1 sent `記一下：今天開始建立 _03 T0301-20260717191259`.
+- TEST-03 Gate 1 run 1 sent `記一下：[REDACTED_IDEA_CONTENT]`.
 - TEST-03 Cloudflare tail observed one live `POST /line/webhook` request to Worker `pline-v3-test-line-gateway` on version `a49c1d70-4d68-46ff-b5fe-d537b0d0869f`.
 - TEST-03 Gate 1 run 1 failed: Worker response status was `502` and no LINE reply appeared in the target chat during the observation window.
 - TEST-03 stopped after Gate 1 run 1 failure; Gate 1 three consecutive success condition was not met and Gate 2 was not executed.
@@ -190,7 +190,7 @@ Build the smallest dual-path LINE loop:
 - FIX-07 Wrangler tail/logs readability confirmed.
 - FIX-07 no-secret evidence file: `FIX_EVIDENCE_FIX_07.md`.
 - TEST-04 used Computer Use to control the logged-in LINE app and confirmed the target chat window was `菲比智能客服 測試_03`.
-- TEST-04 Gate 1 run 1 sent `記一下：今天開始建立 _03 T0401-20260717192632`.
+- TEST-04 Gate 1 run 1 sent `記一下：[REDACTED_IDEA_CONTENT]`.
 - TEST-04 Cloudflare tail observed one live `POST /line/webhook` request to Worker `pline-v3-test-line-gateway` on version `19c6ece9-5d6f-4b62-a4fd-060c22c26f12`.
 - TEST-04 Gate 1 run 1 failed: Worker invocation outcome was `canceled`, no response status was available, and no LINE reply appeared in the target chat during the observation window.
 - TEST-04 stopped after Gate 1 run 1 failure; Gate 1 three consecutive success condition was not met and Gate 2 was not executed.
@@ -205,7 +205,7 @@ Build the smallest dual-path LINE loop:
 - FIX-08 confirmed secret names, KV bindings, deployments list, Wrangler tail readability, and n8n production webhook path availability without exposing secret values.
 - FIX-08 no-secret evidence file: `FIX_EVIDENCE_FIX_08.md`.
 - TEST-05 used Computer Use to control the logged-in LINE app and confirmed the target chat window was `菲比智能客服 測試_03`.
-- TEST-05 Gate 1 run 1 sent `記一下：今天開始建立 _03 T0501-20260717194130`.
+- TEST-05 Gate 1 run 1 sent `記一下：[REDACTED_IDEA_CONTENT]`.
 - TEST-05 Cloudflare tail observed one live `POST /line/webhook` request to Worker `pline-v3-test-line-gateway` on version `cf29a8be-55d6-4462-8edb-ae1a1a3ffa48`.
 - TEST-05 Gate 1 run 1 passed Worker stages `line_event_received`, `signature_pass`, `admin_pass`, and `idempotency_pass`, then failed at `line_fast_reply_failed` with reason `line_reply_http_401`.
 - TEST-05 no LINE reply appeared in the target chat, no `n8n_background_started` was observed, and Gate 1 three consecutive success condition was not met.
@@ -219,7 +219,7 @@ Build the smallest dual-path LINE loop:
 - FIX-09 `/health` confirms required env fields true, `line_reply_mode` is `fast_ack_then_background_n8n`, and `codex_task_final_mode` is `background_push_final`.
 - FIX-09 no-secret evidence file: `FIX_EVIDENCE_FIX_09.md`.
 - TEST-06 used Computer Use to control the logged-in LINE app and confirmed the target chat window was `菲比智能客服 測試_03`.
-- TEST-06 Gate 1 run 1 sent `記一下：今天開始建立 _03 T0601-20260717195248`.
+- TEST-06 Gate 1 run 1 sent `記一下：[REDACTED_IDEA_CONTENT]`.
 - TEST-06 Cloudflare tail observed one live `POST /line/webhook` request to Worker `pline-v3-test-line-gateway` on version `97f20405-6ed9-4cfb-801d-218ae1f21c61`.
 - TEST-06 Gate 1 run 1 passed Worker stages `line_event_received`, `signature_pass`, `admin_pass`, `idempotency_pass`, `line_fast_reply_completed`, and `n8n_background_started`.
 - TEST-06 LINE app displayed the fast ACK reply.
@@ -235,8 +235,8 @@ Build the smallest dual-path LINE loop:
 - FIX-10 `/health` confirms required env fields true, production n8n URL, `line_reply_mode`, and `codex_task_final_mode`.
 - FIX-10 no-secret evidence file: `FIX_EVIDENCE_FIX_10.md`.
 - TEST-07 used Computer Use to control the logged-in LINE app and confirmed the target chat window was `菲比智能客服 測試_03`.
-- TEST-07 sent Gate 1 attempt `記一下：今天開始建立 _03 T0701-20260717200544`; LINE app showed fast ACK, but the initial tail session did not emit the matching event during the observation window, so it cannot count as a fully evidenced pass.
-- TEST-07 restarted tail and sent Gate 1 candidate `記一下：今天開始建立 _03 T0701B-20260717200704`.
+- TEST-07 sent Gate 1 attempt `記一下：[REDACTED_IDEA_CONTENT]`; LINE app showed fast ACK, but the initial tail session did not emit the matching event during the observation window, so it cannot count as a fully evidenced pass.
+- TEST-07 restarted tail and sent Gate 1 candidate `記一下：[REDACTED_IDEA_CONTENT]`.
 - TEST-07 evidenced candidate passed Worker stages `line_event_received`, `signature_pass`, `admin_pass`, `idempotency_pass`, `line_fast_reply_completed`, and `n8n_background_started`.
 - TEST-07 evidenced candidate failed background n8n contract at `n8n_background_contract_failed` with reason `request_id_mismatch`; Gate 1 three consecutive success condition was not met.
 - TEST-07 Gate 2 was not executed.
@@ -252,7 +252,7 @@ Build the smallest dual-path LINE loop:
 - FIX-11 local validation passed: n8n JSON parse, workflow draft contract check, Worker syntax check, and Worker unit test.
 - FIX-11 no-secret evidence file: `FIX_EVIDENCE_FIX_11.md`.
 - TEST-08 used Computer Use to control the logged-in LINE app and confirmed the target chat window was `菲比智能客服 測試_03`.
-- TEST-08 Gate 1 run 1 sent `記一下：今天開始建立 _03 T0801-20260717203222`.
+- TEST-08 Gate 1 run 1 sent `記一下：[REDACTED_IDEA_CONTENT]`.
 - TEST-08 Gate 1 run 1 was fully evidenced in Cloudflare tail: Worker version `02b1fa59-4d4c-4119-8dc8-5699183d5456`, `line_event_received`, `signature_pass`, `admin_pass`, `idempotency_pass`, `line_fast_reply_completed`, `n8n_background_started`, and `n8n_background_completed`.
 - TEST-08 Gate 1 run 1 background evidence: `intent=idea_create`, `status=completed`, `tool_called=idea_create`, `saved_record=1`.
 - TEST-08 sent additional Gate 1 attempts `T0802-20260717203253`, `T0802B-20260717203418`, and `T0802C-20260717203602`; LINE app displayed fast ACK replies, but Cloudflare tail did not emit matching LINE/background events for these attempts and n8n had no saved executions available for per-run correlation.
@@ -633,6 +633,19 @@ Hand off to `PLine03｜TEST｜測試與驗收` to recheck the recovered live ite
 
 Hand off to `PLine03｜N8N｜n8n workflow` to repair production Respond-to-Webhook output and execution attribution.
 
+## Computer Use open_browser_page Gate Feasibility
+
+- FIX checked whether `_03` monitor can directly execute Codex Computer Use for capability `open_browser_page`.
+- Result: blocked. The monitor is a normal Node.js process and cannot directly call Codex MCP tools, `node_repl`, or Computer Use skill.
+- No fake implementation was added. Shell `open`, arbitrary command, and AppleScript browser automation were not used as a substitute.
+- Current Worker/monitor actions remain `create_smoke_file` and `save_idea_json`.
+- Blocked reason: `monitor_unable_to_call_codex_computer_use_tools`.
+- Evidence: `FIX_EVIDENCE_COMPUTER_USE_OPEN_BROWSER_PAGE.md`.
+
+## Next Stage
+
+Decide a bridge before rerunning this Gate: trusted local Codex Computer Use executor, controller-thread claim/finalize protocol, or a purpose-built fixed `open_browser_page` tool exposed to the monitor.
+
 ## Live Regression Recovery TEST
 
 - TEST rechecked Worker version `493e4b8a-91da-479e-81e0-229fd1eb72c7`.
@@ -640,7 +653,7 @@ Hand off to `PLine03｜N8N｜n8n workflow` to repair production Respond-to-Webho
 - `1153` request `pline-v3-01KXSNQFMVYQTAK12PGGCPZQ4R` is recovered:
   - `monitor_claimed`, `idea_json_file_written`, `idea_json_final_push_completed`, and `idea_json_final_callback_completed` are present.
   - Task `idea-8748409c3efdcc4f5363d2eb` is `completed`.
-  - Dropbox JSON `idea-20260718-115346-8748409c3efd.json` exists, parses, has exactly the 9 allowed schema fields, matches the reported idea content, and contains no raw LINE User ID pattern.
+  - Dropbox JSON `idea-20260718-115346-8748409c3efd.json` exists, parses, has exactly the 9 allowed schema fields, redacted idea content, and contains no raw LINE User ID pattern.
 - Open-webpage request `pline-v3-01KXSP35BTPS6GH5VM25JF9BJV` is recovered:
   - Task `pline-v3-codex-1784347208503` is `failed` with `capability_not_yet_enabled`.
   - Result changed files count is `0`.
@@ -705,6 +718,62 @@ Hand off to `PLine03｜N8N｜n8n workflow` to repair production Respond-to-Webho
 - Result: `N8N SHARED-SECRET HARDENING TEST PASS`.
 - Evidence: `TEST_EVIDENCE_N8N_SHARED_SECRET_HARDENING.md`.
 - Next step: hand off to FIX for the next Gate, `Computer Use 最小開通：只允許 open_browser_page`.
+
+## Live Regression 1503cc No Reply
+
+- Date: 2026-07-18
+- Field report: around 15:03 CST, 菲比 sent `記一下：[REDACTED_IDEA_CONTENT]` and saw no LINE reply.
+- TEST did not resend LINE and used approximate time, remote `_03` durable evidence, and fixed Dropbox directory readback.
+- Identified request id: `pline-v3-01KXT0JM1YHRN0W22P7C147AJW`.
+- Worker received the event and recorded `signature_pass`, `admin_pass`, `idempotency_pass`, `line_visible_ack_skipped`, and `webhook_http_200_returned`.
+- n8n completed successfully with `intent=idea_create`, `tool_called=idea_create`, and `saved_record=1`; `request_id_mismatch` was absent.
+- `save_idea_json` was enqueued, but task `idea-82487259686e7b01ced7621a` remained `pending`.
+- Missing: `monitor_claimed`, `idea_json_file_written`, `idea_json_final_push_completed`, and final callback evidence.
+- Dropbox readback found no new idea JSON after 14:50 CST and no JSON matching the `1503` water reminder.
+- Root cause shape: same as the original `1153` pending-monitor case; not the T2601/T2606 request-id mismatch class; T2701/T2801 passed because TEST had monitor poll running before the live message.
+- LINE read observation: appshot showed some earlier messages with gray `已讀`, but latest 15:03 message did not stably show it. This remains a LINE desktop/OA setting observation only, not backend proof.
+- Result: `LIVE REGRESSION 1503CC NO REPLY FAILED`.
+- Evidence: `TEST_EVIDENCE_LIVE_REGRESSION_1503CC_NO_REPLY.md`.
+- Next step: hand off to FIX for durable always-on monitor/queue runner or Worker-side timeout/failure final for pending `save_idea_json` tasks.
+
+## Durable Monitor Runner Live TEST
+
+- Date: 2026-07-18
+- FIX under TEST: Worker version `187a2454-4b4a-464d-9175-88d43017a833` and launchd runner `com.pline.v3.test.codex-monitor`.
+- TEST did not run manual `monitor poll`, `claim-task`, or `drain`.
+- launchd runner precheck: state `running`; heartbeat initially `ready`.
+- Baseline pending queue already contained one stale completed pending key: `idea_json:v1:pending:idea-0dde004dabcab361ed557fff`.
+- TEST sent live T-code `T2901-20260718152036`.
+- Request id: `pline-v3-01KXT1KRBW5MSP8WDT9QR2A3Y4`.
+- Worker/n8n path passed: signature/admin/idempotency, webhook HTTP `200`, `line_visible_ack_skipped`, `n8n_background_completed`, `intent=idea_create`, `tool_called=idea_create`, and `saved_record=1`.
+- T2901 pending index was created for task `idea-4a47aede9a419394a2967bd0`.
+- T2901 task remained `pending`; `monitor_claimed`, Dropbox JSON, and final push evidence were absent.
+- Runner heartbeat changed to `error`; safe reason summary indicates pending index cleanup failed while trying to delete the stale completed pending key.
+- Remaining pending idea queue count after wait: `2` (`idea-0dde...` stale key plus T2901 key).
+- 1503 recovery file `idea-20260718-150321-82487259686e.json` still exists exactly once, parses, has valid 9-field schema, and has no raw LINE User ID pattern.
+- Minimal regression passed: `node worker/test/worker.test.mjs` and `node monitor/test/monitor.test.mjs`.
+- Result: `DURABLE MONITOR RUNNER LIVE IDEA_CREATE FAILED`.
+- Evidence: `TEST_EVIDENCE_DURABLE_MONITOR_RUNNER_LIVE.md`.
+- Next step: hand off to FIX to repair pending-index cleanup and runner error handling, then rerun TEST without manual monitor commands.
+
+## Durable Monitor Runner Second Live TEST
+
+- Date: 2026-07-18
+- TEST did not run manual `monitor poll`, `claim-task`, or `drain`.
+- launchd runner `com.pline.v3.test.codex-monitor` was `running`; heartbeat was `ready`.
+- Pending queue baseline before T2902: idea `0`, codex `0`.
+- TEST sent live T-code `T2902-20260718153255` to LINE target `菲比智能客服 測試_03`.
+- Request id: `pline-v3-01KXT29N4CBP3J3AVDVKSDKZ91`.
+- Worker/n8n path passed: signature/admin/idempotency, webhook HTTP `200`, `line_visible_ack_skipped`, `n8n_background_completed`, `intent=idea_create`, `tool_called=idea_create`, and `saved_record=1`.
+- T2902 task `idea-ef60f64a6f511ce02c065eaa` was claimed and completed by launchd runner evidence `pline-v3-test-codex-monitor`.
+- T2902 pending index was created and removed; final pending queue count remained idea `0`, codex `0`.
+- Dropbox JSON `idea-20260718-153325-ef60f64a6f51.json` exists, parses, has exactly the 9 allowed schema fields, matches the runner cleanup verification idea, and contains no raw LINE User ID pattern.
+- Final durable evidence includes `idea_json_final_push_completed` and `idea_json_final_callback_completed`.
+- 1503 recovery file and T2901 recovery file each remain single, with no duplicates.
+- Minimal regression passed: `node worker/test/worker.test.mjs` and `node monitor/test/monitor.test.mjs`.
+- Result: `DURABLE MONITOR RUNNER SECOND LIVE IDEA_CREATE PASS`.
+- Evidence: `TEST_EVIDENCE_DURABLE_MONITOR_RUNNER_SECOND_LIVE.md`.
+- Next step: hand off to RELEASE for git status, secret scan, commit, and push if controller is ready to close this TEST scope.
 
 ## N8N Request ID Contract Recurrence Repair
 
@@ -777,3 +846,22 @@ Hand off to `PLine03｜TEST｜測試與驗收` / `PLine03｜FIX｜Worker 與程�
 ## Next Stage
 
 Hand off to `PLine03｜TEST｜測試與驗收` / `PLine03｜FIX｜Worker 與程式` to confirm direct no-secret n8n probe remains rejected and live Worker LINE idea_create still passes. Computer Use minimal-open-page Gate remains paused until hardening verification passes.
+## Durable Monitor Queue Runner - 2026-07-18
+
+Status: FIX completed; TEST handoff required.
+
+- Root cause: live idea_create could enqueue `save_idea_json` successfully but remain pending when TEST had not manually started monitor polling.
+- Repair: Worker now writes pending queue indexes under `codex_task:v1:pending:` and `idea_json:v1:pending:`; monitor runner drains those indexes continuously.
+- Runner: launchd label `com.pline.v3.test.codex-monitor`, state verified `running`, heartbeat path `runtime/monitor-runner/heartbeat.json`.
+- Recovery: task `idea-82487259686e7b01ced7621a` completed; Dropbox JSON `idea-20260718-150321-82487259686e.json`; `idea_json_final_push_completed` present.
+- Deployed Worker version: `187a2454-4b4a-464d-9175-88d43017a833`.
+
+Next: TEST sends a fresh idea_create live message without manually starting monitor poll and verifies monitor claim, Dropbox JSON, callback, and natural final.
+
+### Follow-up: Pending Index Cleanup Error Handling
+
+- TEST T2901 found runner heartbeat `error` because stale completed pending cleanup failed before the active pending task.
+- Repair: pending-key get/parse/delete is now isolated; terminal cleanup is best-effort warning only; later active tasks continue.
+- Recovered T2901 task `idea-4a47aede9a419394a2967bd0`; Dropbox JSON `idea-20260718-152127-4a47aede9a41.json`; final status completed.
+- Runner heartbeat returned to `ready`; both `idea_json:v1:pending:` and `codex_task:v1:pending:` are empty.
+- No Worker deploy was needed for this follow-up.

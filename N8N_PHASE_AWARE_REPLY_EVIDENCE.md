@@ -87,7 +87,7 @@ Observed cases:
 1. User input:
 
 ```text
-記一下：[redacted idea content] 1153
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Observed result:

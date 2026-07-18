@@ -9,7 +9,7 @@ Only verify the minimal dual-path TEST loop.
 Test sentence:
 
 ```text
-記一下：今天開始建立 _03 <唯一時間碼>
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Required evidence per run:
@@ -353,7 +353,7 @@ Pre-Gate live readiness:
 Gate 1 run 1 sent:
 
 ```text
-記一下：今天開始建立 _03 T0301-20260717191259
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Gate 1 run 1 observed:
@@ -463,7 +463,7 @@ Pre-Gate live readiness:
 Gate 1 run 1 sent:
 
 ```text
-記一下：今天開始建立 _03 T1101-20260718051847
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Gate 1 observed by sanitized tail:
@@ -528,7 +528,7 @@ Pre-Gate live readiness:
 Gate 1 run 1 sent:
 
 ```text
-記一下：今天開始建立 _03 T1001-20260718050632
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Gate 1 observed:
@@ -625,8 +625,8 @@ Pre-Gate note:
 Valid Gate 1 candidates sent:
 
 ```text
-記一下：今天開始建立 _03 T0901-20260718045141
-記一下：今天開始建立 _03 T0901A-20260718045215
+記一下：[REDACTED_IDEA_CONTENT]
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Gate 1 observed:
@@ -732,7 +732,7 @@ Pre-Gate live readiness:
 Gate 1 run 1 sent:
 
 ```text
-記一下：今天開始建立 _03 T0801-20260717203222
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Gate 1 run 1 observed:
@@ -755,9 +755,9 @@ Gate 1 run 1 observed:
 Gate 1 subsequent attempts sent:
 
 ```text
-記一下：今天開始建立 _03 T0802-20260717203253
-記一下：今天開始建立 _03 T0802B-20260717203418
-記一下：今天開始建立 _03 T0802C-20260717203602
+記一下：[REDACTED_IDEA_CONTENT]
+記一下：[REDACTED_IDEA_CONTENT]
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Gate 1 subsequent attempts observed:
@@ -877,7 +877,7 @@ Pre-Gate live readiness:
 Gate 1 first attempt sent:
 
 ```text
-記一下：今天開始建立 _03 T0701-20260717200544
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Gate 1 first attempt observed:
@@ -889,7 +889,7 @@ Gate 1 first attempt observed:
 Gate 1 evidenced candidate sent:
 
 ```text
-記一下：今天開始建立 _03 T0701B-20260717200704
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Gate 1 evidenced candidate observed:
@@ -948,7 +948,7 @@ Pre-Gate live readiness:
 Gate 1 run 1 sent:
 
 ```text
-記一下：今天開始建立 _03 T0601-20260717195248
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Gate 1 run 1 observed:
@@ -1035,7 +1035,7 @@ Pre-Gate live readiness:
 Gate 1 run 1 sent:
 
 ```text
-記一下：今天開始建立 _03 T0401-20260717192632
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Gate 1 run 1 observed:
@@ -1119,7 +1119,7 @@ Pre-Gate live readiness:
 Gate 1 run 1 sent:
 
 ```text
-記一下：今天開始建立 _03 T0501-20260717194130
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Gate 1 run 1 observed:
@@ -1240,7 +1240,7 @@ Pre-Gate live readiness:
 Gate 1 run 1 sent:
 
 ```text
-記一下：今天開始建立 _03 T1201-20260718053133
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Gate 1 observed:
@@ -1845,6 +1845,27 @@ Blocked TEST condition:
 
 Evidence: `FIX_EVIDENCE_WORKER_N8N_URL_ATTRIBUTION.md`.
 
+## Computer Use open_browser_page Gate
+
+Date: 2026-07-18
+
+Current status: blocked before implementation.
+
+TEST must not run this Gate until a real Codex/Computer Use bridge is available to `_03` monitor or controller.
+
+Required future acceptance:
+
+- LINE request is classified as codex_task with capability `open_browser_page`.
+- The execution is performed by an explicitly authorized Codex/Computer Use bridge, not shell `open`.
+- First Gate URL allowlist is only `about:blank` or `https://example.com/`.
+- Duplicate/retry does not open extra pages or send duplicate finals.
+- User-visible messages contain no internal terms.
+- Existing idea_create, Dropbox JSON, n8n hardening, Codex smoke, idempotency, admin allowlist, and webhook HTTP 200 regressions remain PASS.
+
+Blocked reason: `monitor_unable_to_call_codex_computer_use_tools`.
+
+Evidence: `FIX_EVIDENCE_COMPUTER_USE_OPEN_BROWSER_PAGE.md`.
+
 ### TEST Recovery Readback Result
 
 Date: 2026-07-18
@@ -1923,7 +1944,7 @@ Date: 2026-07-18
 Live message:
 
 ```text
-記一下：今天喝水提醒修復驗證 T2601-20260718131959
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Result:
@@ -1971,7 +1992,7 @@ Date: 2026-07-18
 Live message:
 
 ```text
-記一下：[redacted idea content] T2701-20260718140429
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Result:
@@ -2031,7 +2052,7 @@ Direct no-header barrier:
 
 Worker/header live idea_create:
 
-- Live message: `記一下：[redacted idea content] T2801-20260718141551`
+- Live message: `記一下：[REDACTED_IDEA_CONTENT]`
 - Marker: `T2801-20260718141551`
 - Request id: `pline-v3-01KXSXWXAE94G82MCZEYQABCJ7`
 - Worker invocation: PASS
@@ -2071,6 +2092,194 @@ Required next step:
 
 ```text
 FIX opens next Gate: Computer Use minimal enablement, only allowing open_browser_page.
+```
+
+## Live Regression 1503cc No Reply
+
+Date: 2026-07-18
+
+Field report:
+
+```text
+記一下：[REDACTED_IDEA_CONTENT]
+```
+
+Diagnosis result:
+
+- Request id: `pline-v3-01KXT0JM1YHRN0W22P7C147AJW`
+- Marker: absent
+- Worker invocation: PASS
+- signature/admin/idempotency: PASS
+- webhook HTTP `200`: PASS
+- visible ACK skipped: PASS
+- n8n started: PASS
+- n8n completed: PASS
+- `request_id_mismatch`: absent
+- `intent=idea_create`: PASS
+- `tool_called=idea_create`: PASS
+- `saved_record=1`: PASS
+- `save_idea_json` enqueue: PASS
+- Task id: `idea-82487259686e7b01ced7621a`
+- Task status: `pending`
+- monitor claim: FAIL, absent
+- Dropbox JSON: FAIL, absent
+- final push: FAIL, absent
+
+Root-cause class:
+
+- Same as original `1153` pending-monitor case.
+- Not the T2601 / 12:53 `request_id_mismatch` class.
+- T2701/T2801 passed when TEST had monitor poll running before live message.
+
+LINE read observation:
+
+- Some earlier appshot messages showed gray `已讀`.
+- Latest 15:03 message did not stably show `已讀`.
+- Read-state remains a LINE desktop/OA setting observation only.
+
+```text
+LIVE REGRESSION 1503CC NO REPLY FAILED
+```
+
+Evidence: `TEST_EVIDENCE_LIVE_REGRESSION_1503CC_NO_REPLY.md`.
+
+Required next step:
+
+```text
+FIX provides durable always-on monitor/queue processing or Worker-side timeout/failure final for pending save_idea_json tasks.
+```
+
+## Durable Monitor Runner Live Gate
+
+Date: 2026-07-18
+
+Preconditions:
+
+- launchd runner `com.pline.v3.test.codex-monitor`: running
+- heartbeat before live message: `ready`
+- manual `monitor poll/claim-task/drain`: not run
+- baseline idea pending count: `1`, stale completed pending key existed
+
+Live message:
+
+```text
+記一下：[REDACTED_IDEA_CONTENT]
+```
+
+Result:
+
+- T-code: `T2901-20260718152036`
+- Request id: `pline-v3-01KXT1KRBW5MSP8WDT9QR2A3Y4`
+- Worker invocation: PASS
+- signature/admin/idempotency: PASS
+- webhook HTTP `200`: PASS
+- visible ACK skipped: PASS
+- n8n started/completed: PASS
+- `request_id_mismatch`: absent
+- `intent=idea_create`: PASS
+- `tool_called=idea_create`: PASS
+- `saved_record=1`: PASS
+- pending index created: PASS
+- pending index removed: FAIL
+- Task id: `idea-4a47aede9a419394a2967bd0`
+- Task status: `pending`
+- monitor claim by launchd runner: FAIL, absent
+- Dropbox JSON: FAIL, absent
+- final push: FAIL, absent
+- heartbeat after wait: `error`
+- remaining idea pending count: `2`
+
+1503 recovery:
+
+- File: `idea-20260718-150321-82487259686e.json`
+- Exact file count: `1`
+- Parse/schema/raw-ID checks: PASS
+- Duplicate recovery file: absent
+
+Minimal regression:
+
+- Worker tests: PASS
+- Monitor tests: PASS
+- Codex capability guard: covered and PASS
+
+```text
+DURABLE MONITOR RUNNER LIVE IDEA_CREATE FAILED
+```
+
+Evidence: `TEST_EVIDENCE_DURABLE_MONITOR_RUNNER_LIVE.md`.
+
+Required next step:
+
+```text
+FIX repairs stale completed pending-key cleanup and runner error handling so one bad pending key does not block later tasks.
+```
+
+## Durable Monitor Runner Second Live Gate
+
+Date: 2026-07-18
+
+Preconditions:
+
+- launchd runner `com.pline.v3.test.codex-monitor`: running
+- heartbeat before live message: `ready`
+- manual `monitor poll/claim-task/drain`: not run
+- baseline idea pending count: `0`
+- baseline codex pending count: `0`
+
+Live message:
+
+```text
+記一下：[REDACTED_IDEA_CONTENT]
+```
+
+Result:
+
+- T-code: `T2902-20260718153255`
+- Request id: `pline-v3-01KXT29N4CBP3J3AVDVKSDKZ91`
+- Worker invocation: PASS
+- signature/admin/idempotency: PASS
+- webhook HTTP `200`: PASS
+- visible ACK skipped: PASS
+- n8n started/completed: PASS
+- `request_id_mismatch`: absent
+- `intent=idea_create`: PASS
+- `tool_called=idea_create`: PASS
+- `saved_record=1`: PASS
+- pending index created: PASS
+- pending index removed: PASS
+- Task id: `idea-ef60f64a6f511ce02c065eaa`
+- Task status: `completed`
+- monitor claim by launchd runner: PASS
+- Dropbox JSON: `idea-20260718-153325-ef60f64a6f51.json`
+- Dropbox parse/schema/content/raw-ID checks: PASS
+- final push: PASS
+- heartbeat after completion: `ready`
+- remaining idea pending count: `0`
+- remaining codex pending count: `0`
+
+Duplicate checks:
+
+- 1503 recovery file exact count: `1`
+- T2901 recovery file exact count: `1`
+- T2902 file exact count: `1`
+
+Minimal regression:
+
+- Worker tests: PASS
+- Monitor tests: PASS
+- Codex capability guard: covered and PASS
+- Unsafe Computer Use open-webpage: not run
+
+```text
+DURABLE MONITOR RUNNER SECOND LIVE IDEA_CREATE PASS
+```
+
+Evidence: `TEST_EVIDENCE_DURABLE_MONITOR_RUNNER_SECOND_LIVE.md`.
+
+Required next step:
+
+```text
+RELEASE performs git status, secret scan, commit, and push if controller is ready to close this TEST scope.
 ```
 
 ## N8N Live Production Path Follow-Up
@@ -2157,3 +2366,32 @@ TEST must rerun a new safe idea_create marker before opening the Computer Use mi
 - monitor claim
 - Dropbox JSON creation
 - natural final reply
+## Durable Monitor Queue Runner Regression
+
+For live idea_create tests, TEST no longer needs to manually start `monitor poll` before sending LINE.
+
+Required evidence for the next live idea_create:
+
+- Worker receives event and returns webhook HTTP 200.
+- n8n completes as `intent=idea_create` and `tool_called=idea_create`.
+- Worker creates `idea_json:v1:pending:<task_id>`.
+- launchd monitor runner claims the task.
+- Dropbox JSON is written once in the fixed `_03` Dropbox directory.
+- JSON parse/schema/no raw User ID checks pass.
+- Monitor callback reaches Worker finalizer.
+- `idea_json_final_push_completed` is present exactly once.
+- Pending queue prefix is empty after completion.
+
+Regression checks:
+
+- duplicate/retry does not create a second Dropbox JSON or second final.
+- failed JSON write does not send success text.
+- codex_task `capability_not_yet_enabled` guard remains intact.
+- invalid LINE signature remains `401`.
+
+Additional cleanup regression:
+
+- A stale completed pending key must not block a later active pending task.
+- Pending delete failure is warning-only.
+- Missing or unreadable task records are warning-only and do not abort drain.
+- Active idea task still completes and clears its pending index.

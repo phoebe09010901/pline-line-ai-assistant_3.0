@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pline.v3.test.codex-monitor</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/phoebe/Documents/菲比 LINE 智能助理_03/monitor/src/monitor.js</string>
+    <string>runner</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/phoebe/Documents/菲比 LINE 智能助理_03</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/Users/phoebe/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>CODEX_BIN</key>
+    <string>/Users/phoebe/.local/bin/codex</string>
+    <key>MONITOR_RUNNER_INTERVAL_MS</key>
+    <string>3000</string>
+    <key>MONITOR_RUNNER_IDLE_INTERVAL_MS</key>
+    <string>5000</string>
+    <key>MONITOR_RUNNER_DRAIN_ITERATIONS</key>
+    <string>20</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/monitor-runner/stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/monitor-runner/stderr.log</string>
+</dict>
+</plist>

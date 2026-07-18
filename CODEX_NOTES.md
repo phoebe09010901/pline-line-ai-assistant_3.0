@@ -171,7 +171,7 @@ FIX-03 created the two required `_03` TEST KV namespaces and updated live KV bin
 
 ## Live Regression Intake After N8N Reply Contract
 
-- 菲比 reported `記一下：[redacted idea content] 1153` produced no visible LINE reply.
+- 菲比 reported `記一下：[REDACTED_IDEA_CONTENT]` produced no visible LINE reply.
 - TEST rechecked no-secret remote evidence and found request `pline-v3-01KXSNQFMVYQTAK12PGGCPZQ4R` passed Worker signature/admin/idempotency, returned webhook HTTP `200`, completed n8n as `idea_create`, and enqueued `save_idea_json`, but the idea task remained pending with no monitor claim, no Dropbox JSON attribution, and no final push.
 - 菲比 reported `請 Codex 幫我用computer use開啟一個新的網頁` produced only the processing reply and no computer action or final reply.
 - Current codex_task Gate enables only the fixed minimal smoke task; arbitrary Computer Use / opening a webpage should be marked `capability_not_yet_enabled` and get a truthful non-success final.
@@ -514,6 +514,17 @@ Date: 2026-07-18
 - Worker version: `d50b4501-2244-4a31-9951-f7289ca06f09`.
 - Evidence: `FIX_EVIDENCE_WORKER_N8N_URL_ATTRIBUTION.md`.
 
+## Computer Use open_browser_page Gate Feasibility
+
+Date: 2026-07-18
+
+- The requested Gate requires true Codex/Computer Use execution for `open_browser_page`.
+- Current `_03` monitor cannot directly call Codex MCP tools, `node_repl`, or Computer Use skill.
+- Current supported actions are still `create_smoke_file` and `save_idea_json`.
+- Do not use shell `open` or AppleScript browser automation as a substitute for this Gate.
+- Blocked reason: `monitor_unable_to_call_codex_computer_use_tools`.
+- Evidence: `FIX_EVIDENCE_COMPUTER_USE_OPEN_BROWSER_PAGE.md`.
+
 ## Live Regression Recovery TEST
 
 Date: 2026-07-18
@@ -534,7 +545,7 @@ Date: 2026-07-18
 
 Date: 2026-07-18
 
-- TEST sent `記一下：今天喝水提醒修復驗證 T2601-20260718131959` via LINE app to `菲比智能客服 測試_03`.
+- TEST sent `記一下：[REDACTED_IDEA_CONTENT]` via LINE app to `菲比智能客服 測試_03`.
 - Marker resolved to request `pline-v3-01KXSTP8HJ3AF374NNY5W6KV86`.
 - Worker-side gate stages passed through signature/admin/idempotency and webhook HTTP `200`.
 - n8n background started but failed the Worker contract with `request_id_mismatch`.
@@ -549,7 +560,7 @@ Date: 2026-07-18
 
 Date: 2026-07-18
 
-- TEST sent `記一下：[redacted idea content] T2701-20260718140429` via LINE app to `菲比智能客服 測試_03`.
+- TEST sent `記一下：[REDACTED_IDEA_CONTENT]` via LINE app to `菲比智能客服 測試_03`.
 - Marker resolved to request `pline-v3-01KXSX7E4SRVM7CVZ3ST40GA6X`.
 - Worker-side gate stages passed through signature/admin/idempotency and webhook HTTP `200`.
 - n8n background completed successfully and no `request_id_mismatch` stage was present.
@@ -567,7 +578,7 @@ Date: 2026-07-18
 
 - TEST verified direct no-header probe to the production n8n webhook did not return a normal idea_create contract.
 - Direct no-header probe response was HTTP `200`, empty/non-JSON, with no `intent`, no `tool_called`, and no `saved_record`.
-- TEST sent `記一下：[redacted idea content] T2801-20260718141551` via LINE app to `菲比智能客服 測試_03`.
+- TEST sent `記一下：[REDACTED_IDEA_CONTENT]` via LINE app to `菲比智能客服 測試_03`.
 - Marker resolved to request `pline-v3-01KXSXWXAE94G82MCZEYQABCJ7`.
 - Worker/header path passed signature/admin/idempotency and webhook HTTP `200`.
 - n8n background completed successfully and no `request_id_mismatch` stage was present.
@@ -579,6 +590,58 @@ Date: 2026-07-18
 - Result: `N8N SHARED-SECRET HARDENING TEST PASS`.
 - Evidence: `TEST_EVIDENCE_N8N_SHARED_SECRET_HARDENING.md`.
 - Next handoff: FIX can open `Computer Use 最小開通：只允許 open_browser_page`.
+
+## Live Regression 1503cc No Reply
+
+Date: 2026-07-18
+
+- TEST diagnosed 菲比's 15:03 live no-reply report without resending LINE.
+- Identified request `pline-v3-01KXT0JM1YHRN0W22P7C147AJW` by approximate time and latest `_03` durable evidence.
+- Worker receipt, signature/admin/idempotency, webhook HTTP `200`, and `line_visible_ack_skipped` were present.
+- n8n completed as `idea_create` with `tool_called=idea_create` and `saved_record=1`; this was not a `request_id_mismatch` recurrence.
+- `save_idea_json` task `idea-82487259686e7b01ced7621a` stayed `pending` with no monitor claim, no Dropbox JSON, and no final push.
+- Fixed Dropbox directory had no new idea JSON after 14:50 CST and no file matching the `1503` water reminder.
+- Root cause class matches the original 1153 pending-monitor case and differs from T2601/12:53 request-id mismatch. T2701/T2801 passed with TEST-started monitor poll.
+- LINE read-state remains a separate UI/OA observation; do not mix it with backend evidence.
+- Evidence: `TEST_EVIDENCE_LIVE_REGRESSION_1503CC_NO_REPLY.md`.
+- Next handoff: FIX should make monitor/queue processing durable outside ad hoc TEST poll windows, or add Worker-side timeout/failure final for pending idea tasks.
+
+## Durable Monitor Runner Live TEST
+
+Date: 2026-07-18
+
+- TEST verified launchd runner `com.pline.v3.test.codex-monitor` was running and heartbeat was initially `ready`.
+- TEST did not run manual monitor poll/claim/drain.
+- Baseline `idea_json:v1:pending:*` count was already `1`; the key pointed to completed task `idea-0dde004dabcab361ed557fff`.
+- TEST sent live `T2901-20260718152036` to `菲比智能客服 測試_03`.
+- Request `pline-v3-01KXT1KRBW5MSP8WDT9QR2A3Y4` passed Worker/n8n and created task `idea-4a47aede9a419394a2967bd0`.
+- T2901 pending key was created but not removed.
+- T2901 task stayed `pending`; no monitor claim, no Dropbox JSON, and no final push were evidenced.
+- Runner heartbeat changed to `error`; safe reason points to failure deleting stale completed pending key before draining later work.
+- Remaining idea pending count was `2`.
+- 1503 recovery file count remains exactly `1`; no duplicate recovery file observed.
+- Worker and monitor tests passed.
+- Result: durable monitor runner live Gate FAILED.
+- Evidence: `TEST_EVIDENCE_DURABLE_MONITOR_RUNNER_LIVE.md`.
+- Next handoff: FIX must make stale completed pending-key cleanup non-blocking or robust, then rerun TEST.
+
+## Durable Monitor Runner Second Live TEST
+
+Date: 2026-07-18
+
+- TEST reran the durable runner Gate after cleanup fix without manual monitor poll/claim/drain.
+- launchd runner `com.pline.v3.test.codex-monitor` was running and heartbeat was ready.
+- Pending queue baseline was idea `0`, codex `0`.
+- TEST sent live `T2902-20260718153255` to `菲比智能客服 測試_03`.
+- Request `pline-v3-01KXT29N4CBP3J3AVDVKSDKZ91` passed Worker/n8n and created task `idea-ef60f64a6f511ce02c065eaa`.
+- Runner evidence `pline-v3-test-codex-monitor` was present on `monitor_claimed`, `idea_json_saved`, `idea_json_file_written`, and final callback stages.
+- Pending key was removed; pending queues ended at idea `0`, codex `0`.
+- Dropbox JSON `idea-20260718-153325-ef60f64a6f51.json` was written and validated.
+- 1503 and T2901 recovery files remain single; no duplicates observed.
+- Worker and monitor tests passed; no unsafe Computer Use open-webpage action was run.
+- Result: durable monitor runner second live Gate PASS.
+- Evidence: `TEST_EVIDENCE_DURABLE_MONITOR_RUNNER_SECOND_LIVE.md`.
+- Next handoff: RELEASE can run git status, secret scan, commit, and push when controller authorizes closeout.
 
 ## N8N Request ID Contract Recurrence Repair
 
@@ -638,3 +701,18 @@ Date: 2026-07-18
 - Residual risk: full value equality awaits safe n8n variable/credential setup.
 - Evidence: `N8N_EVIDENCE_SHARED_SECRET_HARDENING.md`.
 - Next handoff: TEST/FIX checks no-secret rejection and live Worker idea_create PASS before Computer Use Gate.
+## Durable Monitor Queue Runner
+
+- Added `monitor/src/monitor.js runner`, a durable poll loop with no-secret heartbeat at `runtime/monitor-runner/heartbeat.json`.
+- Added project-local launchd agent `monitor/com.pline.v3.test.codex-monitor.plist`.
+- Worker enqueue now writes pending indexes: `codex_task:v1:pending:<task_id>` and `idea_json:v1:pending:<task_id>`.
+- Monitor runner scans pending indexes only; manual legacy scan remains for old pre-index tasks.
+- Monitor deletes pending indexes after terminal completion/failure/duplicate and can recover stale claimed/running tasks after the stale interval.
+- Recovered request `pline-v3-01KXT0JM1YHRN0W22P7C147AJW` / task `idea-82487259686e7b01ced7621a`; Dropbox JSON file `idea-20260718-150321-82487259686e.json`; final push evidence completed.
+
+### Follow-up Cleanup Fix
+
+- Runner error root cause: stale completed pending index cleanup used unsupported Wrangler `--force` and the delete error aborted the drain round.
+- Fix: delete is now best-effort, per-key failures are isolated, terminal/missing/bad pending entries do not block later active tasks.
+- Recovered T2901 request `pline-v3-01KXT1KRBW5MSP8WDT9QR2A3Y4` / task `idea-4a47aede9a419394a2967bd0`; Dropbox JSON `idea-20260718-152127-4a47aede9a41.json`; final push evidence completed.
+- Runner heartbeat is `ready`; pending prefixes are empty.

@@ -43,8 +43,8 @@ Pre-Gate note:
 Valid Gate 1 candidate messages sent:
 
 ```text
-記一下：今天開始建立 _03 T0901-20260718045141
-記一下：今天開始建立 _03 T0901A-20260718045215
+記一下：[REDACTED_IDEA_CONTENT]
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Observed evidence:

@@ -669,6 +669,7 @@ export async function enqueueCodexTask(env = {}, normalized = {}, body = {}) {
     created_at: new Date().toISOString(),
   });
   await env.RUNTIME_KV.put(key, JSON.stringify(task), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await env.RUNTIME_KV.put(codexPendingKey(body.task_id), key, { expirationTtl: EVIDENCE_TTL_SECONDS });
   return { ok: true, key, task_id: body.task_id, status: "queued" };
 }
 
@@ -728,6 +729,7 @@ export async function enqueueIdeaTask(env = {}, normalized = {}, body = {}) {
     created_at: new Date().toISOString(),
   });
   await env.RUNTIME_KV.put(key, JSON.stringify(task), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await env.RUNTIME_KV.put(ideaPendingKey(taskId), key, { expirationTtl: EVIDENCE_TTL_SECONDS });
   return { ok: true, key, task_id: taskId, status: "pending" };
 }
 
@@ -1860,12 +1862,20 @@ function codexTaskKey(taskId) {
   return `${CODEX_TASK_PREFIX}:task:${sanitizeEvidenceId(taskId)}`;
 }
 
+function codexPendingKey(taskId) {
+  return `${CODEX_TASK_PREFIX}:pending:${sanitizeEvidenceId(taskId)}`;
+}
+
 function codexFinalKey(taskId) {
   return `${CODEX_TASK_PREFIX}:final:${sanitizeEvidenceId(taskId)}`;
 }
 
 function ideaTaskKey(taskId) {
   return `${IDEA_TASK_PREFIX}:task:${sanitizeEvidenceId(taskId)}`;
+}
+
+function ideaPendingKey(taskId) {
+  return `${IDEA_TASK_PREFIX}:pending:${sanitizeEvidenceId(taskId)}`;
 }
 
 function ideaFinalKey(taskId) {

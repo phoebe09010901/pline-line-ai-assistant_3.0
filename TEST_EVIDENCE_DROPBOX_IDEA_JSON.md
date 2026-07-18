@@ -32,9 +32,9 @@ Result: `DROPBOX IDEA JSON PATH PASS`
 The following messages were sent through the authorized LINE app with Computer Use:
 
 ```text
-記一下：[redacted idea content] T2201-20260718084633
-記一下：[redacted idea content] T2202-20260718084802
-記一下：[redacted idea content] T2203-20260718084935
+記一下：[REDACTED_IDEA_CONTENT]
+記一下：[REDACTED_IDEA_CONTENT]
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 ## Continuous Three-Run Evidence

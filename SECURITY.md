@@ -172,3 +172,35 @@ Security behavior:
 - Do not execute arbitrary Computer Use, browser actions, shell commands, paths, or filenames.
 
 Evidence: `FIX_EVIDENCE_LIVE_REGRESSION_PENDING_CAPABILITY.md`.
+
+## Computer Use open_browser_page Gate
+
+Do not treat shell `open`, AppleScript browser automation, or arbitrary local commands as Codex Computer Use.
+
+Before enabling `open_browser_page`, `_03` must have an explicit bridge that:
+
+- exposes only fixed action `open_browser_page`;
+- allows only `about:blank` or `https://example.com/` in the first Gate;
+- prevents login, form fill, submit, permission acceptance, download, upload, settings changes, local path access, and page-content scraping;
+- records no secrets, raw User ID, full payload, or sensitive page content;
+- preserves exactly-once final behavior.
+
+Current blocked reason: `monitor_unable_to_call_codex_computer_use_tools`.
+
+Evidence: `FIX_EVIDENCE_COMPUTER_USE_OPEN_BROWSER_PAGE.md`.
+## Durable Monitor Runner Boundary
+
+The `_03` monitor runner is limited to the existing fixed actions:
+
+```text
+create_smoke_file
+save_idea_json
+```
+
+It drains only `_03` KV pending indexes and writes only to approved `_03` targets. It does not accept arbitrary shell commands, arbitrary local paths, arbitrary Dropbox directories, Computer Use actions, secrets, raw User IDs, or full webhook payloads.
+
+The runner heartbeat is no-secret local runtime state under:
+
+```text
+runtime/monitor-runner/heartbeat.json
+```

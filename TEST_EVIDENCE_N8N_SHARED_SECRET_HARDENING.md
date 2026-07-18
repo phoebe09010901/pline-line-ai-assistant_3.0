@@ -57,7 +57,7 @@ LINE target:
 Live message:
 
 ```text
-記一下：[redacted idea content] T2801-20260718141551
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Marker:

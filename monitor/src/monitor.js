@@ -23,8 +23,15 @@ export const IDEA_FINALIZE_PATH = "/test/idea-finalize";
 export const CODEX_FINALIZE_PATH = "/test/codex-finalize";
 export const TASK_PREFIX = "codex_task:v1";
 export const IDEA_TASK_PREFIX = "idea_json:v1";
+export const TASK_PENDING_PREFIX = `${TASK_PREFIX}:pending:`;
+export const IDEA_TASK_PENDING_PREFIX = `${IDEA_TASK_PREFIX}:pending:`;
 export const EVIDENCE_PREFIX = "evidence:v1";
 export const EVIDENCE_TTL_SECONDS = 172800;
+export const RUNNER_HEARTBEAT_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/monitor-runner/heartbeat.json";
+export const RUNNER_DEFAULT_INTERVAL_MS = 3000;
+export const RUNNER_DEFAULT_IDLE_INTERVAL_MS = 5000;
+export const RUNNER_DEFAULT_ERROR_INTERVAL_MS = 10000;
+export const RUNNER_STALE_CLAIM_MS = 5 * 60 * 1000;
 
 export async function resolveCodexBin(env = process.env) {
   const candidates = [];
@@ -70,9 +77,17 @@ export async function health(env = process.env) {
     task_prefixes: [TASK_PREFIX, IDEA_TASK_PREFIX],
     task_prefix: TASK_PREFIX,
     idea_task_prefix: IDEA_TASK_PREFIX,
+    pending_prefixes: [TASK_PENDING_PREFIX, IDEA_TASK_PENDING_PREFIX],
     dropbox_idea_dir: DROPBOX_IDEA_DIR,
     evidence_prefix: EVIDENCE_PREFIX,
     runtime_kv_namespace_id: RUNTIME_KV_NAMESPACE_ID,
+    runner: {
+      mode: "durable_poll_loop",
+      heartbeat_path: RUNNER_HEARTBEAT_PATH,
+      default_interval_ms: RUNNER_DEFAULT_INTERVAL_MS,
+      default_idle_interval_ms: RUNNER_DEFAULT_IDLE_INTERVAL_MS,
+      stale_claim_ms: RUNNER_STALE_CLAIM_MS,
+    },
     codex_bin: codex,
   };
 }
@@ -143,6 +158,7 @@ export function normalizeTask(task = {}) {
     content: task.content || SMOKE_FILE_CONTENT,
     idea: task.idea || null,
     finalize_token: sanitizeId(task.finalize_token || ""),
+    final_reply_text: String(task.final_reply_text || ""),
     line_user_ref: String(task.line_user_ref || ""),
   };
 }
@@ -152,28 +168,61 @@ export async function claimOnce(options = {}) {
   const kv = options.kv || createWranglerKv(env);
   const now = new Date().toISOString();
   const keys = [];
+  const warnings = [];
   if (options.taskId || options.task_id) {
     keys.push({ name: taskKey(options.taskId || options.task_id, options.action || FIXED_ACTION) });
   } else {
-    for (const prefix of [`${TASK_PREFIX}:task:`, `${IDEA_TASK_PREFIX}:task:`]) {
-      keys.push(...await kv.list(prefix));
+    for (const prefix of [TASK_PENDING_PREFIX, IDEA_TASK_PENDING_PREFIX]) {
+      const pendingKeys = await kv.list(prefix);
+      for (const pendingKey of pendingKeys) {
+        keys.push({
+          name: taskKeyFromPendingKey(pendingKey.name || pendingKey),
+          pending_key: pendingKey.name || pendingKey,
+        });
+      }
+    }
+    if (keys.length === 0 && options.legacyScan !== false) {
+      for (const prefix of [`${TASK_PREFIX}:task:`, `${IDEA_TASK_PREFIX}:task:`]) {
+        keys.push(...await kv.list(prefix));
+      }
     }
   }
 
   for (const key of keys) {
-    const raw = await kv.get(key.name || key);
-    if (!raw) {
+    let raw;
+    try {
+      raw = await kv.get(key.name || key);
+    } catch (error) {
+      warnings.push(await bestEffortDeletePendingIndex(kv, null, key.pending_key, "pending_task_get_failed", error));
       continue;
     }
+    if (!raw) {
+      warnings.push(await bestEffortDeletePendingIndex(kv, null, key.pending_key, "pending_task_missing"));
+      continue;
+    }
+    let original;
     let task;
     try {
-      task = normalizeTask(JSON.parse(raw));
-    } catch {
+      original = JSON.parse(raw);
+      task = normalizeTask(original);
+    } catch (error) {
+      warnings.push(await bestEffortDeletePendingIndex(kv, null, key.pending_key, "pending_task_unreadable", error));
       continue;
     }
-    const status = JSON.parse(raw).status || "";
-    if (status !== "pending" && status !== "queued") {
+    const status = original.status || "";
+    const staleClaim = isStaleClaim(original, options);
+    if (status !== "pending" && status !== "queued" && !staleClaim) {
+      if (isTerminalStatus(status)) {
+        warnings.push(await bestEffortDeletePendingIndex(kv, task, key.pending_key, "terminal_pending_index_cleanup"));
+      }
       continue;
+    }
+    if (staleClaim) {
+      await writeEvidenceStage(kv, task, "monitor_stale_claim_recovered", {
+        monitor: MONITOR_NAME,
+        action: task.action,
+        status,
+      });
     }
 
     const claimRecord = {
@@ -202,6 +251,7 @@ export async function claimOnce(options = {}) {
         failed_at: new Date().toISOString(),
         reason: execution.reason,
       }));
+      warnings.push(await bestEffortDeletePendingIndex(kv, task, pendingKey(task.task_id, task.action), "failed_task_pending_index_cleanup"));
       if (task.action === FIXED_ACTION) {
         await kv.put(codexResultKey(task.task_id), JSON.stringify(failedResultRecord));
         const callbackResult = await notifyCodexFinalizer(task, "failed", env, execution.reason);
@@ -255,6 +305,7 @@ export async function claimOnce(options = {}) {
       file_name: execution.file_name,
     };
     await kv.put(taskKey(task.task_id, task.action), JSON.stringify(completedTaskRecord));
+    warnings.push(await bestEffortDeletePendingIndex(kv, task, pendingKey(task.task_id, task.action), "completed_task_pending_index_cleanup"));
     if (task.action === FIXED_ACTION) {
       const resultRecord = codexResultRecord(task, execution);
       await kv.put(codexResultKey(task.task_id), JSON.stringify(resultRecord));
@@ -293,10 +344,16 @@ export async function claimOnce(options = {}) {
       status: completedStatus,
       file_name: execution.file_name,
       mtime_iso: execution.mtime_iso,
+      warning_count: warnings.filter((warning) => warning && !warning.ok).length,
     };
   }
 
-  return { ok: true, claimed: false, reason: "no_pending_task" };
+  return {
+    ok: true,
+    claimed: false,
+    reason: "no_pending_task",
+    warning_count: warnings.filter((warning) => warning && !warning.ok).length,
+  };
 }
 
 export async function poll(options = {}) {
@@ -352,6 +409,63 @@ export async function drain(options = {}) {
     reason: "drain_limit_reached",
     checks: results.length,
     results,
+  };
+}
+
+export async function runner(options = {}) {
+  const env = options.env || process.env;
+  const iterations = Number(options.iterations ?? env.MONITOR_RUNNER_ITERATIONS ?? 0);
+  const drainIterations = Number(options.drainIterations ?? env.MONITOR_RUNNER_DRAIN_ITERATIONS ?? 20);
+  const intervalMs = Number(options.intervalMs ?? env.MONITOR_RUNNER_INTERVAL_MS ?? RUNNER_DEFAULT_INTERVAL_MS);
+  const idleIntervalMs = Number(options.idleIntervalMs ?? env.MONITOR_RUNNER_IDLE_INTERVAL_MS ?? RUNNER_DEFAULT_IDLE_INTERVAL_MS);
+  const errorIntervalMs = Number(options.errorIntervalMs ?? env.MONITOR_RUNNER_ERROR_INTERVAL_MS ?? RUNNER_DEFAULT_ERROR_INTERVAL_MS);
+  const heartbeatPath = options.heartbeatPath || env.MONITOR_RUNNER_HEARTBEAT_PATH || RUNNER_HEARTBEAT_PATH;
+  const results = [];
+  let loops = 0;
+  let totalDrained = 0;
+
+  while (iterations === 0 || loops < iterations) {
+    loops += 1;
+    let result;
+    try {
+      result = await drain({
+        ...options,
+        env,
+        legacyScan: false,
+        iterations: drainIterations,
+        intervalMs: 0,
+      });
+    } catch (error) {
+      result = {
+        ok: false,
+        drained: 0,
+        reason: error?.message || "runner_drain_failed",
+      };
+    }
+    totalDrained += Number(result.drained || 0);
+    results.push(result);
+    await writeRunnerHeartbeat({
+      status: result.ok ? "ready" : "error",
+      monitor: MONITOR_NAME,
+      loops,
+      total_drained: totalDrained,
+      last_result: summarizeRunnerResult(result),
+      updated_at: new Date().toISOString(),
+    }, heartbeatPath);
+
+    if (iterations !== 0 && loops >= iterations) {
+      break;
+    }
+    await sleep(result.ok ? (result.drained > 0 ? intervalMs : idleIntervalMs) : errorIntervalMs);
+  }
+
+  return {
+    ok: results.every((result) => result.ok),
+    mode: "durable_poll_loop",
+    loops,
+    drained: totalDrained,
+    heartbeat_path: heartbeatPath,
+    last_result: summarizeRunnerResult(results.at(-1) || {}),
   };
 }
 
@@ -461,7 +575,23 @@ export async function createSyntheticTask(task = {}, options = {}) {
     monitor: MONITOR_NAME,
     created_at: normalized.created_at || new Date().toISOString(),
   }));
+  await kv.put(pendingKey(normalized.task_id, normalized.action), taskKey(normalized.task_id, normalized.action));
   return { ok: true, ...normalized };
+}
+
+export async function writeRunnerHeartbeat(record = {}, heartbeatPath = RUNNER_HEARTBEAT_PATH) {
+  await mkdir(dirnameForFile(heartbeatPath), { recursive: true });
+  const safeRecord = {
+    schema: "pline-v3-test-monitor-runner/v1",
+    status: record.status === "error" ? "error" : "ready",
+    monitor: MONITOR_NAME,
+    loops: Number(record.loops || 0),
+    total_drained: Number(record.total_drained || 0),
+    updated_at: String(record.updated_at || new Date().toISOString()),
+    last_result: summarizeRunnerResult(record.last_result || {}),
+  };
+  await writeFile(heartbeatPath, `${JSON.stringify(safeRecord, null, 2)}\n`, "utf8");
+  return { ok: true, heartbeat_path: heartbeatPath };
 }
 
 export async function createSyntheticIdeaTask(task = {}, options = {}) {
@@ -493,6 +623,7 @@ export async function createSyntheticIdeaTask(task = {}, options = {}) {
     monitor: MONITOR_NAME,
     created_at: new Date().toISOString(),
   }));
+  await kv.put(pendingKey(normalized.task_id, normalized.action), taskKey(normalized.task_id, normalized.action));
   return { ok: true, ...normalized };
 }
 
@@ -788,12 +919,79 @@ export function createWranglerKv(env = process.env) {
         "--ttl", String(EVIDENCE_TTL_SECONDS),
       ], { cwd: WORKER_ROOT, maxBuffer: 1024 * 1024 * 4 });
     },
+    async delete(key) {
+      await execFile("npx", [
+        "wrangler", "kv", "key", "delete", key,
+        "--namespace-id", namespaceId,
+        "--remote",
+      ], { cwd: WORKER_ROOT, maxBuffer: 1024 * 1024 * 4 });
+    },
   };
 }
 
 function taskKey(taskId, action = FIXED_ACTION) {
   const prefix = action === SAVE_IDEA_ACTION ? IDEA_TASK_PREFIX : TASK_PREFIX;
   return `${prefix}:task:${sanitizeId(taskId)}`;
+}
+
+function pendingKey(taskId, action = FIXED_ACTION) {
+  const prefix = action === SAVE_IDEA_ACTION ? IDEA_TASK_PREFIX : TASK_PREFIX;
+  return `${prefix}:pending:${sanitizeId(taskId)}`;
+}
+
+function taskKeyFromPendingKey(key) {
+  const value = String(key || "");
+  if (value.startsWith(TASK_PENDING_PREFIX)) {
+    return taskKey(value.slice(TASK_PENDING_PREFIX.length), FIXED_ACTION);
+  }
+  if (value.startsWith(IDEA_TASK_PENDING_PREFIX)) {
+    return taskKey(value.slice(IDEA_TASK_PENDING_PREFIX.length), SAVE_IDEA_ACTION);
+  }
+  return value;
+}
+
+function isTerminalStatus(status = "") {
+  return ["completed", "duplicate", "failed", "unsupported", "cancelled"].includes(String(status || ""));
+}
+
+async function bestEffortDeletePendingIndex(kv, task = null, pendingIndexKey = "", reason = "pending_index_cleanup", error = null) {
+  const key = sanitizePendingKey(pendingIndexKey || (task ? pendingKey(task.task_id, task.action) : ""));
+  if (!key || !kv.delete) {
+    return { ok: true, deleted: false, reason };
+  }
+  try {
+    await kv.delete(key);
+    return { ok: true, deleted: true, reason, key };
+  } catch (deleteError) {
+    const safeReason = sanitizeId(reason || "pending_index_cleanup_failed");
+    if (task?.request_id) {
+      try {
+        await writeEvidenceStage(kv, task, "monitor_pending_index_cleanup_warning", {
+          monitor: MONITOR_NAME,
+          action: task.action,
+          status: "warning",
+          reason: safeReason,
+        });
+      } catch {
+        // Warning evidence is best-effort only.
+      }
+    }
+    return {
+      ok: false,
+      deleted: false,
+      reason: safeReason,
+      error_name: sanitizeId(deleteError?.name || error?.name || "Error"),
+      key,
+    };
+  }
+}
+
+function sanitizePendingKey(value = "") {
+  const key = String(value || "");
+  if (key.startsWith(TASK_PENDING_PREFIX) || key.startsWith(IDEA_TASK_PENDING_PREFIX)) {
+    return key.replace(/[^A-Za-z0-9:_\-.]/g, "").slice(0, 220);
+  }
+  return "";
 }
 
 function codexResultKey(taskId) {
@@ -863,6 +1061,38 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isStaleClaim(record = {}, options = {}) {
+  const status = record.status || "";
+  if (status !== "claimed" && status !== "running") {
+    return false;
+  }
+  const staleMs = Number(options.staleClaimMs ?? process.env.MONITOR_STALE_CLAIM_MS ?? RUNNER_STALE_CLAIM_MS);
+  if (staleMs <= 0) {
+    return false;
+  }
+  const claimedAt = Date.parse(record.claimed_at || record.running_at || "");
+  return Number.isFinite(claimedAt) && Date.now() - claimedAt > staleMs;
+}
+
+function summarizeRunnerResult(result = {}) {
+  return {
+    ok: Boolean(result.ok),
+    drained: Number(result.drained || 0),
+    claimed: Boolean(result.claimed),
+    reason: sanitizeId(result.reason || ""),
+    task_id: sanitizeId(result.task_id || result.failed_task_id || ""),
+    request_id: sanitizeId(result.request_id || result.failed_request_id || ""),
+    action: sanitizeId(result.action || ""),
+    status: sanitizeId(result.status || ""),
+  };
+}
+
+function dirnameForFile(path) {
+  const normalized = String(path || "");
+  const index = normalized.lastIndexOf("/");
+  return index > 0 ? normalized.slice(0, index) : ".";
+}
+
 function printJson(value) {
   console.log(JSON.stringify(value, null, 2));
 }
@@ -906,6 +1136,11 @@ async function main() {
 
   if (command === "drain") {
     printJson(await drain());
+    return;
+  }
+
+  if (command === "runner") {
+    printJson(await runner());
     return;
   }
 

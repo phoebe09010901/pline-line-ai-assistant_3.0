@@ -395,6 +395,8 @@ assert.deepEqual(codexBackgroundCalls, [
 ]);
 const codexTaskKeys = await codexTaskKv.list({ prefix: "codex_task:v1:task:" });
 assert.equal(codexTaskKeys.keys.length, 1);
+const codexPendingKeys = await codexTaskKv.list({ prefix: "codex_task:v1:pending:" });
+assert.deepEqual(codexPendingKeys.keys.map((key) => key.name), ["codex_task:v1:pending:T1"]);
 const codexTaskRecord = JSON.parse(await codexTaskKv.get(codexTaskKeys.keys[0].name));
 assert.equal(codexTaskRecord.status, "queued");
 assert.equal(codexTaskRecord.task_id, "T1");
@@ -471,6 +473,7 @@ const enqueueRecord = JSON.parse(await enqueueKv.get("codex_task:v1:task:task-en
 assert.equal(enqueueRecord.status, "queued");
 assert.equal(enqueueRecord.content, "Codex 任務測試成功");
 assert.equal(enqueueRecord.project_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke");
+assert.equal(await enqueueKv.get("codex_task:v1:pending:task-enqueue-unit"), "codex_task:v1:task:task-enqueue-unit");
 
 const ideaKv = createMemoryKv();
 const ideaEnqueueResult = await enqueueIdeaTask({
@@ -486,6 +489,8 @@ const ideaEnqueueResult = await enqueueIdeaTask({
 assert.equal(ideaEnqueueResult.ok, true);
 const ideaKeys = await ideaKv.list({ prefix: "idea_json:v1:task:" });
 assert.equal(ideaKeys.keys.length, 1);
+const ideaPendingKeys = await ideaKv.list({ prefix: "idea_json:v1:pending:" });
+assert.equal(ideaPendingKeys.keys.length, 1);
 const ideaRecord = JSON.parse(await ideaKv.get(ideaKeys.keys[0].name));
 assert.equal(ideaRecord.action, "save_idea_json");
 assert.equal(ideaRecord.target_dir, "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03");
@@ -501,6 +506,7 @@ assert.equal(ideaRecord.finalize_token.startsWith("fin-"), true);
 assert.equal(typeof ideaRecord.line_user_ref, "string");
 assert.equal(ideaRecord.line_user_ref.startsWith("v1."), true);
 assert.equal(JSON.stringify(ideaRecord).includes("U_RAW_SHOULD_NOT_STORE"), false);
+assert.equal(await ideaKv.get(`idea_json:v1:pending:${ideaRecord.task_id}`), `idea_json:v1:task:${ideaRecord.task_id}`);
 const duplicateIdeaEnqueue = await enqueueIdeaTask({
   RUNTIME_KV: ideaKv,
   N8N_SHARED_SECRET: "unit-test-secret",

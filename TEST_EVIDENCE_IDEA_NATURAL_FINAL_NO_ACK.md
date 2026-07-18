@@ -30,9 +30,9 @@ Result: `IDEA NATURAL FINAL REPLY WITHOUT ACK PASS`
 Messages sent with Computer Use to `菲比智能客服 測試_03`:
 
 ```text
-記一下：[redacted idea content] T2301-20260718092056
-記一下：[redacted idea content] T2302-20260718092156
-記一下：[redacted idea content] T2303-20260718092325
+記一下：[REDACTED_IDEA_CONTENT]
+記一下：[REDACTED_IDEA_CONTENT]
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 | Marker | Dropbox JSON | ACK | HTTP 200 | Final | Notes |

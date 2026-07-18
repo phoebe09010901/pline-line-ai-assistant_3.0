@@ -23,7 +23,7 @@ Local time: 14:04-14:07 CST
 ## Live Test Message
 
 ```text
-記一下：[redacted idea content] T2701-20260718140429
+記一下：[REDACTED_IDEA_CONTENT]
 ```
 
 Marker:
