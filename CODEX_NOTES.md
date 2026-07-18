@@ -759,3 +759,30 @@ Date: 2026-07-18
 - Pending queues returned to `idea=0`, `codex=0`.
 - Evidence: `TEST_EVIDENCE_LINE_READ_CHAT_OFF_T3002.md`.
 - Next: RELEASE can perform git status, secret scan, commit, and push if the controller is ready.
+
+## N8N idea_create Natural Reply
+
+- Target workflow only: `kcMcBQos5cxsnWU1`.
+- Fixed repeated final `已記下這個想法。` by moving normal `idea_create` reply generation into AI Agent/tool output.
+- Root cause was n8n-side fallback: `Structured Output` had the fixed phrase and AI output was absent because `OpenAI Chat Model` used an old string model parameter shape.
+- Published version: `N8N idea_create saved natural reply guard`.
+- The AI Agent now receives `idea_content`, completed/saved phase fields, and returns `reply_text` with `reply_source=ai_generated`.
+- `Structured Output` preserves AI text and only falls back to `已經幫妳記下來了 💡` when AI text is missing, unsafe, or contradicts saved status.
+- Four production synthetic idea probes returned distinct content-aware `ai_generated` replies and preserved request id / saved contract.
+- Evidence: `N8N_EVIDENCE_IDEA_CREATE_NATURAL_REPLY.md`.
+- TEST still needs live LINE T3101/T3102 validation; no Worker code, Dropbox schema, shared-secret guard, or codex_task route was changed.
+
+## idea_create Natural Final Live TEST
+
+- Live markers: `T3101-20260718163705`, `T3102-20260718163706`.
+- Request ids: `pline-v3-01KXT5Z8WG55H64Q7XJX4WGEE4`, `pline-v3-01KXT5ZB1057E1PK8A4M8YM36E`.
+- LINE desktop showed read state for both sent messages.
+- Two visible final replies appeared and were content-aware, concise, Traditional Chinese, and non-identical.
+- Fixed fallback `已記下這個想法。` was absent.
+- User-visible finals contained no `_03`, `TEST`, `n8n`, `Worker`, `task`, `JSON`, `execution`, or `webhook`.
+- Durable evidence did not expose `reply_source` or `reply_text`; final text validation used LINE visible screenshot, while flow proof used durable KV stages.
+- Both requests had `line_mark_as_read_skipped_disabled`, `n8n_background_completed`, `intent=idea_create`, `tool_called=idea_create`, `saved_record=1`, monitor claim, Dropbox JSON write, and final push/callback completed.
+- Dropbox JSON files: `idea-20260718-163742-7034568e607d.json`, `idea-20260718-163743-0d611eb4be09.json`.
+- Pending queues returned to `idea=0`, `codex=0`.
+- Evidence: `TEST_EVIDENCE_IDEA_CREATE_AI_NATURAL_FINAL_LIVE.md`.
+- Next: RELEASE can perform git status, secret scan, commit, and push if the controller is ready.

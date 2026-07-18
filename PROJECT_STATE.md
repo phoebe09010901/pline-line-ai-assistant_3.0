@@ -920,3 +920,34 @@ Status: PASS.
 - Evidence: `TEST_EVIDENCE_LINE_READ_CHAT_OFF_T3002.md`.
 
 Next: RELEASE can perform git status, secret scan, commit, and push if the controller is ready to close this TEST scope.
+
+## N8N idea_create Natural Reply - 2026-07-18
+
+Status: N8N production synthetic PASS; TEST live validation required.
+
+- Fixed source of repeated `已記下這個想法。`: n8n `Structured Output` fallback was used because AI natural reply was absent.
+- Found `OpenAI Chat Model` was failing with `Could not get parameter "model.value"`; fixed model locator setting in workflow `kcMcBQos5cxsnWU1`.
+- Published n8n version `N8N idea_create saved natural reply guard`.
+- `AI Agent` now receives `idea_content`, saved phase/status fields, and must return `reply_text` plus `reply_source=ai_generated`.
+- Synthetic production probes for four public ideas returned distinct content-aware `ai_generated` replies with request id preserved and `saved_record=1`.
+- Evidence: `N8N_EVIDENCE_IDEA_CREATE_NATURAL_REPLY.md`.
+
+Next: TEST sends fresh live LINE idea_create markers such as T3101/T3102 and confirms final LINE text is natural/content-aware while Dropbox JSON and final delivery remain PASS.
+
+### TEST Result: T3101/T3102 Live Natural Finals
+
+Status: PASS.
+
+- TEST sent two live idea_create messages to LINE target `菲比智能客服 測試_03`.
+- T3101 request id: `pline-v3-01KXT5Z8WG55H64Q7XJX4WGEE4`.
+- T3102 request id: `pline-v3-01KXT5ZB1057E1PK8A4M8YM36E`.
+- LINE desktop screenshot showed grey `已讀` for both sent messages.
+- Two user-visible final replies appeared, were not identical, and neither was fixed sentence `已記下這個想法。`.
+- User-visible final replies were content-aware and contained no `_03`, `TEST`, `n8n`, `Worker`, `task`, `JSON`, `execution`, or `webhook`.
+- Durable Worker evidence for both requests included `line_mark_as_read_skipped_disabled`; `line_mark_as_read_failed` was absent.
+- Durable Worker/n8n evidence for both requests included `n8n_background_completed`, `intent=idea_create`, `tool_called=idea_create`, `saved_record=1`.
+- Monitor runner auto-claimed and wrote Dropbox JSON files `idea-20260718-163742-7034568e607d.json` and `idea-20260718-163743-0d611eb4be09.json`; both parse/schema/no raw UID checks PASS.
+- Pending queues after completion: `idea=0`, `codex=0`.
+- Evidence: `TEST_EVIDENCE_IDEA_CREATE_AI_NATURAL_FINAL_LIVE.md`.
+
+Next: RELEASE can perform git status, secret scan, commit, and push if the controller is ready.

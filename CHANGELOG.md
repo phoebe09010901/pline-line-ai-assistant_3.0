@@ -357,3 +357,13 @@
 - Worker mark-as-read API is now disabled by default and requires `LINE_MARK_AS_READ_ENABLED === "true"`.
 - Default durable stage is now `line_mark_as_read_skipped_disabled`, avoiding failed-noise while Chat is off.
 - Deployed Worker version `b39f1e21-f5e3-41e8-a673-1f77e45c98cb`.
+
+## 2026-07-18 - N8N idea_create Natural AI Reply
+
+- Repaired workflow `kcMcBQos5cxsnWU1` so normal `idea_create` replies come from AI Agent/tool output instead of the fixed `Structured Output` fallback.
+- Found `OpenAI Chat Model` runtime error `Could not get parameter "model.value"` and fixed the model parameter through n8n resource-locator mode.
+- Added `idea_content` contract, stricter saved-reply prompt rules, and a semantic guard for saved/failure contradictions.
+- Published n8n version `N8N idea_create saved natural reply guard`.
+- Verified four production synthetic idea probes returned distinct content-aware `reply_source=ai_generated` replies with request id preserved and `saved_record=1`.
+- Added evidence file `N8N_EVIDENCE_IDEA_CREATE_NATURAL_REPLY.md`.
+- Next handoff: TEST reruns live LINE idea_create markers T3101/T3102 and confirms natural final text plus Dropbox/final PASS.

@@ -2458,3 +2458,41 @@ Result: `LINE READ CHAT OFF AUTO-READ T3002 PASS`
 - Evidence: `TEST_EVIDENCE_LINE_READ_CHAT_OFF_T3002.md`.
 
 Next: RELEASE can perform git status, secret scan, commit, and push.
+
+## N8N idea_create Natural Reply Regression
+
+Synthetic n8n validation:
+
+- Send four public idea examples through the production n8n webhook with a header-present no-secret probe.
+- Verify `request_id` is preserved.
+- Verify `intent=idea_create`, `tool_called=idea_create`, `saved_record=1`, and `saved_status=saved`.
+- Verify `reply_source=ai_generated`.
+- Verify reply text is Traditional Chinese, 1-2 sentences, content-aware, not identical across all samples, and does not contain internal terms.
+- Verify saved replies do not contain apology/failure language such as `抱歉`, `發生問題`, `稍後再試`, or `失敗`.
+
+Live TEST handoff:
+
+- Send fresh LINE idea_create markers such as `T3101` and `T3102`.
+- Confirm LINE final text is no longer repeatedly `已記下這個想法。`.
+- Confirm Dropbox JSON parse/schema and `idea_json_final_push_completed` still pass.
+- Keep this as TEST validation only; synthetic n8n PASS is not live LINE PASS.
+
+### TEST Result: 2026-07-18 T3101/T3102
+
+Result: `IDEA CREATE AI NATURAL FINAL LIVE PASS`
+
+- T3101: `T3101-20260718163705`, request `pline-v3-01KXT5Z8WG55H64Q7XJX4WGEE4`.
+- T3102: `T3102-20260718163706`, request `pline-v3-01KXT5ZB1057E1PK8A4M8YM36E`.
+- LINE UI: both sent messages showed grey `已讀`.
+- User-visible final replies: `2`.
+- Fixed fallback sentence `已記下這個想法。`: absent.
+- Final reply equality: not identical.
+- Final reply content: short, Traditional Chinese, content-aware, and no internal terms.
+- Durable `reply_source` / `reply_text`: not exposed in Worker evidence; LINE screenshot was used for text validation.
+- Durable stages: Worker received, signature/admin/idempotency, webhook HTTP 200, n8n background completed, `intent=idea_create`, `tool_called=idea_create`, `saved_record=1`, monitor claim, Dropbox JSON write, final push/callback completed.
+- Mark/read mode: `line_mark_as_read_skipped_disabled` present; `line_mark_as_read_failed` absent.
+- Dropbox regression: PASS; JSON parse/schema/no raw User ID checks PASS for both files.
+- Pending queue after completion: `idea=0`, `codex=0`.
+- Evidence: `TEST_EVIDENCE_IDEA_CREATE_AI_NATURAL_FINAL_LIVE.md`.
+
+Next: RELEASE can perform git status, secret scan, commit, and push.
