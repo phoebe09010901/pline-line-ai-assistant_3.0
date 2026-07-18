@@ -30,6 +30,7 @@ const DROPBOX_IDEA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案
 const CODEX_PROCESSING_REPLY_TEXT = "收到～這件事需要一點時間，我處理完成後再告訴妳 🛠️";
 const CODEX_COMPLETED_REPLY_TEXT = "已經處理完成了 ✨\n指定的小任務已成功執行。";
 const CODEX_FAILED_REPLY_TEXT = "這次沒有順利完成，我先停在安全狀態，沒有假裝處理成功 🙏";
+const CODEX_CAPABILITY_NOT_ENABLED_REPLY_TEXT = "這類操作目前還沒開放，我先不假裝已經執行。等下一階段授權後再處理。";
 const IDEA_SAVED_FALLBACK_REPLY_TEXT = "已經幫妳記下來了 💡";
 const IDEA_SAVE_FAILED_REPLY_TEXT = "這次沒有成功保存，我先不假裝記好了，請稍後再試一次 🙏";
 const IDEA_FINALIZE_PATH = "/test/idea-finalize";
@@ -223,6 +224,7 @@ export function workerHealth(env = {}) {
     },
     n8n: {
       webhook_url: env.N8N_WEBHOOK_URL || N8N_WEBHOOK_URL,
+      webhook_target: n8nWebhookAttribution(env.N8N_WEBHOOK_URL || N8N_WEBHOOK_URL),
       shared_secret_header: N8N_SHARED_SECRET_HEADER,
     },
     line_reply_mode: LINE_REPLY_MODE,
@@ -342,9 +344,19 @@ export function normalizeForN8n(event) {
 }
 
 export async function processN8nInBackground(normalized, env) {
-  await persistEvidenceStage(env, normalized, "n8n_background_started");
+  const n8nTarget = n8nWebhookAttribution(env.N8N_WEBHOOK_URL || N8N_WEBHOOK_URL);
+  await persistEvidenceStage(env, normalized, "n8n_background_started", {
+    n8n_host: n8nTarget.host,
+    n8n_path: n8nTarget.path,
+    n8n_route_type: n8nTarget.route_type,
+    n8n_path_fingerprint: n8nTarget.path_fingerprint,
+    workflow_hint: n8nTarget.workflow_hint,
+  });
   logStage("n8n_background_started", {
     request_id: normalized.request_id,
+    n8n_host: n8nTarget.host,
+    n8n_path: n8nTarget.path,
+    n8n_route_type: n8nTarget.route_type,
   });
 
   let n8nResult;
@@ -385,12 +397,28 @@ export async function processN8nInBackground(normalized, env) {
 
   const contractResult = validateN8nContract(n8nResult.body, normalized.request_id);
   if (!contractResult.ok) {
+    const responseShape = n8nResponseShape(n8nResult.body);
     await persistEvidenceStage(env, normalized, "n8n_background_contract_failed", {
       reason: contractResult.reason,
+      n8n_host: n8nTarget.host,
+      n8n_path: n8nTarget.path,
+      n8n_route_type: n8nTarget.route_type,
+      n8n_path_fingerprint: n8nTarget.path_fingerprint,
+      request_id_source: contractResult.request_id_source || "",
+      response_request_id_present: Boolean(contractResult.response_request_id_present),
+      worker_request_id_present: Boolean(contractResult.worker_request_id_present),
+      canonical_request_id_present: Boolean(contractResult.canonical_request_id_present),
+      n8n_response_shape: responseShape.shape,
+      n8n_response_top_keys: responseShape.top_keys,
+      n8n_response_nested_keys: responseShape.nested_keys,
     });
     logStage("n8n_background_contract_failed", {
       request_id: normalized.request_id,
       reason: contractResult.reason,
+      n8n_host: n8nTarget.host,
+      n8n_path: n8nTarget.path,
+      n8n_route_type: n8nTarget.route_type,
+      request_id_source: contractResult.request_id_source || undefined,
     });
     return {
       ok: false,
@@ -460,6 +488,42 @@ export async function processN8nInBackground(normalized, env) {
       });
     }
   } else if (contractResult.body.intent === "codex_task") {
+    const capabilityResult = codexTaskCapabilityCheck(normalized.message_text);
+    if (!capabilityResult.ok) {
+      await persistEvidenceStage(env, normalized, "codex_task_capability_not_enabled", {
+        intent: contractResult.body.intent,
+        action: CODEX_TASK_ACTION,
+        status: "failed",
+        reason: capabilityResult.reason,
+      });
+      logStage("codex_task_capability_not_enabled", {
+        request_id: normalized.request_id,
+        action: CODEX_TASK_ACTION,
+        status: "failed",
+        reason: capabilityResult.reason,
+      });
+      const noticeResult = await pushToLine(normalized.user_id, CODEX_CAPABILITY_NOT_ENABLED_REPLY_TEXT, env);
+      await persistEvidenceStage(env, normalized, noticeResult.ok ? "codex_task_capability_notice_completed" : "codex_task_capability_notice_failed", {
+        intent: contractResult.body.intent,
+        action: CODEX_TASK_ACTION,
+        status: "failed",
+        reason: noticeResult.ok ? capabilityResult.reason : noticeResult.reason,
+      });
+      logStage(noticeResult.ok ? "codex_task_capability_notice_completed" : "codex_task_capability_notice_failed", {
+        request_id: normalized.request_id,
+        action: CODEX_TASK_ACTION,
+        status: "failed",
+        reason: noticeResult.ok ? capabilityResult.reason : noticeResult.reason,
+      });
+      return {
+        ok: false,
+        request_id: normalized.request_id,
+        intent: contractResult.body.intent,
+        status: "failed",
+        reason: capabilityResult.reason,
+      };
+    }
+
     const enqueueResult = await enqueueCodexTask(env, normalized, contractResult.body);
     await persistEvidenceStage(env, normalized, enqueueResult.ok ? "codex_task_enqueued" : "codex_task_enqueue_failed", {
       intent: contractResult.body.intent,
@@ -712,14 +776,44 @@ export function normalizeN8nResponseBody(body) {
   if (body && typeof body === "object" && body.json && typeof body.json === "object") {
     return body.json;
   }
+  if (body && typeof body === "object" && body.body && typeof body.body === "object") {
+    return normalizeN8nResponseBody(body.body);
+  }
+  if (body && typeof body === "object" && body.data && typeof body.data === "object") {
+    return normalizeN8nResponseBody(body.data);
+  }
+  if (body && typeof body === "object" && body.response && typeof body.response === "object") {
+    return normalizeN8nResponseBody(body.response);
+  }
+  if (body && typeof body === "object" && body.result && typeof body.result === "object") {
+    return normalizeN8nResponseBody(body.result);
+  }
+  if (body && typeof body === "object" && body.output && typeof body.output === "object") {
+    return normalizeN8nResponseBody(body.output);
+  }
+  if (body && typeof body === "object" && typeof body.output === "string") {
+    const parsedOutput = parseJsonSafely(body.output);
+    if (parsedOutput && typeof parsedOutput === "object") {
+      return normalizeN8nResponseBody(parsedOutput);
+    }
+  }
   return body;
 }
 
 export function validateN8nContract(body, requestId) {
   body = normalizeN8nResponseBody(body);
-  if (!body || body.request_id !== requestId) {
-    return { ok: false, reason: "request_id_mismatch" };
+  const requestIdentity = n8nResponseRequestIdentity(body);
+  if (!body || requestIdentity.value !== requestId) {
+    return {
+      ok: false,
+      reason: "request_id_mismatch",
+      request_id_source: requestIdentity.source,
+      response_request_id_present: Boolean(body?.request_id),
+      worker_request_id_present: Boolean(body?.worker_request_id),
+      canonical_request_id_present: Boolean(body?.canonicalRequestId),
+    };
   }
+  body = { ...body, request_id: requestIdentity.value };
   if (!ACCEPTED_N8N_INTENTS.includes(body.intent)) {
     return { ok: false, reason: "unsupported_intent" };
   }
@@ -751,6 +845,100 @@ export function validateN8nContract(body, requestId) {
   }
 
   return { ok: true, body: { ...body, reply_text: replyText || "" } };
+}
+
+export function n8nResponseRequestIdentity(body = {}) {
+  if (!body || typeof body !== "object") {
+    return { value: "", source: "" };
+  }
+  if (body.worker_request_id) {
+    return { value: String(body.worker_request_id), source: "worker_request_id" };
+  }
+  if (body.canonicalRequestId) {
+    return { value: String(body.canonicalRequestId), source: "canonicalRequestId" };
+  }
+  if (body.request_id) {
+    return { value: String(body.request_id), source: "request_id" };
+  }
+  return { value: "", source: "" };
+}
+
+export function n8nWebhookAttribution(webhookUrl = "") {
+  try {
+    const url = new URL(webhookUrl || N8N_WEBHOOK_URL);
+    const routeType = url.pathname === "/webhook" || url.pathname.startsWith("/webhook/") ? "production" : url.pathname === "/webhook-test" || url.pathname.startsWith("/webhook-test/") ? "test" : "unknown";
+    return {
+      host: url.host,
+      path: url.pathname,
+      route_type: routeType,
+      workflow_hint: url.pathname.split("/").filter(Boolean).at(-1) || "",
+      path_fingerprint: stableShortFingerprint(`${url.host}${url.pathname}`),
+    };
+  } catch {
+    return {
+      host: "",
+      path: "",
+      route_type: "invalid",
+      workflow_hint: "",
+      path_fingerprint: stableShortFingerprint("invalid"),
+    };
+  }
+}
+
+export function n8nResponseShape(body = {}) {
+  const topKeys = safeObjectKeys(body);
+  const nestedKeys = [];
+  for (const key of ["json", "body", "data", "response", "result", "output"]) {
+    const value = body && typeof body === "object" ? body[key] : null;
+    if (value && typeof value === "object") {
+      nestedKeys.push(`${key}:${safeObjectKeys(value).join(",")}`);
+    } else if (typeof value === "string") {
+      const parsed = parseJsonSafely(value);
+      if (parsed && typeof parsed === "object") {
+        nestedKeys.push(`${key}:${safeObjectKeys(parsed).join(",")}`);
+      } else {
+        nestedKeys.push(`${key}:string`);
+      }
+    }
+  }
+  return {
+    shape: Array.isArray(body) ? "array" : body && typeof body === "object" ? "object" : typeof body,
+    top_keys: topKeys.join(",").slice(0, 200),
+    nested_keys: nestedKeys.join("|").slice(0, 200),
+  };
+}
+
+function safeObjectKeys(value = {}) {
+  if (!value || typeof value !== "object") return [];
+  return Object.keys(value)
+    .map((key) => String(key).replace(/[^A-Za-z0-9:_\-.]/g, "").slice(0, 40))
+    .filter(Boolean)
+    .sort()
+    .slice(0, 20);
+}
+
+function stableShortFingerprint(value = "") {
+  let hash = 0x811c9dc5;
+  for (const char of String(value)) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+export function codexTaskCapabilityCheck(messageText = "") {
+  const text = String(messageText || "").trim().toLowerCase();
+  const unsupportedPattern = /(?:computer use|browser|chrome|safari|http:\/\/|https:\/\/|網頁|瀏覽器|網站|網址|開啟|打開|瀏覽|搜尋)/i;
+  if (unsupportedPattern.test(text)) {
+    return { ok: false, reason: "capability_not_yet_enabled" };
+  }
+
+  const smokeScopePattern = /(?:最小任務測試|測試檔案|smoke|建立.*檔案|codex.*測試)/i;
+  if (!smokeScopePattern.test(text)) {
+    return { ok: false, reason: "capability_not_yet_enabled" };
+  }
+
+  return { ok: true };
 }
 
 function contractEvidenceForLog(body) {
@@ -1383,7 +1571,8 @@ async function pushCodexFailureOnce(env = {}, task = {}, reason = "monitor_task_
     return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
   }
 
-  const pushResult = await pushToLine(userId.value, CODEX_FAILED_REPLY_TEXT, env);
+  const failureReplyText = reason === "capability_not_yet_enabled" ? CODEX_CAPABILITY_NOT_ENABLED_REPLY_TEXT : CODEX_FAILED_REPLY_TEXT;
+  const pushResult = await pushToLine(userId.value, failureReplyText, env);
   if (!pushResult.ok) {
     await env.RUNTIME_KV.put(finalKey, JSON.stringify({
       schema: "pline-v3-test-codex-final/v1",
@@ -1881,6 +2070,18 @@ function sanitizeEvidenceRecord(record) {
     "file_written",
     "saved",
     "source",
+    "n8n_host",
+    "n8n_path",
+    "n8n_route_type",
+    "n8n_path_fingerprint",
+    "workflow_hint",
+    "request_id_source",
+    "response_request_id_present",
+    "worker_request_id_present",
+    "canonical_request_id_present",
+    "n8n_response_shape",
+    "n8n_response_top_keys",
+    "n8n_response_nested_keys",
   ]);
   for (const [key, value] of Object.entries(record)) {
     if (!allowed.has(key) || value === undefined || value === "") {

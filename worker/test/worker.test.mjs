@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  codexTaskCapabilityCheck,
   extractGateMarker,
   enqueueCodexTask,
   enqueueIdeaTask,
@@ -9,6 +10,9 @@ import {
   handleIdeaFinalize,
   handleLineWebhook,
   lineAuthorizationHeader,
+  n8nResponseRequestIdentity,
+  n8nResponseShape,
+  n8nWebhookAttribution,
   normalizeN8nResponseBody,
   normalizeReplyText,
   persistEvidenceStage,
@@ -26,6 +30,13 @@ assert.equal(health.worker, "pline-v3-test-line-gateway");
 assert.equal(health.resources.runtime_kv, "pline-v3-test-runtime");
 assert.equal(health.resources.idempotency_kv, "pline-v3-test-idempotency");
 assert.equal(health.n8n.webhook_url, "https://n8nphy.app.n8n.cloud/webhook/pline-v3-test-ai-agent");
+assert.deepEqual(health.n8n.webhook_target, {
+  host: "n8nphy.app.n8n.cloud",
+  path: "/webhook/pline-v3-test-ai-agent",
+  route_type: "production",
+  workflow_hint: "pline-v3-test-ai-agent",
+  path_fingerprint: n8nWebhookAttribution("https://n8nphy.app.n8n.cloud/webhook/pline-v3-test-ai-agent").path_fingerprint,
+});
 assert.equal(health.n8n.shared_secret_header, "x-pline-v3-shared-secret");
 assert.equal(health.line_reply_mode, "no_visible_ack_background_n8n");
 assert.equal(health.codex_task_final_mode, "monitor_callback_exactly_once");
@@ -208,6 +219,19 @@ assert.deepEqual(normalizeN8nResponseBody([{ json: {
   request_id: "pline-v3-E2",
   intent: "idea_create",
 });
+assert.deepEqual(normalizeN8nResponseBody({ body: { request_id: "pline-v3-WRAP-BODY", intent: "idea_create" } }), {
+  request_id: "pline-v3-WRAP-BODY",
+  intent: "idea_create",
+});
+assert.deepEqual(normalizeN8nResponseBody({ output: JSON.stringify({ request_id: "pline-v3-WRAP-OUTPUT", intent: "idea_create" }) }), {
+  request_id: "pline-v3-WRAP-OUTPUT",
+  intent: "idea_create",
+});
+assert.deepEqual(n8nResponseShape({ body: { request_id: "pline-v3-SHAPE", intent: "idea_create" } }), {
+  shape: "object",
+  top_keys: "body",
+  nested_keys: "body:intent,request_id",
+});
 
 assert.equal(validateN8nContract([{ json: {
   request_id: "pline-v3-E5",
@@ -224,6 +248,33 @@ assert.equal(validateN8nContract({
   saved_record: 1,
   status: "completed",
 }, "pline-v3-E5B").ok, true);
+assert.deepEqual(n8nResponseRequestIdentity({ worker_request_id: "pline-v3-CANON", request_id: "ai-wrong-id" }), {
+  value: "pline-v3-CANON",
+  source: "worker_request_id",
+});
+const workerRequestIdResult = validateN8nContract({
+  request_id: "ai-wrong-id",
+  worker_request_id: "pline-v3-CANON",
+  canonicalRequestId: "pline-v3-CANON",
+  intent: "idea_create",
+  reply_text: "已記下",
+  tool_called: "idea_create",
+  saved_record: 1,
+  status: "completed",
+}, "pline-v3-CANON");
+assert.equal(workerRequestIdResult.ok, true);
+assert.equal(workerRequestIdResult.body.request_id, "pline-v3-CANON");
+const canonicalRequestIdResult = validateN8nContract({
+  request_id: "ai-wrong-id",
+  canonicalRequestId: "pline-v3-CANON-2",
+  intent: "idea_create",
+  reply_text: "已記下",
+  tool_called: "idea_create",
+  saved_record: 1,
+  status: "completed",
+}, "pline-v3-CANON-2");
+assert.equal(canonicalRequestIdResult.ok, true);
+assert.equal(canonicalRequestIdResult.body.request_id, "pline-v3-CANON-2");
 
 const clarifyResult = validateN8nContract({
   request_id: "pline-v3-E3",
@@ -243,6 +294,8 @@ assert.equal(unsupportedResult.ok, true);
 assert.equal(unsupportedResult.body.reply_text, "目前我只能先幫妳記想法，或處理指定的小任務。");
 
 assert.equal(normalizeReplyText("idea_create", ""), "");
+assert.deepEqual(codexTaskCapabilityCheck("請 Codex 執行最小任務測試，建立測試檔案").ok, true);
+assert.equal(codexTaskCapabilityCheck("請 Codex 幫我用computer use開啟一個新的網頁").reason, "capability_not_yet_enabled");
 
 assert.equal(validateN8nContract({
   request_id: "pline-v3-E2",
@@ -355,6 +408,50 @@ assert.equal(codexTaskRecord.target_path, "/Users/phoebe/Documents/菲比 LINE �
 assert.equal(codexTaskRecord.content, "Codex 任務測試成功");
 assert.equal(typeof codexTaskRecord.finalize_token, "string");
 assert.equal(codexTaskRecord.line_user_ref.includes("U_TEST"), false);
+globalThis.fetch = originalFetch;
+
+const capabilityNotEnabledCodexCalls = [];
+const capabilityNotEnabledCodexKv = createMemoryKv();
+globalThis.fetch = async (url) => {
+  capabilityNotEnabledCodexCalls.push(url);
+  if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  return new Response(JSON.stringify({
+    request_id: "pline-v3-BG2-UNSUPPORTED",
+    intent: "codex_task",
+    reply_text: "收到，我開始處理囉。",
+    tool_called: "codex_task",
+    task_id: "T-UNSUPPORTED",
+    codex_task: 1,
+    action: "create_smoke_file",
+    status: "completed",
+  }), { status: 200 });
+};
+const capabilityNotEnabledCodexResult = await processN8nInBackground({
+  request_id: "pline-v3-BG2-UNSUPPORTED",
+  line_event_id: "BG2-UNSUPPORTED",
+  reply_token: "reply-token",
+  user_id: "U_TEST",
+  message_text: "請 Codex 幫我用computer use開啟一個新的網頁",
+  received_at: "2026-07-18T00:00:00.000Z",
+}, {
+  N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  RUNTIME_KV: capabilityNotEnabledCodexKv,
+});
+assert.equal(capabilityNotEnabledCodexResult.ok, false);
+assert.equal(capabilityNotEnabledCodexResult.reason, "capability_not_yet_enabled");
+assert.deepEqual(capabilityNotEnabledCodexCalls, [
+  "https://n8n.example.test/webhook",
+  "https://api.line.me/v2/bot/message/push",
+]);
+assert.equal((await capabilityNotEnabledCodexKv.list({ prefix: "codex_task:v1:task:" })).keys.length, 0);
+const capabilityNotEnabledEvidence = await readEvidenceForRequest({ RUNTIME_KV: capabilityNotEnabledCodexKv }, "pline-v3-BG2-UNSUPPORTED");
+assert.equal(capabilityNotEnabledEvidence.stages.some((stage) => stage.stage === "codex_task_capability_not_enabled"), true);
+assert.equal(capabilityNotEnabledEvidence.stages.some((stage) => stage.stage === "codex_task_capability_notice_completed"), true);
+assert.equal(capabilityNotEnabledEvidence.stages.some((stage) => stage.stage === "codex_task_processing_notice_completed"), false);
 globalThis.fetch = originalFetch;
 
 const enqueueKv = createMemoryKv();
@@ -860,6 +957,11 @@ assert.equal(liveEvidenceBody.summary.visible_ack_skipped, true);
 assert.equal(liveEvidenceBody.summary.webhook_http_200, true);
 assert.equal(liveEvidenceBody.stages.some((stage) => stage.stage === "line_visible_ack_skipped"), true);
 assert.equal(liveEvidenceBody.summary.n8n_started, true);
+const n8nStartedStage = liveEvidenceBody.stages.find((stage) => stage.stage === "n8n_background_started");
+assert.equal(n8nStartedStage.n8n_host, "n8n.example.test");
+assert.equal(n8nStartedStage.n8n_path, "/webhook");
+assert.equal(n8nStartedStage.n8n_route_type, "production");
+assert.equal(typeof n8nStartedStage.n8n_path_fingerprint, "string");
 assert.equal(liveEvidenceBody.summary.n8n_completed, true);
 assert.equal(liveEvidenceBody.summary.intent, "idea_create");
 assert.equal(liveEvidenceBody.summary.tool_called, "idea_create");

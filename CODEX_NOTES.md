@@ -16,7 +16,7 @@ Not allowed in this FIX-03 stage:
 - Use old Worker/KV/D1/route/service binding/secret names.
 - Run Gate 1/Gate 2 LINE live tests.
 - Publish, activate, or connect production services.
-- Add out-of-scope features.
+- Add features outside this stage.
 
 ## N8N-01 Handoff
 
@@ -156,6 +156,30 @@ FIX-03 created the two required `_03` TEST KV namespaces and updated live KV bin
 - Live retry contract evidence: request id preserved as `pline-v3-...`, `intent=idea_create`, `status=completed`, `tool_called=idea_create`, `saved_record=1`, and `record=1`.
 - Worker code was not changed and no Worker deploy was required; current Worker version remains `02b1fa59-4d4c-4119-8dc8-5699183d5456`.
 - Evidence: `FIX_EVIDENCE_FIX_11.md`.
+
+## N8N Phase-Aware Reply Result
+
+- Thread role for this handoff: `PLine03｜N8N｜n8n workflow`.
+- Target workflow only: `kcMcBQos5cxsnWU1`.
+- n8n version published: `N8N phase-aware codex reply contract`.
+- AI Agent now receives sanitized phase fields for `codex_task`: `intent`, `phase`, `original_user_text`, `task_summary`, `project_name`, `actual_result`, and `actual_status`.
+- AI Agent is instructed to return `reply_text` and `reply_source: ai_generated` for `processing`, `completed`, and `failed`.
+- Structured Output passes through valid AI text and marks invalid/missing AI text as `fallback_required` for Worker fallback.
+- Worker/FIX still needs to wire phase-mode calls and read `reply_text` / `reply_source`.
+- `idea_create` behavior and Dropbox JSON schema were not changed.
+- Evidence: `N8N_PHASE_AWARE_REPLY_EVIDENCE.md`.
+
+## Live Regression Intake After N8N Reply Contract
+
+- 菲比 reported `記一下：[redacted idea content] 1153` produced no visible LINE reply.
+- TEST rechecked no-secret remote evidence and found request `pline-v3-01KXSNQFMVYQTAK12PGGCPZQ4R` passed Worker signature/admin/idempotency, returned webhook HTTP `200`, completed n8n as `idea_create`, and enqueued `save_idea_json`, but the idea task remained pending with no monitor claim, no Dropbox JSON attribution, and no final push.
+- 菲比 reported `請 Codex 幫我用computer use開啟一個新的網頁` produced only the processing reply and no computer action or final reply.
+- Current codex_task Gate enables only the fixed minimal smoke task; arbitrary Computer Use / opening a webpage should be marked `capability_not_yet_enabled` and get a truthful non-success final.
+- TEST found request `pline-v3-01KXSP35BTPS6GH5VM25JF9BJV` completed n8n as `codex_task`, delivered the processing notice, and enqueued task `pline-v3-codex-1784347208503`, but the task remained queued with no monitor claim/result/finalizer. It was also accepted as fixed action `create_smoke_file`, which is not correct for a not-yet-enabled browser/Computer Use capability.
+- 菲比 still did not see `已讀`; track this as a separate LINE desktop / Developers / OA Manager observation, not as webhook/final-push proof.
+- Do not claim live Gate PASS from the phase-aware synthetic validation.
+- Next handoff: FIX should add a durable live monitor runner or timeout/failure final for unclaimed monitor tasks, mark not-yet-enabled codex_task capabilities as `capability_not_yet_enabled`, and leave LINE read-state settings as a separate `_03` OA/Developers UI check.
+- Evidence: `TEST_EVIDENCE_LIVE_REGRESSION_1153_CODEX_PENDING_READ.md`.
 
 ## FIX-12 Result
 
@@ -446,3 +470,171 @@ Date: 2026-07-18
 - Remote no-secret selftest `T2400-20260718113900` confirmed task/result records retain `created_at`.
 - Evidence: `FIX_EVIDENCE_CODEX_TASK_CREATED_AT_SCHEMA.md`.
 - Next: TEST reruns live Codex Task Gate.
+
+## Codex Task AI Replies Phase-1 Trace
+
+Date: 2026-07-18
+
+- Processing reply is fixed in Worker as `CODEX_PROCESSING_REPLY_TEXT`.
+- Completed reply is fixed in Worker as `CODEX_COMPLETED_REPLY_TEXT`.
+- Failed reply is fixed in Worker as `CODEX_FAILED_REPLY_TEXT`.
+- n8n AI Agent currently supports codex_task classification and tool call, but the Worker does not use n8n `reply_text` for codex_task processing.
+- Completed/failed monitor callback path has actual result data. Follow-up N8N work now added the phase-aware AI reply contract in workflow `kcMcBQos5cxsnWU1`.
+- Current task/evidence records do not include `reply_source=ai_generated|fallback`.
+- Decision: do not fake AI replies in Worker; N8N now provides phase-aware AI reply output and Worker/FIX should wire it.
+- Evidence: `FIX_EVIDENCE_CODEX_TASK_AI_REPLIES.md`.
+
+## Live Pending Monitor / Capability Boundary FIX
+
+Date: 2026-07-18
+
+- Worker now prevents not-yet-enabled codex_task capabilities from being converted into the fixed smoke task.
+- This is not a permanent product decision about Computer Use/browser operations. Those capabilities require a later explicit authorization Gate.
+- Current enabled codex_task capability remains the fixed smoke task only.
+- Evidence terms:
+  - `codex_task_capability_not_enabled`
+  - `codex_task_capability_notice_completed`
+  - `capability_not_yet_enabled`
+- Monitor now has bounded `drain`, targeted `claim-task`, and targeted `mark-capability-not-enabled`.
+- Live pending idea request `pline-v3-01KXSNQFMVYQTAK12PGGCPZQ4R` reached completed Dropbox/final evidence.
+- Live browser/Computer Use request `pline-v3-01KXSP35BTPS6GH5VM25JF9BJV` reached failed/final evidence without arbitrary local execution.
+- Worker version: `493e4b8a-91da-479e-81e0-229fd1eb72c7`.
+- Evidence: `FIX_EVIDENCE_LIVE_REGRESSION_PENDING_CAPABILITY.md`.
+
+## Worker N8N URL Attribution FIX
+
+Date: 2026-07-18
+
+- Worker live `/health` confirms n8n host/path `n8nphy.app.n8n.cloud` + `/webhook/pline-v3-test-ai-agent`.
+- Route type is `production`; path fingerprint is `377f812f`.
+- Worker now records n8n target attribution in durable evidence.
+- Worker now accepts canonical request id from `worker_request_id` or `canonicalRequestId` and unwraps common n8n response wrappers.
+- Live marker `T2606-20260718134903` still failed because n8n production returned an empty object: no `request_id`, no `worker_request_id`, no `canonicalRequestId`, and no top/nested keys.
+- Conclusion: Worker env/path is correct; remaining blocker is n8n production response/execution attribution.
+- Worker version: `d50b4501-2244-4a31-9951-f7289ca06f09`.
+- Evidence: `FIX_EVIDENCE_WORKER_N8N_URL_ATTRIBUTION.md`.
+
+## Live Regression Recovery TEST
+
+Date: 2026-07-18
+
+- TEST confirmed `1153` request `pline-v3-01KXSNQFMVYQTAK12PGGCPZQ4R` now has monitor claim, Dropbox JSON write, final push completion, and final callback completion evidence.
+- Dropbox file `idea-20260718-115346-8748409c3efd.json` parses, matches the 9-field schema, matches the reported idea, and does not contain a raw LINE User ID pattern.
+- TEST confirmed open-webpage Codex request `pline-v3-01KXSP35BTPS6GH5VM25JF9BJV` / task `pline-v3-codex-1784347208503` is `failed` with `capability_not_yet_enabled`, changed files count `0`, and final failure notice completed.
+- No arbitrary Computer Use/browser action and no successful smoke-file execution were evidenced for the open-webpage request.
+- Worker and monitor tests passed as minimal regression coverage for idea_create, Dropbox, Codex smoke, duplicate/idempotency, and capability guard.
+- LINE desktop `已讀` remains a separate UI/OA setting observation.
+- Supplemental live 12:53 idea request `pline-v3-01KXSS4ZKDTPE9N9C9BDB1HAMF` reached Worker and passed signature/admin/idempotency, but failed n8n contract with `request_id_mismatch` before `save_idea_json` enqueue.
+- No monitor-claimable idea task or Dropbox JSON was created for the 12:53 water reminder, so bounded drain/targeted recovery had nothing to claim.
+- Result: `LIVE REGRESSION RECOVERY PARTIAL`.
+- Evidence: `TEST_EVIDENCE_LIVE_REGRESSION_RECOVERY.md`.
+- Next handoff: N8N/FIX must repair the live idea_create `request_id_mismatch` recurrence before opening `Computer Use 最小開通：只允許 open_browser_page`.
+
+## N8N request_id Recurrence Repair Live Verification
+
+Date: 2026-07-18
+
+- TEST sent `記一下：今天喝水提醒修復驗證 T2601-20260718131959` via LINE app to `菲比智能客服 測試_03`.
+- Marker resolved to request `pline-v3-01KXSTP8HJ3AF374NNY5W6KV86`.
+- Worker-side gate stages passed through signature/admin/idempotency and webhook HTTP `200`.
+- n8n background started but failed the Worker contract with `request_id_mismatch`.
+- No idea task was enqueued; therefore monitor poll had no task to claim and no Dropbox JSON/final push could occur.
+- The 12:53 request and T2601 now show the same live production failure shape.
+- Worker and monitor local tests passed, including capability guard coverage.
+- Result: live repair verification FAILED.
+- Evidence: `TEST_EVIDENCE_N8N_REQUEST_ID_RECURRENCE_REPAIR.md`.
+- Next handoff: N8N/FIX must inspect the live production execution for `pline-v3-01KXSTP8HJ3AF374NNY5W6KV86` and align the production response contract.
+
+## N8N Respond Nonempty Live idea_create Verification
+
+Date: 2026-07-18
+
+- TEST sent `記一下：[redacted idea content] T2701-20260718140429` via LINE app to `菲比智能客服 測試_03`.
+- Marker resolved to request `pline-v3-01KXSX7E4SRVM7CVZ3ST40GA6X`.
+- Worker-side gate stages passed through signature/admin/idempotency and webhook HTTP `200`.
+- n8n background completed successfully and no `request_id_mismatch` stage was present.
+- Durable contract evidence showed `intent=idea_create`, `tool_called=idea_create`, and `saved_record=1`.
+- Monitor claimed the `save_idea_json` task and wrote Dropbox JSON `idea-20260718-140449-c49d33a39125.json`.
+- Finalizer evidence showed `idea_json_final_push_completed` and `idea_json_final_callback_completed`.
+- Worker and monitor local tests passed, including capability guard coverage.
+- Result: `N8N RESPOND NONEMPTY LIVE IDEA_CREATE PASS`.
+- Evidence: `TEST_EVIDENCE_N8N_RESPOND_NONEMPTY_LIVE_IDEA.md`.
+- Next handoff: FIX/N8N should harden n8n-side shared-secret enforcement before opening the Computer Use minimal Gate.
+
+## n8n Shared-Secret Hardening TEST
+
+Date: 2026-07-18
+
+- TEST verified direct no-header probe to the production n8n webhook did not return a normal idea_create contract.
+- Direct no-header probe response was HTTP `200`, empty/non-JSON, with no `intent`, no `tool_called`, and no `saved_record`.
+- TEST sent `記一下：[redacted idea content] T2801-20260718141551` via LINE app to `菲比智能客服 測試_03`.
+- Marker resolved to request `pline-v3-01KXSXWXAE94G82MCZEYQABCJ7`.
+- Worker/header path passed signature/admin/idempotency and webhook HTTP `200`.
+- n8n background completed successfully and no `request_id_mismatch` stage was present.
+- Durable contract evidence showed `intent=idea_create`, `tool_called=idea_create`, and `saved_record=1`.
+- Monitor claimed the `save_idea_json` task and wrote Dropbox JSON `idea-20260718-141633-a223c8a90177.json`.
+- Finalizer evidence showed `idea_json_final_push_completed` and `idea_json_final_callback_completed`.
+- Worker and monitor local tests passed, including capability guard coverage.
+- Residual risk: n8n variable creation remains disabled, so full value comparison is pending; no-header barrier is passing.
+- Result: `N8N SHARED-SECRET HARDENING TEST PASS`.
+- Evidence: `TEST_EVIDENCE_N8N_SHARED_SECRET_HARDENING.md`.
+- Next handoff: FIX can open `Computer Use 最小開通：只允許 open_browser_page`.
+
+## N8N Request ID Contract Recurrence Repair
+
+Date: 2026-07-18
+
+- Target workflow only: `kcMcBQos5cxsnWU1`.
+- Published n8n version: `N8N request_id recurrence repair`.
+- Local draft updated: `N8N_WORKFLOW_PLINE_V3_TEST_AI_AGENT.json`.
+- `Normalize Input` now preserves the Worker original request id as `worker_request_id`.
+- `Structured Output` now uses only the Normalize canonical id and ignores AI-produced `request_id`.
+- No-secret synthetic verification intentionally supplied a wrong AI id and confirmed output request id still equals `pline-v3-01KXSS4ZKDTPE9N9C9BDB1HAMF`, with `intent=idea_create`, `tool_called=idea_create`, and `saved_record=1`.
+- Evidence: `N8N_EVIDENCE_REQUEST_ID_CONTRACT_RECURRENCE.md`.
+- Next handoff: TEST reruns a new safe idea_create marker before opening `Computer Use 最小開通：只允許 open_browser_page`.
+
+## N8N Live Production request_id_mismatch Follow-Up
+
+Date: 2026-07-18
+
+- Rechecked live failed request `pline-v3-01KXSTP8HJ3AF374NNY5W6KV86` against only workflow `kcMcBQos5cxsnWU1`.
+- n8n UI shows the workflow is active/published and the production webhook path is `/webhook/pline-v3-test-ai-agent`.
+- Current `Structured Output` UI contains `canonicalRequestId` and `worker_request_id`; it does not contain `parsed.request_id`.
+- Current `Respond to Webhook` UI returns JSON with `{{ $json }}`.
+- The workflow `Executions` tab showed `No executions found`, so T2601 per-node live output was not available under the target workflow.
+- Local no-secret harness for T2601 PASSed and preserved the Worker request id even when the synthetic AI output returned a wrong id.
+- Updated `.env.example` to show the production webhook path.
+- Evidence: `N8N_EVIDENCE_LIVE_PRODUCTION_REQUEST_ID_MISMATCH.md`.
+- Next handoff: FIX/TEST confirms live Worker `N8N_WEBHOOK_URL` and execution attribution, then reruns T260x idea_create before any Computer Use Gate.
+
+## N8N Respond-to-Webhook Nonempty Production Repair
+
+Date: 2026-07-18
+
+- Target workflow only: `kcMcBQos5cxsnWU1`.
+- Production execution UI exposed `Normalize Input` failure: env var access denied.
+- Removed direct `$env.N8N_SHARED_SECRET` access from Normalize Input and replaced it with guarded `$vars.N8N_SHARED_SECRET` lookup.
+- Changed `Respond to Webhook` from custom JSON `{{ $json }}` to `First Incoming Item`.
+- Published version: `N8N normalize env and respond nonempty repair`.
+- Production no-secret probe returned nonempty contract JSON with preserved request id, `intent=idea_create`, `tool_called=idea_create`, `status=completed`, and `saved_record=1`.
+- Execution saving/UI visibility still showed `No executions found` after the successful probe.
+- Risk: direct no-secret n8n probe succeeded; configure/check n8n variable `N8N_SHARED_SECRET` if n8n-side direct endpoint hardening is required.
+- Evidence: `N8N_EVIDENCE_RESPOND_WEBHOOK_NONEMPTY.md`.
+- Next handoff: TEST/FIX reruns live T260x idea_create and confirms Dropbox JSON plus natural final before Computer Use Gate.
+
+## N8N Shared-Secret Header Hardening
+
+Date: 2026-07-18
+
+- Target workflow only: `kcMcBQos5cxsnWU1`.
+- Published version: `N8N shared-secret header hardening`.
+- n8n Variables UI did not have `N8N_SHARED_SECRET`; `Create variable` was disabled.
+- Normalize guard now rejects missing `x-pline-v3-shared-secret`.
+- Normalize guard performs `$vars.N8N_SHARED_SECRET` value equality when that variable is available.
+- No direct `$env.N8N_SHARED_SECRET` access was restored.
+- Respond node remains `First Incoming Item`.
+- Production no-header probe no longer returned normal `intent=idea_create` contract.
+- Production header-present synthetic probe still returned nonempty idea_create contract with preserved request id.
+- Residual risk: full value equality awaits safe n8n variable/credential setup.
+- Evidence: `N8N_EVIDENCE_SHARED_SECRET_HARDENING.md`.
+- Next handoff: TEST/FIX checks no-secret rejection and live Worker idea_create PASS before Computer Use Gate.

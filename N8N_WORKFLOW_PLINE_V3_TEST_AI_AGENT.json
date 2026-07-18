@@ -32,7 +32,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const requestEnvelope = $json || {};\nconst headers = requestEnvelope.headers || {};\nconst body = requestEnvelope.body || requestEnvelope;\nconst expectedSecret = $env.N8N_SHARED_SECRET || '';\nconst receivedSecret = headers['x-pline-v3-shared-secret'] || headers['X-Pline-V3-Shared-Secret'] || '';\nif (expectedSecret && receivedSecret !== expectedSecret) {\n  throw new Error('invalid_n8n_shared_secret');\n}\nreturn [{ json: {\n  request_id: body.request_id || '',\n  line_event_id: body.line_event_id || '',\n  reply_token: body.reply_token || '',\n  user_id: body.user_id || '',\n  message_text: body.message_text || '',\n  received_at: body.received_at || new Date().toISOString(),\n  allowed_intents: ['idea_create', 'codex_task', 'clarify', 'unsupported'],\n  project_scope: '菲比 LINE 智能助理_03',\n  project_root: '/Users/phoebe/Documents/菲比 LINE 智能助理_03'\n} }];"
+        "jsCode": "const requestEnvelope = $json || {};\nconst headers = requestEnvelope.headers || {};\nconst body = requestEnvelope.body && typeof requestEnvelope.body === 'object' ? requestEnvelope.body : requestEnvelope;\nlet expectedSecret = '';\ntry {\n  if (typeof $vars !== 'undefined' && $vars && $vars.N8N_SHARED_SECRET) {\n    expectedSecret = String($vars.N8N_SHARED_SECRET || '');\n  }\n} catch (error) {\n  expectedSecret = '';\n}\nconst receivedSecret = headers['x-pline-v3-shared-secret'] || headers['X-Pline-V3-Shared-Secret'] || '';\nif (!receivedSecret) {\n  throw new Error('missing_n8n_shared_secret');\n}\nif (expectedSecret && receivedSecret !== expectedSecret) {\n  throw new Error('invalid_n8n_shared_secret');\n}\nconst phases = ['processing', 'completed', 'failed'];\nconst statuses = ['queued', 'processing', 'completed', 'failed'];\nconst phase = phases.includes(body.phase) ? body.phase : '';\nconst actualStatus = statuses.includes(body.actual_status) ? body.actual_status : (phase || 'queued');\nconst workerRequestId = String(body.request_id || body.worker_request_id || '');\nfunction removeTerm(text, term) {\n  let output = text;\n  for (const candidate of [term, term.toLowerCase(), term.toUpperCase()]) {\n    output = output.split(candidate).join('');\n  }\n  return output;\n}\nfunction publicText(value, fallback = '') {\n  let text = String(value || fallback);\n  text = text.split(' ').filter((part) => !part.startsWith('/Users/')).join(' ');\n  for (const term of ['task_id', 'branch', 'commit hash', 'commit', 'n8n', 'Worker', 'JSON', 'execution', 'queued', 'stack trace', 'internal node', 'node name', 'secret', 'token', '_03', 'TEST']) {\n    text = removeTerm(text, term);\n  }\n  return text.split(String.fromCharCode(10)).join(' ').split(String.fromCharCode(9)).join(' ').split('  ').join(' ').trim();\n}\nconst originalUserText = publicText(body.original_user_text || body.message_text || '');\nconst taskSummary = publicText(body.task_summary || body.message_text || '處理這次指令');\nconst projectName = publicText(body.project_name || '菲比智能客服');\nconst actualResult = publicText(body.actual_result || '');\nreturn [{ json: {\n  request_id: workerRequestId,\n  worker_request_id: workerRequestId,\n  line_event_id: body.line_event_id || '',\n  reply_token: body.reply_token || '',\n  user_id: body.user_id || '',\n  message_text: body.message_text || body.original_user_text || '',\n  received_at: body.received_at || new Date().toISOString(),\n  intent: body.intent || '',\n  phase,\n  original_user_text: originalUserText,\n  task_summary: taskSummary,\n  project_name: projectName,\n  actual_result: actualResult,\n  actual_status: actualStatus,\n  phase_reply_contract: body.intent === 'codex_task' && Boolean(phase),\n  allowed_intents: ['idea_create', 'codex_task', 'clarify', 'unsupported']\n} }];"
       },
       "id": "pline-v3-normalize-input",
       "name": "Normalize Input",
@@ -48,7 +48,7 @@
         "promptType": "define",
         "text": "={{ JSON.stringify($json) }}",
         "options": {
-          "systemMessage": "You are the TEST-only PLine V3 minimal AI Agent for the clean-room project 菲比 LINE 智能助理_03. Classify each one-line message into exactly one intent: idea_create, codex_task, clarify, unsupported. Use only the connected tools named idea_create and codex_task when those intents apply. For clarify or unsupported, return a short reply_text and do not call tools. Never mention or use non-_03 resources. Output a JSON object with request_id, intent, reply_text, task_id, and status."
+          "systemMessage": "You are the phase-aware reply writer for a clean-room LINE assistant. The input is JSON with intent, phase, original_user_text, task_summary, project_name, actual_result, and actual_status.\n\nReturn only a JSON object. Do not wrap it in markdown.\n\nFor intent=codex_task and phase is processing, completed, or failed, output exactly:\n{\"reply_text\":\"自然繁中，最多兩句\",\"reply_source\":\"ai_generated\",\"intent\":\"codex_task\",\"phase\":\"processing|completed|failed\",\"status\":\"accepted|completed|failed\"}\n\nRules for codex_task replies:\n- Traditional Chinese only, natural and warm, at most two sentences.\n- Mention the real task content or real result in plain user-facing words.\n- processing means the task is being handled; never say it is finished.\n- completed means it is actually finished; include actual_result when present.\n- failed means it did not finish; do not pretend success.\n- Vary the opening wording.\n- Do not ask follow-up questions, do not chat, do not add memory, persona, multi-turn behavior, or promises beyond the provided status.\n- reply_text must not contain these internal words or concepts: task_id, local absolute path, branch, commit hash, n8n, Worker, JSON, execution, queued, stack trace, internal node name, secret, token, _03, TEST.\n- Do not expose IDs, file paths, service names, technical pipeline names, secrets, tokens, or raw payloads.\n\nFor intent=idea_create, preserve the existing behavior: classify and call idea_create when appropriate.\nFor a new codex_task without phase, classify and call codex_task when appropriate, and still return a short user-facing reply_text if you can.\nFor unclear or unsupported requests, return intent clarify or unsupported with a short reply_text."
         }
       },
       "id": "pline-v3-ai-agent",
@@ -109,7 +109,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const agent = $json || {};\nconst input = $('Normalize Input').first().json || {};\nlet parsed = {};\ntry {\n  parsed = typeof agent.output === 'string' ? JSON.parse(agent.output) : agent.output || agent;\n} catch (error) {\n  parsed = { intent: 'clarify', reply_text: '我需要再確認一次你的需求。', status: 'accepted' };\n}\nconst requestId = input.request_id || '';\nconst messageText = input.message_text || '';\nconst allowed = ['idea_create', 'codex_task', 'clarify', 'unsupported'];\nlet intent = allowed.includes(parsed.intent) ? parsed.intent : '';\nif (!intent) {\n  intent = /codex|測試檔案|建立測試檔案/i.test(messageText) ? 'codex_task' : (/記一下|記錄|想法/.test(messageText) ? 'idea_create' : 'unsupported');\n}\nconst status = intent === 'unsupported' || intent === 'clarify' ? 'accepted' : (parsed.status || 'completed');\nconst base = {\n  request_id: requestId,\n  intent,\n  reply_text: parsed.reply_text || (intent === 'codex_task' ? 'Codex 任務已建立。' : intent === 'idea_create' ? '已記下這個想法。' : '目前只支援記想法或建立 Codex 測試任務。'),\n  status\n};\nif (intent === 'idea_create') {\n  return [{ json: {\n    ...base,\n    tool_called: 'idea_create',\n    saved: true,\n    saved_record: 1,\n    record: 1\n  } }];\n}\nif (intent === 'codex_task') {\n  return [{ json: {\n    ...base,\n    tool_called: 'codex_task',\n    task_id: parsed.task_id || 'pline-v3-codex-' + Date.now(),\n    codex_task: 1,\n    action: 'create_smoke_file',\n    target_path: '/Users/phoebe/Documents/菲比 LINE 智能助理_03/codex-smoke.txt',\n    content: 'Codex 已打通'\n  } }];\n}\nreturn [{ json: base }];"
+        "jsCode": "const agent = $json || {};\nconst input = $('Normalize Input').first().json || {};\nlet parsed = {};\ntry {\n  parsed = typeof agent.output === 'string' ? JSON.parse(agent.output) : agent.output || agent;\n} catch (error) {\n  parsed = {};\n}\nconst canonicalRequestId = String(input.worker_request_id || input.request_id || '');\nconst messageText = String(input.message_text || '');\nconst phases = ['processing', 'completed', 'failed'];\nconst allowed = ['idea_create', 'codex_task', 'clarify', 'unsupported'];\nconst forbiddenTerms = ['task_id', '/Users/', 'branch', 'commit hash', 'commit', 'n8n', 'Worker', 'JSON', 'execution', 'queued', 'stack trace', 'internal node', 'node name', 'secret', 'token', '_03', 'TEST'];\nfunction removeTerm(text, term) {\n  let output = text;\n  for (const candidate of [term, term.toLowerCase(), term.toUpperCase()]) {\n    output = output.split(candidate).join('');\n  }\n  return output;\n}\nfunction hasForbidden(value) {\n  const text = String(value || '');\n  const lower = text.toLowerCase();\n  return forbiddenTerms.some((term) => lower.includes(term.toLowerCase()));\n}\nfunction publicText(value, fallback = '') {\n  let text = String(value || fallback);\n  text = text.split(' ').filter((part) => !part.startsWith('/Users/')).join(' ');\n  for (const term of forbiddenTerms) {\n    text = removeTerm(text, term);\n  }\n  return text.split(String.fromCharCode(10)).join(' ').split(String.fromCharCode(9)).join(' ').split('  ').join(' ').trim();\n}\nfunction twoSentences(value) {\n  const text = publicText(value);\n  if (!text) return '';\n  const stops = ['。', '！', '？', '!', '?'];\n  let count = 0;\n  let end = text.length;\n  for (let i = 0; i < text.length; i += 1) {\n    if (stops.includes(text[i])) {\n      count += 1;\n      if (count === 2) {\n        end = i + 1;\n        break;\n      }\n    }\n  }\n  return text.slice(0, end).trim();\n}\nfunction safeAiReply(value) {\n  const text = twoSentences(value);\n  if (!text || hasForbidden(text)) return '';\n  return text;\n}\nlet intent = allowed.includes(parsed.intent) ? parsed.intent : '';\nif (!intent) {\n  const lowerMessage = messageText.toLowerCase();\n  const isCodex = lowerMessage.includes('codex') || messageText.includes('測試檔案') || messageText.includes('建立測試檔案') || messageText.includes('讀取檔案') || messageText.includes('最小測試') || messageText.includes('失敗');\n  const isIdea = messageText.includes('記一下') || messageText.includes('記錄') || messageText.includes('想法');\n  intent = input.intent || (isCodex ? 'codex_task' : (isIdea ? 'idea_create' : 'unsupported'));\n}\nconst phase = phases.includes(parsed.phase) ? parsed.phase : (phases.includes(input.phase) ? input.phase : '');\nif (intent === 'codex_task' && phase) {\n  const replyText = safeAiReply(parsed.reply_text);\n  const aiGenerated = parsed.reply_source === 'ai_generated' && Boolean(replyText);\n  return [{ json: {\n    request_id: canonicalRequestId,\n    worker_request_id: canonicalRequestId,\n    intent: 'codex_task',\n    phase,\n    reply_text: aiGenerated ? replyText : '',\n    reply_source: aiGenerated ? 'ai_generated' : 'fallback_required',\n    actual_status: input.actual_status || (phase === 'completed' ? 'completed' : phase === 'failed' ? 'failed' : 'processing'),\n    task_summary: input.task_summary || '',\n    actual_result: input.actual_result || '',\n    status: phase === 'failed' ? 'failed' : (phase === 'completed' ? 'completed' : 'accepted')\n  } }];\n}\nconst status = intent === 'unsupported' || intent === 'clarify' ? 'accepted' : (parsed.status || 'completed');\nconst aiReply = safeAiReply(parsed.reply_text);\nconst base = {\n  request_id: canonicalRequestId,\n  worker_request_id: canonicalRequestId,\n  intent,\n  reply_text: aiReply || (intent === 'codex_task' ? '我已開始處理這次任務。' : intent === 'idea_create' ? '已記下這個想法。' : '目前只支援記想法或建立測試任務。'),\n  reply_source: parsed.reply_source === 'ai_generated' && aiReply ? 'ai_generated' : 'fallback_required',\n  status\n};\nif (intent === 'idea_create') {\n  return [{ json: {\n    ...base,\n    tool_called: 'idea_create',\n    saved: true,\n    saved_record: 1,\n    record: 1\n  } }];\n}\nif (intent === 'codex_task') {\n  return [{ json: {\n    ...base,\n    tool_called: 'codex_task',\n    task_id: parsed.task_id || 'pline-v3-codex-' + Date.now(),\n    codex_task: 1,\n    action: 'create_smoke_file',\n    target_path: '/Users/phoebe/Documents/菲比 LINE 智能助理_03/codex-smoke.txt',\n    content: 'Codex 已打通'\n  } }];\n}\nreturn [{ json: base }];"
       },
       "id": "pline-v3-structured-output",
       "name": "Structured Output",
@@ -122,8 +122,7 @@
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ $json }}",
+        "respondWith": "firstIncomingItem",
         "options": {}
       },
       "id": "pline-v3-respond-to-webhook",
@@ -215,5 +214,39 @@
       ]
     }
   },
-  "updated_by_fix": "FIX-11 live response contract repair"
+  "updated_by_fix": "N8N request_id recurrence repair",
+  "phase_aware_reply_contract": {
+    "intent": "codex_task",
+    "phases": [
+      "processing",
+      "completed",
+      "failed"
+    ],
+    "input_fields": [
+      "intent",
+      "phase",
+      "original_user_text",
+      "task_summary",
+      "project_name",
+      "actual_result",
+      "actual_status"
+    ],
+    "output_fields": [
+      "reply_text",
+      "reply_source"
+    ],
+    "reply_source": "ai_generated",
+    "fallback_policy": "Worker handles fallback when n8n returns fallback_required or empty reply_text"
+  },
+  "workflow_version_name": "N8N request_id recurrence repair",
+  "request_id_contract_repair": {
+    "date": "2026-07-18",
+    "reason": "live idea_create request_id_mismatch recurrence at 12:53",
+    "rule": "Structured Output uses only Normalize Input worker_request_id/request_id as canonical response id; AI output request_id is ignored",
+    "version_name": "N8N request_id recurrence repair"
+  },
+  "guard_contract": {
+    "rule": "Normalize Input rejects requests missing x-pline-v3-shared-secret; when $vars.N8N_SHARED_SECRET exists it also compares the header value. Direct $env access is forbidden because n8n production Code node denied env var access.",
+    "updated_at": "2026-07-18"
+  }
 }

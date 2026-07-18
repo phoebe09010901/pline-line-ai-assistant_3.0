@@ -152,8 +152,12 @@ export async function claimOnce(options = {}) {
   const kv = options.kv || createWranglerKv(env);
   const now = new Date().toISOString();
   const keys = [];
-  for (const prefix of [`${TASK_PREFIX}:task:`, `${IDEA_TASK_PREFIX}:task:`]) {
-    keys.push(...await kv.list(prefix));
+  if (options.taskId || options.task_id) {
+    keys.push({ name: taskKey(options.taskId || options.task_id, options.action || FIXED_ACTION) });
+  } else {
+    for (const prefix of [`${TASK_PREFIX}:task:`, `${IDEA_TASK_PREFIX}:task:`]) {
+      keys.push(...await kv.list(prefix));
+    }
   }
 
   for (const key of keys) {
@@ -308,6 +312,129 @@ export async function poll(options = {}) {
     await sleep(intervalMs);
   }
   return { ok: true, claimed: false, reason: "poll_exhausted", checks: results.length };
+}
+
+export async function drain(options = {}) {
+  const iterations = Number(options.iterations || process.env.MONITOR_DRAIN_ITERATIONS || 20);
+  const intervalMs = Number(options.intervalMs || process.env.MONITOR_POLL_INTERVAL_MS || 500);
+  const results = [];
+  let drained = 0;
+
+  for (let index = 0; index < iterations; index += 1) {
+    const result = await claimOnce(options);
+    results.push(result);
+    if (result.ok === false) {
+      return {
+        ok: false,
+        drained,
+        reason: result.reason,
+        failed_task_id: result.task_id,
+        failed_request_id: result.request_id,
+        results,
+      };
+    }
+    if (!result.claimed) {
+      return {
+        ok: true,
+        drained,
+        reason: "drain_complete",
+        checks: results.length,
+        results,
+      };
+    }
+    drained += 1;
+    await sleep(intervalMs);
+  }
+
+  return {
+    ok: true,
+    drained,
+    reason: "drain_limit_reached",
+    checks: results.length,
+    results,
+  };
+}
+
+export async function markCodexTaskCapabilityNotEnabled(taskId = "", options = {}) {
+  const kv = options.kv || createWranglerKv(options.env || process.env);
+  const safeTaskId = sanitizeId(taskId);
+  if (!safeTaskId) {
+    return { ok: false, reason: "missing_task_id" };
+  }
+
+  const key = taskKey(safeTaskId, FIXED_ACTION);
+  const raw = await kv.get(key);
+  if (!raw) {
+    return { ok: false, reason: "missing_codex_task", task_id: safeTaskId };
+  }
+
+  let original;
+  try {
+    original = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: "unreadable_codex_task", task_id: safeTaskId };
+  }
+
+  const task = normalizeTask(original);
+  if (task.action !== FIXED_ACTION || task.task_type !== "codex_task") {
+    return { ok: false, reason: "unsupported_task_type", task_id: safeTaskId };
+  }
+
+  if (original.status && !["pending", "queued", "claimed", "running"].includes(original.status)) {
+    return {
+      ok: true,
+      task_id: safeTaskId,
+      request_id: task.request_id,
+      status: original.status,
+      reason: "already_terminal",
+      finalized: false,
+    };
+  }
+
+  const failedAt = new Date().toISOString();
+  const reason = "capability_not_yet_enabled";
+  const failedRecord = {
+    ...original,
+    ...task,
+    schema: original.schema || "pline-v3-test-codex-task/v1",
+    monitor: MONITOR_NAME,
+    status: "failed",
+    failed_at: failedAt,
+    reason,
+  };
+  await kv.put(key, JSON.stringify(failedRecord));
+  await kv.put(codexResultKey(task.task_id), JSON.stringify(codexResultRecord(task, {
+    ok: false,
+    reason,
+  })));
+  await writeEvidenceStage(kv, task, "codex_task_capability_not_enabled", {
+    monitor: MONITOR_NAME,
+    action: FIXED_ACTION,
+    status: "failed",
+    reason,
+  });
+  await writeEvidenceStage(kv, task, "codex_task_result_recorded", {
+    monitor: MONITOR_NAME,
+    action: FIXED_ACTION,
+    status: "failed",
+  });
+  const callbackResult = await notifyCodexFinalizer(task, "failed", options.env || process.env, reason);
+  await writeEvidenceStage(kv, task, callbackResult.ok ? "codex_task_final_callback_completed" : "codex_task_final_callback_failed", {
+    monitor: MONITOR_NAME,
+    action: FIXED_ACTION,
+    status: "failed",
+    reason: callbackResult.ok ? reason : callbackResult.reason,
+  });
+
+  return {
+    ok: callbackResult.ok,
+    task_id: task.task_id,
+    request_id: task.request_id,
+    status: "failed",
+    reason: callbackResult.ok ? reason : callbackResult.reason,
+    finalized: callbackResult.ok,
+    pushed: Boolean(callbackResult.pushed),
+  };
 }
 
 export async function createSyntheticTask(task = {}, options = {}) {
@@ -763,8 +890,27 @@ async function main() {
     return;
   }
 
+  if (command === "claim-task") {
+    printJson(await claimOnce({
+      env: process.env,
+      taskId: argValue("task_id"),
+      action: argValue("action") || FIXED_ACTION,
+    }));
+    return;
+  }
+
   if (command === "poll") {
     printJson(await poll());
+    return;
+  }
+
+  if (command === "drain") {
+    printJson(await drain());
+    return;
+  }
+
+  if (command === "mark-capability-not-enabled") {
+    printJson(await markCodexTaskCapabilityNotEnabled(argValue("task_id"), { env: process.env }));
     return;
   }
 

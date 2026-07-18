@@ -1735,3 +1735,425 @@ Date: 2026-07-18
   - smoke file, natural LINE processing/final, repeated callback, failed path, idea_create, and Dropbox regressions remain PASS
 
 Evidence for FIX readiness: `FIX_EVIDENCE_CODEX_TASK_CREATED_AT_SCHEMA.md`.
+
+## Codex Task AI Replies Gate: N8N Prerequisite
+
+Date: 2026-07-18
+
+FIX phase-1 trace found the Gate cannot be truthfully passed by Worker/monitor alone.
+
+Before TEST can run the AI reply Gate, N8N must provide a phase-aware codex_task AI reply contract:
+
+- input `intent=codex_task`
+- input `phase=processing|completed|failed`
+- input sanitized original user instruction
+- input task summary
+- input public project name
+- input actual result for completed/failed phase
+- input actual status
+- output `reply_text`
+- output `reply_source=ai_generated|fallback`
+
+TEST Gate must later verify:
+
+- processing does not claim completion
+- completed reflects actual result
+- failed does not pretend success
+- normal cases primarily show `reply_source=ai_generated`
+- forced fallback shows `reply_source=fallback`
+- user-visible text contains no task id, local absolute path, branch, commit hash, n8n, Worker, JSON, execution, stack trace, internal node names, secrets, or tokens
+- A/B/C/D codex_task variants are covered after N8N and FIX wiring
+
+Evidence for phase-1 trace: `FIX_EVIDENCE_CODEX_TASK_AI_REPLIES.md`.
+
+## Live Regression Diagnostic: 1153 / Codex Pending / LINE Read
+
+Date: 2026-07-18
+
+No new LINE message was sent for this diagnostic. TEST used existing no-secret remote KV evidence, monitor health, Worker health, and fixed Dropbox directory readback.
+
+1153 idea_create result:
+
+- Worker invocation: PASS
+- signature/admin/idempotency: PASS
+- webhook HTTP `200`: PASS
+- visible ACK skipped: PASS, by current reply mode
+- n8n completion: PASS
+- `intent=idea_create`: PASS
+- `tool_called=idea_create`: PASS
+- `save_idea_json` enqueue: PASS
+- monitor claim: FAIL, missing
+- Dropbox JSON attribution: FAIL, missing
+- final push: FAIL, missing
+
+Codex pending result:
+
+- Worker invocation: PASS
+- signature/admin/idempotency: PASS
+- webhook HTTP `200`: PASS
+- n8n completion: PASS
+- `intent=codex_task`: PASS
+- processing notice: PASS
+- remote task enqueue: PASS
+- monitor claim/result/finalizer: FAIL, missing
+- capability validation: FAIL, browser/Computer Use request was not yet enabled in this Gate but was accepted as fixed smoke action `create_smoke_file`.
+
+LINE read observation:
+
+- LINE desktop `已讀` is not a backend Gate signal.
+- Keep it separate from webhook HTTP `200`, final push, and Dropbox persistence.
+- Investigate `_03` LINE Developers / LINE OA Manager read-receipt or chat-mode settings separately if needed.
+
+Required next step:
+
+```text
+FIX: make live monitor processing durable/always-on or add Worker-side timeout/failure final for unclaimed tasks; mark capabilities that are not enabled in this Gate as `capability_not_yet_enabled` instead of leaving them processing or converting them into smoke success.
+```
+
+Evidence: `TEST_EVIDENCE_LIVE_REGRESSION_1153_CODEX_PENDING_READ.md`.
+
+## Live Pending Monitor / Capability Boundary Regression
+
+Date: 2026-07-18
+
+TEST should verify after Worker version `493e4b8a-91da-479e-81e0-229fd1eb72c7`:
+
+- Existing request `pline-v3-01KXSNQFMVYQTAK12PGGCPZQ4R` has `monitor_claimed`, `idea_json_file_written`, `idea_json_final_callback_completed`, and `idea_json_final_push_completed`.
+- Existing request `pline-v3-01KXSP35BTPS6GH5VM25JF9BJV` has `codex_task_capability_not_enabled`, failed result `error=capability_not_yet_enabled`, and final failure/capability notice evidence.
+- Browser/Computer Use capability is not permanently rejected; it is simply not enabled in this Gate.
+- New not-yet-enabled codex_task capabilities must not enqueue `create_smoke_file`, must not send a processing notice, and must not remain queued/pending.
+- Fixed smoke codex_task must still execute and final exactly-once.
+- idea_create, Dropbox JSON, duplicate, idempotency, admin allowlist, webhook HTTP `200`, and invalid-signature `401` regressions remain PASS.
+
+Evidence for FIX readiness: `FIX_EVIDENCE_LIVE_REGRESSION_PENDING_CAPABILITY.md`.
+
+## Worker N8N URL Attribution Regression
+
+Date: 2026-07-18
+
+FIX result after Worker version `d50b4501-2244-4a31-9951-f7289ca06f09`:
+
+- Live `/health` must show n8n route type `production` and path `/webhook/pline-v3-test-ai-agent`.
+- `n8n_background_started` evidence must include no-secret host/path/route/path fingerprint.
+- Worker accepts `worker_request_id` and `canonicalRequestId` as canonical request id fields.
+- Worker unwraps common n8n wrappers before contract validation.
+- Live marker `T2606-20260718134903` still failed because n8n production returned an empty response object.
+
+Blocked TEST condition:
+
+- Do not rerun idea_create Gate as PASS until N8N repairs production Respond-to-Webhook output to include canonical request id, intent, reply text, status, and tool evidence.
+
+Evidence: `FIX_EVIDENCE_WORKER_N8N_URL_ATTRIBUTION.md`.
+
+### TEST Recovery Readback Result
+
+Date: 2026-07-18
+
+FIX handoff version:
+
+```text
+493e4b8a-91da-479e-81e0-229fd1eb72c7
+```
+
+1153 idea request:
+
+- Request id: `pline-v3-01KXSNQFMVYQTAK12PGGCPZQ4R`
+- Task id: `idea-8748409c3efdcc4f5363d2eb`
+- Task status: `completed`
+- `monitor_claimed`: PASS
+- `idea_json_file_written`: PASS
+- `idea_json_final_push_completed`: PASS
+- `idea_json_final_callback_completed`: PASS
+- Dropbox JSON: `idea-20260718-115346-8748409c3efd.json`
+- JSON parse/schema/content/raw-ID checks: PASS
+
+Open-webpage Codex request:
+
+- Request id: `pline-v3-01KXSP35BTPS6GH5VM25JF9BJV`
+- Task id: `pline-v3-codex-1784347208503`
+- Task status: `failed`
+- Reason: `capability_not_yet_enabled`
+- Result changed files: `0`
+- Final state: `failure_notice_completed`
+- Arbitrary Computer Use/browser action: not executed
+- Smoke-file success for this request: absent
+
+Minimal regression:
+
+- Worker tests: PASS
+- Monitor tests: PASS
+- idea_create / Dropbox / Codex smoke / duplicate / idempotency / capability guard: PASS through existing focused tests
+
+LINE read observation:
+
+- `已讀` remains a separate LINE desktop / LINE Developers / LINE OA Manager setting observation and is not a backend blocker.
+
+Supplemental 12:53 idea case:
+
+- Request id: `pline-v3-01KXSS4ZKDTPE9N9C9BDB1HAMF`
+- Worker invocation: PASS
+- signature/admin/idempotency: PASS
+- webhook HTTP `200`: PASS
+- n8n started: PASS
+- n8n completed: FAIL
+- Failure stage: `n8n_background_contract_failed`
+- Failure reason: `request_id_mismatch`
+- `save_idea_json` enqueue: absent
+- monitor claim: absent
+- Dropbox JSON for the water reminder: absent
+- final push: absent
+- Root cause classification: not the same as the original `1153` monitor-pending case; this fails before monitor can recover it.
+
+```text
+LIVE REGRESSION RECOVERY PARTIAL
+```
+
+Evidence: `TEST_EVIDENCE_LIVE_REGRESSION_RECOVERY.md`.
+
+Required next step:
+
+```text
+N8N/FIX repairs the live idea_create request_id_mismatch recurrence, then FIX opens next Gate: Computer Use minimal enablement, only allowing open_browser_page.
+```
+
+## N8N request_id Recurrence Repair Live Verification
+
+Date: 2026-07-18
+
+Live message:
+
+```text
+記一下：今天喝水提醒修復驗證 T2601-20260718131959
+```
+
+Result:
+
+- Marker: `T2601-20260718131959`
+- Request id: `pline-v3-01KXSTP8HJ3AF374NNY5W6KV86`
+- Worker invocation: PASS
+- signature/admin/idempotency: PASS
+- webhook HTTP `200`: PASS
+- visible ACK skipped: PASS
+- n8n started: PASS
+- n8n completed: FAIL
+- Failure stage: `n8n_background_contract_failed`
+- Failure reason: `request_id_mismatch`
+- `intent=idea_create`: absent
+- `tool_called=idea_create`: absent
+- `save_idea_json` enqueue: absent
+- monitor claim: absent
+- Dropbox JSON: absent
+- natural final reply: absent
+
+Minimal regression:
+
+- Worker tests: PASS
+- Monitor tests: PASS
+- Codex capability guard: covered and PASS
+- idea_create / Dropbox / duplicate / idempotency: covered by focused local tests
+
+```text
+N8N REQUEST_ID RECURRENCE REPAIR LIVE VERIFY FAILED
+```
+
+Evidence: `TEST_EVIDENCE_N8N_REQUEST_ID_RECURRENCE_REPAIR.md`.
+
+Required next step:
+
+```text
+N8N/FIX inspects live production execution for pline-v3-01KXSTP8HJ3AF374NNY5W6KV86 and repairs the production response contract before the Computer Use minimal Gate opens.
+```
+
+## N8N Respond Nonempty Live idea_create Verification
+
+Date: 2026-07-18
+
+Live message:
+
+```text
+記一下：[redacted idea content] T2701-20260718140429
+```
+
+Result:
+
+- Marker: `T2701-20260718140429`
+- Request id: `pline-v3-01KXSX7E4SRVM7CVZ3ST40GA6X`
+- Worker invocation: PASS
+- signature/admin/idempotency: PASS
+- webhook HTTP `200`: PASS
+- visible ACK skipped: PASS
+- n8n started: PASS
+- n8n completed: PASS
+- `request_id_mismatch`: absent
+- `intent=idea_create`: PASS
+- `tool_called=idea_create`: PASS
+- `saved_record=1`: PASS
+- `save_idea_json` enqueue: PASS
+- monitor claim: PASS
+- Dropbox JSON: `idea-20260718-140449-c49d33a39125.json`
+- Dropbox parse/schema/content/raw-ID checks: PASS
+- natural final durable evidence: PASS, `idea_json_final_push_completed`
+- LINE UI observation: accessibility changed but did not expose readable bot final text; durable final evidence is primary
+
+Minimal regression:
+
+- Worker tests: PASS
+- Monitor tests: PASS
+- Codex capability guard: covered and PASS
+- idea_create / Dropbox / duplicate / idempotency: covered by focused local tests
+
+```text
+N8N RESPOND NONEMPTY LIVE IDEA_CREATE PASS
+```
+
+Evidence: `TEST_EVIDENCE_N8N_RESPOND_NONEMPTY_LIVE_IDEA.md`.
+
+Required next step:
+
+```text
+FIX/N8N hardens n8n-side shared-secret enforcement for the production webhook, then TEST can continue toward the Computer Use minimal Gate.
+```
+
+## n8n Shared-Secret Hardening TEST
+
+Date: 2026-07-18
+
+Direct no-header barrier:
+
+- Production n8n webhook direct probe without `x-pline-v3-shared-secret`: executed
+- HTTP status: `200`
+- Body: empty/non-JSON
+- Normal `idea_create` contract: absent
+- `intent=idea_create`: absent
+- `tool_called=idea_create`: absent
+- `saved_record`: absent
+- Result: PASS
+
+Worker/header live idea_create:
+
+- Live message: `記一下：[redacted idea content] T2801-20260718141551`
+- Marker: `T2801-20260718141551`
+- Request id: `pline-v3-01KXSXWXAE94G82MCZEYQABCJ7`
+- Worker invocation: PASS
+- signature/admin/idempotency: PASS
+- webhook HTTP `200`: PASS
+- visible ACK skipped: PASS
+- n8n completed: PASS
+- `request_id_mismatch`: absent
+- `intent=idea_create`: PASS
+- `tool_called=idea_create`: PASS
+- `saved_record=1`: PASS
+- `save_idea_json` enqueue: PASS
+- monitor claim: PASS
+- Dropbox JSON: `idea-20260718-141633-a223c8a90177.json`
+- Dropbox parse/schema/content/raw-ID checks: PASS
+- natural final durable evidence: PASS, `idea_json_final_push_completed`
+
+Minimal regression:
+
+- Worker tests: PASS
+- Monitor tests: PASS
+- Codex capability guard: covered and PASS
+- idea_create / Dropbox / duplicate / idempotency: covered by focused local tests
+
+Residual risk:
+
+- n8n variable creation is disabled, so full shared-secret value comparison remains pending.
+- Current no-header barrier and Worker/header live path both pass.
+
+```text
+N8N SHARED-SECRET HARDENING TEST PASS
+```
+
+Evidence: `TEST_EVIDENCE_N8N_SHARED_SECRET_HARDENING.md`.
+
+Required next step:
+
+```text
+FIX opens next Gate: Computer Use minimal enablement, only allowing open_browser_page.
+```
+
+## N8N Live Production Path Follow-Up
+
+Date: 2026-07-18
+
+N8N follow-up checked only workflow `kcMcBQos5cxsnWU1`:
+
+- UI status: active/published.
+- Production webhook path: `/webhook/pline-v3-test-ai-agent`.
+- Current `Structured Output`: preserves canonical request id with `canonicalRequestId` / `worker_request_id`.
+- Current `Structured Output`: does not use `parsed.request_id`.
+- Current `Respond to Webhook`: JSON response body expression `{{ $json }}`.
+- Local draft harness for T2601 request id: PASS.
+- Workflow execution attribution: not confirmed, because the target workflow `Executions` tab showed `No executions found`.
+
+TEST/FIX must not mark live PASS from synthetic evidence alone. Before Computer Use minimal Gate, rerun a fresh T260x idea_create only after confirming live Worker `N8N_WEBHOOK_URL` targets `/webhook/pline-v3-test-ai-agent` and execution attribution is visible or otherwise auditable.
+
+## N8N Respond-to-Webhook Nonempty Production Repair
+
+Date: 2026-07-18
+
+N8N repaired workflow `kcMcBQos5cxsnWU1`:
+
+- Published version: `N8N normalize env and respond nonempty repair`.
+- `Normalize Input`: no direct `$env.N8N_SHARED_SECRET` access; guarded `$vars.N8N_SHARED_SECRET` lookup only.
+- `Respond to Webhook`: `First Incoming Item`.
+- Removed custom `Response Body` expression `{{ $json }}`.
+- Local draft JSON parses.
+- Local first-incoming-item harness: PASS.
+- Production no-secret probe: HTTP `200`, nonempty JSON, request id preserved, `intent=idea_create`, `tool_called=idea_create`, `status=completed`, `saved_record=1`.
+
+TEST must rerun a fresh live T260x idea_create through LINE/Worker. Required result:
+
+- no `request_id_mismatch`
+- `n8n_background_completed`
+- `save_idea_json` enqueue
+- monitor claim
+- Dropbox JSON creation
+- natural final reply
+
+Do not open Computer Use minimal Gate until this live idea_create regression passes.
+
+## N8N Shared-Secret Header Hardening
+
+Date: 2026-07-18
+
+N8N updated workflow `kcMcBQos5cxsnWU1`:
+
+- Published version: `N8N shared-secret header hardening`.
+- `Normalize Input`: rejects missing `x-pline-v3-shared-secret`.
+- `Normalize Input`: compares against `$vars.N8N_SHARED_SECRET` when available.
+- `Normalize Input`: still avoids `$env.N8N_SHARED_SECRET`.
+- `Respond to Webhook`: remains `First Incoming Item`.
+- Local guard tests: PASS.
+- Production direct no-header probe: did not return normal idea_create contract.
+- Production synthetic header-present probe: nonempty response, request id preserved, `intent=idea_create`, `tool_called=idea_create`, `saved_record=1`.
+- Full value equality is pending because n8n `N8N_SHARED_SECRET` variable is not present and variable creation is disabled in the current n8n UI/plan.
+
+TEST/FIX must rerun:
+
+- direct no-secret n8n probe rejected / no normal idea_create contract
+- live Worker LINE idea_create still PASS
+
+Computer Use minimal Gate remains paused until hardening verification passes.
+
+## N8N Request ID Recurrence Repair
+
+- Target workflow: `kcMcBQos5cxsnWU1`
+- Published n8n version: `N8N request_id recurrence repair`
+- Repair: `Normalize Input` now preserves Worker original request id as `worker_request_id`; `Structured Output` uses only the Normalize canonical id and ignores AI-produced `request_id`.
+- No-secret synthetic verification: an intentionally wrong AI `request_id` was ignored; output preserved `pline-v3-01KXSS4ZKDTPE9N9C9BDB1HAMF`, `intent=idea_create`, `tool_called=idea_create`, and `saved_record=1`.
+- Evidence: `N8N_EVIDENCE_REQUEST_ID_CONTRACT_RECURRENCE.md`.
+
+TEST must rerun a new safe idea_create marker before opening the Computer Use minimal-open-page Gate. Required evidence:
+
+- Worker received/signature/admin/idempotency/webhook HTTP `200`
+- n8n completed without `request_id_mismatch`
+- output request id exactly equals Worker request id
+- `intent=idea_create`
+- `tool_called=idea_create`
+- `saved_record=1` or equivalent idea contract evidence
+- `save_idea_json` enqueued
+- monitor claim
+- Dropbox JSON creation
+- natural final reply

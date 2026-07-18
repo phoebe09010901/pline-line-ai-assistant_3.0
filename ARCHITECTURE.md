@@ -128,6 +128,8 @@ Latest FIX status after Worker version `3f0f167c-71b1-4e89-aa1c-6f559507ed46`: t
 
 Latest schema FIX status: monitor lifecycle now preserves codex_task `created_at` across queued, claimed, completed, and failed states. Codex result records also include `created_at`, so TEST can trace completed/failed results back to the original task creation time.
 
+Latest AI reply trace status: codex_task classification currently passes through n8n AI Agent, but LINE-visible processing/completed/failed replies are Worker constants. To make codex_task replies genuinely AI-generated, n8n must expose a phase-aware reply contract for `processing`, `completed`, and `failed` with `reply_source=ai_generated|fallback`; then Worker/monitor can wire those replies without changing task execution semantics.
+
 ### idea_create JSON
 
 Allowed fields only:
@@ -157,3 +159,9 @@ Live `_03` Gate proved no visible fixed ACK for normal `idea_create`, retained w
 Live `_03` Codex Task Gate proved monitor claim, safe runtime smoke-file execution, result record creation, natural LINE final, and repeated callback exactly-once behavior. Gate result: FAILED because the completed task record did not retain required field `created_at`. Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
 
 After Worker version `ca9001fa-cf03-43f7-9911-33f6301dd668`, TEST rerun proved completed task and result records retain `created_at` while preserving monitor claim, safe runtime smoke-file execution, natural LINE final, and repeated callback exactly-once behavior. Gate result: PASS. Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+## FIX Status: Live Pending Monitor / Capability Boundary
+
+Worker version `493e4b8a-91da-479e-81e0-229fd1eb72c7` adds a Gate capability boundary before codex_task enqueue. The only enabled codex_task capability remains the fixed smoke task. Requests that require browser/Computer Use or another not-yet-enabled capability are marked `capability_not_yet_enabled`, receive a natural non-success final, and are not converted to `create_smoke_file`.
+
+Monitor adds bounded `drain` and targeted `claim-task` / `mark-capability-not-enabled` operations for `_03` live recovery. These operations still use fixed task actions and task-scoped finalizer callbacks; they do not introduce arbitrary command, arbitrary path, or browser automation capability.

@@ -15,6 +15,8 @@ import {
   claimOnce,
   createSyntheticIdeaTask,
   createSyntheticTask,
+  drain,
+  markCodexTaskCapabilityNotEnabled,
   health,
   normalizeTask,
   notifyCodexFinalizer,
@@ -38,6 +40,7 @@ const fakeCodexDir = join(tmpdir(), `pline-v3-monitor-${Date.now()}`);
 const fakeCodex = join(fakeCodexDir, "codex");
 await mkdir(fakeCodexDir, { recursive: true });
 await import("node:fs/promises").then(({ writeFile, chmod }) => writeFile(fakeCodex, "#!/bin/sh\nexit 0\n").then(() => chmod(fakeCodex, 0o755)));
+const originalFetch = globalThis.fetch;
 
 const ready = await health({ CODEX_BIN: fakeCodex, PATH: "" });
 assert.equal(ready.status, "ready");
@@ -171,6 +174,66 @@ assert.deepEqual(failedResult, {
   error: "unsupported_target_path",
 });
 
+const drainKv = createMemoryKv();
+await createSyntheticTask({
+  task_id: "pline-v3-monitor-drain-task-1",
+  request_id: "pline-v3-monitor-drain-request-1",
+  marker: "T1701D-20260718010101",
+  created_at: "2026-07-18T11:33:00.000Z",
+}, { kv: drainKv });
+await createSyntheticTask({
+  task_id: "pline-v3-monitor-drain-task-2",
+  request_id: "pline-v3-monitor-drain-request-2",
+  marker: "T1701E-20260718010101",
+  created_at: "2026-07-18T11:34:00.000Z",
+}, { kv: drainKv });
+const drainResult = await drain({ kv: drainKv, env: { CODEX_BIN: fakeCodex, PATH: "", CODEX_FINALIZE_DISABLED: "1" }, iterations: 5, intervalMs: 0 });
+assert.equal(drainResult.ok, true);
+assert.equal(drainResult.drained, 2);
+assert.equal(drainResult.reason, "drain_complete");
+assert.equal(JSON.parse(await drainKv.get(`${TASK_PREFIX}:task:pline-v3-monitor-drain-task-1`)).status, "completed");
+assert.equal(JSON.parse(await drainKv.get(`${TASK_PREFIX}:task:pline-v3-monitor-drain-task-2`)).status, "completed");
+
+const capabilityKv = createMemoryKv();
+await createSyntheticTask({
+  task_id: "pline-v3-monitor-capability-task",
+  request_id: "pline-v3-monitor-capability-request",
+  marker: "T1701C-20260718010101",
+  created_at: "2026-07-18T11:35:00.000Z",
+  finalize_token: "test-finalize-token",
+  line_user_ref: "v1.encrypted.ref",
+}, { kv: capabilityKv });
+const capabilityFinalizeCalls = [];
+globalThis.fetch = async (url, options) => {
+  capabilityFinalizeCalls.push({ url, options });
+  return new Response(JSON.stringify({ status: "failure_notice_completed", pushed: true }), { status: 200 });
+};
+const capabilityResult = await markCodexTaskCapabilityNotEnabled("pline-v3-monitor-capability-task", {
+  kv: capabilityKv,
+  env: { WORKER_BASE_URL: "https://worker.example.test" },
+});
+assert.equal(capabilityResult.ok, true);
+assert.equal(capabilityResult.status, "failed");
+assert.equal(capabilityResult.reason, "capability_not_yet_enabled");
+assert.equal(capabilityFinalizeCalls.length, 1);
+assert.deepEqual(JSON.parse(capabilityFinalizeCalls[0].options.body), {
+  task_id: "pline-v3-monitor-capability-task",
+  request_id: "pline-v3-monitor-capability-request",
+  action: FIXED_ACTION,
+  status: "failed",
+  reason: "capability_not_yet_enabled",
+  finalize_token: "test-finalize-token",
+});
+globalThis.fetch = originalFetch;
+const capabilityTask = JSON.parse(await capabilityKv.get(`${TASK_PREFIX}:task:pline-v3-monitor-capability-task`));
+assert.equal(capabilityTask.status, "failed");
+assert.equal(capabilityTask.created_at, "2026-07-18T11:35:00.000Z");
+const capabilityResultRecord = JSON.parse(await capabilityKv.get(`${TASK_PREFIX}:result:pline-v3-monitor-capability-task`));
+assert.equal(capabilityResultRecord.status, "failed");
+assert.equal(capabilityResultRecord.error, "capability_not_yet_enabled");
+const capabilityEvidenceKeys = await capabilityKv.list("evidence:v1:request:pline-v3-monitor-capability-request:stage:");
+assert.equal(capabilityEvidenceKeys.some((key) => key.name.endsWith(":codex_task_capability_not_enabled")), true);
+
 const uniqueSuffix = String(Date.now()).slice(-10);
 const idea = {
   schema_version: "1.0",
@@ -239,6 +302,27 @@ assert.deepEqual(ideaEvidenceKeys.map((key) => key.name).sort(), [
   `evidence:v1:request:pline-v3-idea-unit-${uniqueSuffix}:stage:monitor_claimed`,
 ]);
 
+const targetedIdeaKv = createMemoryKv();
+await createSyntheticIdeaTask({
+  task_id: `idea-targeted-${uniqueSuffix}`,
+  request_id: `pline-v3-targeted-idea-${uniqueSuffix}`,
+  marker: "T1702T-20260718010102",
+  idea: {
+    ...idea,
+    idea_id: `idea-targeted-${uniqueSuffix}`,
+    line_event_key: `${"c".repeat(54)}${uniqueSuffix}`,
+  },
+}, { kv: targetedIdeaKv });
+const targetedIdeaClaim = await claimOnce({
+  kv: targetedIdeaKv,
+  env: { CODEX_BIN: fakeCodex, PATH: "", IDEA_FINALIZE_DISABLED: "1" },
+  taskId: `idea-targeted-${uniqueSuffix}`,
+  action: SAVE_IDEA_ACTION,
+});
+assert.equal(targetedIdeaClaim.ok, true);
+assert.equal(targetedIdeaClaim.claimed, true);
+assert.equal(targetedIdeaClaim.task_id, `idea-targeted-${uniqueSuffix}`);
+
 const preserveRefKv = createMemoryKv();
 await preserveRefKv.put(`${IDEA_TASK_PREFIX}:task:idea-preserve-ref-${uniqueSuffix}`, JSON.stringify({
   schema: "pline-v3-test-idea-task/v1",
@@ -249,7 +333,7 @@ await preserveRefKv.put(`${IDEA_TASK_PREFIX}:task:idea-preserve-ref-${uniqueSuff
   marker: "T1703-20260718010103",
   action: SAVE_IDEA_ACTION,
   target_dir: DROPBOX_IDEA_DIR,
-  finalize_token: "fin-preserve-ref-token",
+  finalize_token: "test-finalize-token",
   line_user_ref: "v1.encrypted.ref",
   idea,
   created_at: new Date().toISOString(),
@@ -257,11 +341,10 @@ await preserveRefKv.put(`${IDEA_TASK_PREFIX}:task:idea-preserve-ref-${uniqueSuff
 const preserveRefClaim = await claimOnce({ kv: preserveRefKv, env: { CODEX_BIN: fakeCodex, PATH: "", IDEA_FINALIZE_DISABLED: "1" } });
 assert.equal(preserveRefClaim.ok, true);
 const preserveRefTask = JSON.parse(await preserveRefKv.get(`${IDEA_TASK_PREFIX}:task:idea-preserve-ref-${uniqueSuffix}`));
-assert.equal(preserveRefTask.finalize_token, "fin-preserve-ref-token");
+assert.equal(preserveRefTask.finalize_token, "test-finalize-token");
 assert.equal(preserveRefTask.line_user_ref, "v1.encrypted.ref");
 
 const finalizeCalls = [];
-const originalFetch = globalThis.fetch;
 globalThis.fetch = async (url, options) => {
   finalizeCalls.push({ url, options });
   return new Response(JSON.stringify({ status: "completed", pushed: true }), { status: 200 });
@@ -270,7 +353,7 @@ const notifyResult = await notifyIdeaFinalizer({
   task_id: "idea-finalizer-unit",
   request_id: "pline-v3-finalizer-unit",
   action: SAVE_IDEA_ACTION,
-  finalize_token: "fin-unit-token",
+  finalize_token: "test-finalize-token",
 }, "completed", {
   WORKER_BASE_URL: "https://worker.example.test",
 });
@@ -283,7 +366,7 @@ assert.deepEqual(JSON.parse(finalizeCalls[0].options.body), {
   request_id: "pline-v3-finalizer-unit",
   action: SAVE_IDEA_ACTION,
   status: "completed",
-  finalize_token: "fin-unit-token",
+  finalize_token: "test-finalize-token",
 });
 globalThis.fetch = originalFetch;
 
@@ -296,7 +379,7 @@ const codexNotifyResult = await notifyCodexFinalizer({
   task_id: "codex-finalizer-unit",
   request_id: "pline-v3-codex-finalizer-unit",
   action: FIXED_ACTION,
-  finalize_token: "fin-codex-unit-token",
+  finalize_token: "test-finalize-token",
 }, "completed", {
   WORKER_BASE_URL: "https://worker.example.test",
 });
@@ -310,7 +393,7 @@ assert.deepEqual(JSON.parse(codexFinalizeCalls[0].options.body), {
   action: FIXED_ACTION,
   status: "completed",
   reason: "",
-  finalize_token: "fin-codex-unit-token",
+  finalize_token: "test-finalize-token",
 });
 globalThis.fetch = originalFetch;
 

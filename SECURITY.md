@@ -121,6 +121,20 @@ Security requirements:
 - Failed execution must not send completed final.
 - Repeated callback must not send another final.
 
+## Codex Task AI Reply Guard
+
+Codex task processing/completed/failed replies must not be replaced by local template rotation or random text and then labeled as AI.
+
+Required future guardrails:
+
+- N8N AI reply output must include `reply_source=ai_generated|fallback`.
+- Worker evidence must record reply source without storing raw LINE User ID, secrets, full webhook payload, or internal tokens.
+- User-visible AI reply text must not include task id, local absolute path, branch, commit hash, n8n, Worker, JSON, execution, stack trace, internal node names, secrets, or tokens.
+- processing replies must not claim completion.
+- completed replies must be based on actual result.
+- failed replies must not pretend success.
+- fallback is allowed only when AI output is missing, invalid, unsafe, or contradicts actual status.
+
 ## CODEX_BIN Requirement
 
 Future monitor implementation must:
@@ -144,3 +158,17 @@ Live `_03` evidence confirmed normal `idea_create` skips visible fixed ACK, reta
 Live `_03` Codex Task Gate kept execution inside `/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke`, wrote only the fixed smoke file content, and did not expose secrets, raw User ID, task ids, stack traces, or local paths in LINE-visible content. Effective secret scan hit_count was `0`. Gate failed because completed task records must retain `created_at`. Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
 
 After Worker version `ca9001fa-cf03-43f7-9911-33f6301dd668`, TEST rerun confirmed the same safe execution boundary and LINE-visible content guard while completed task/result records retained `created_at`. Effective secret scan hit_count remained `0`. Gate result: PASS. Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+## FIX Guard: Capability Not Yet Enabled
+
+The current Codex Task Gate enables only the fixed smoke action. Browser/Computer Use requests are not permanently refused, but they are not enabled in this Gate.
+
+Security behavior:
+
+- Do not convert not-yet-enabled capabilities into smoke success.
+- Do not leave not-yet-enabled capabilities stuck in processing.
+- Mark the task/evidence as `capability_not_yet_enabled`.
+- Send a natural non-success final without exposing internal details.
+- Do not execute arbitrary Computer Use, browser actions, shell commands, paths, or filenames.
+
+Evidence: `FIX_EVIDENCE_LIVE_REGRESSION_PENDING_CAPABILITY.md`.
