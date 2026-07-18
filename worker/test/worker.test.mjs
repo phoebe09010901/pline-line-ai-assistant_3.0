@@ -473,6 +473,45 @@ assert.equal(contractFailureNoticeStage.stage, "n8n_background_contract_failure_
 assert.equal(contractFailureNoticeStage.status, "failed_notice_sent");
 globalThis.fetch = originalFetch;
 
+const n8nTimeoutCalls = [];
+const n8nTimeoutKv = createMemoryKv();
+globalThis.fetch = async (url, options = {}) => {
+  n8nTimeoutCalls.push(url);
+  if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  return new Promise((resolve, reject) => {
+    options.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+  });
+};
+const n8nTimeoutResult = await processN8nInBackground({
+  request_id: "pline-v3-N8N-TIMEOUT",
+  line_event_id: "N8N-TIMEOUT",
+  reply_token: "reply-token",
+  user_id: "U_TEST",
+  message_text: "請 Codex 執行一件會卡住的事",
+  received_at: "2026-07-18T00:00:00.000Z",
+}, {
+  N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
+  N8N_SHARED_SECRET: "unit-test-secret",
+  N8N_WEBHOOK_TIMEOUT_MS: "5",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  RUNTIME_KV: n8nTimeoutKv,
+});
+assert.equal(n8nTimeoutResult.ok, false);
+assert.equal(n8nTimeoutResult.reason, "n8n_fetch_exception");
+assert.deepEqual(n8nTimeoutCalls, [
+  "https://n8n.example.test/webhook",
+  "https://api.line.me/v2/bot/message/push",
+]);
+const n8nTimeoutFailedStage = JSON.parse(await n8nTimeoutKv.get("evidence:v1:request:pline-v3-N8N-TIMEOUT:stage:n8n_background_failed"));
+const n8nTimeoutNoticeStage = JSON.parse(await n8nTimeoutKv.get("evidence:v1:request:pline-v3-N8N-TIMEOUT:stage:n8n_background_failure_notice_completed"));
+assert.equal(n8nTimeoutFailedStage.stage, "n8n_background_failed");
+assert.equal(n8nTimeoutFailedStage.reason, "n8n_fetch_exception");
+assert.equal(n8nTimeoutNoticeStage.stage, "n8n_background_failure_notice_completed");
+assert.equal(n8nTimeoutNoticeStage.status, "failed_notice_sent");
+globalThis.fetch = originalFetch;
+
 const codexBackgroundCalls = [];
 const codexTaskKv = createMemoryKv();
 globalThis.fetch = async (url) => {

@@ -42,6 +42,7 @@ const EVIDENCE_PREFIX = "evidence:v1";
 const EVIDENCE_TTL_SECONDS = 172800;
 const WEBHOOK_ACCEPT_EVIDENCE_CHECKPOINT_TIMEOUT_MS = 1500;
 const LINE_MARK_AS_READ_TIMEOUT_MS = 1500;
+const N8N_WEBHOOK_TIMEOUT_MS = 15000;
 const GATE_MARKER_PATTERN = /\bT\d{4}[A-Z]?-\d{14}\b/;
 const INTERNAL_REPLY_PATTERN = /(?:_03|TEST|n8n|worker|monitor|task|json|execution|webhook|cloudflare|測試|任務|工作流|執行)/i;
 
@@ -414,6 +415,7 @@ export async function processN8nInBackground(normalized, env) {
       reason: "n8n_fetch_exception",
       error_name: error?.name || "Error",
     });
+    await pushN8nFailureNotice(env, normalized, "n8n_background_failure_notice", "n8n_fetch_exception");
     return {
       ok: false,
       reason: "n8n_fetch_exception",
@@ -431,11 +433,7 @@ export async function processN8nInBackground(normalized, env) {
       reason: n8nResult.reason,
       status: n8nResult.status,
     });
-    const failureNotice = await pushToLine(normalized.user_id, N8N_CONTRACT_FAILED_REPLY_TEXT, env);
-    await persistEvidenceStage(env, normalized, failureNotice.ok ? "n8n_background_failure_notice_completed" : "n8n_background_failure_notice_failed", {
-      status: failureNotice.ok ? "failed_notice_sent" : "failed",
-      reason: failureNotice.ok ? n8nResult.reason : failureNotice.reason,
-    });
+    await pushN8nFailureNotice(env, normalized, "n8n_background_failure_notice", n8nResult.reason);
     return {
       ok: false,
       reason: n8nResult.reason,
@@ -468,11 +466,7 @@ export async function processN8nInBackground(normalized, env) {
       n8n_route_type: n8nTarget.route_type,
       request_id_source: contractResult.request_id_source || undefined,
     });
-    const failureNotice = await pushToLine(normalized.user_id, N8N_CONTRACT_FAILED_REPLY_TEXT, env);
-    await persistEvidenceStage(env, normalized, failureNotice.ok ? "n8n_background_contract_failure_notice_completed" : "n8n_background_contract_failure_notice_failed", {
-      status: failureNotice.ok ? "failed_notice_sent" : "failed",
-      reason: failureNotice.ok ? contractResult.reason : failureNotice.reason,
-    });
+    await pushN8nFailureNotice(env, normalized, "n8n_background_contract_failure_notice", contractResult.reason);
     return {
       ok: false,
       reason: contractResult.reason,
@@ -756,14 +750,23 @@ export async function callN8nWebhook(payload, env) {
     return { ok: false, reason: "missing_N8N_SHARED_SECRET", status: 503 };
   }
 
-  const response = await fetch(env.N8N_WEBHOOK_URL, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      [N8N_SHARED_SECRET_HEADER]: env.N8N_SHARED_SECRET,
-    },
-    body: JSON.stringify(payload),
-  });
+  const timeoutMs = Number(env.N8N_WEBHOOK_TIMEOUT_MS || N8N_WEBHOOK_TIMEOUT_MS);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(env.N8N_WEBHOOK_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [N8N_SHARED_SECRET_HEADER]: env.N8N_SHARED_SECRET,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const responseText = await response.text();
   let body = {};
@@ -784,6 +787,15 @@ export async function callN8nWebhook(payload, env) {
   }
 
   return { ok: true, body: normalizeN8nResponseBody(body) };
+}
+
+async function pushN8nFailureNotice(env = {}, normalized = {}, stagePrefix = "n8n_background_failure_notice", reason = "") {
+  const failureNotice = await pushToLine(normalized.user_id, N8N_CONTRACT_FAILED_REPLY_TEXT, env);
+  await persistEvidenceStage(env, normalized, failureNotice.ok ? `${stagePrefix}_completed` : `${stagePrefix}_failed`, {
+    status: failureNotice.ok ? "failed_notice_sent" : "failed",
+    reason: failureNotice.ok ? reason : failureNotice.reason,
+  });
+  return failureNotice;
 }
 
 export function normalizeN8nResponseBody(body) {

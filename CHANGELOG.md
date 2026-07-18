@@ -389,3 +389,5 @@
 - Root cause of the user-visible silence: Worker recorded `n8n_background_contract_failed` but did not push a final failure notice to LINE.
 - Added a natural failure final for n8n background failures and n8n contract failures, so the user no longer sees silent no-progress behavior.
 - Deployed Worker version `ae59f6ff-59a4-407e-8b0d-6b0b617ce991`.
+- Extended the protection with a bounded n8n webhook timeout and catch-path failure notice; n8n timeout/exception now also produces a natural LINE failure final.
+- Deployed Worker version `610d11c5-a64c-4d6a-a640-f3cb8a5e5836`.

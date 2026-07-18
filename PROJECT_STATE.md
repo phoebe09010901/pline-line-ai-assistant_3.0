@@ -999,3 +999,5 @@ Status: `DEPLOYED`.
 - Root cause of no visible progress: Worker did not send a LINE final on n8n contract failure.
 - Fix: Worker now pushes a natural failure final for `n8n_background_failed` and `n8n_background_contract_failed`, with evidence stages `n8n_background_failure_notice_completed` or `n8n_background_contract_failure_notice_completed`.
 - Deployed Worker version `ae59f6ff-59a4-407e-8b0d-6b0b617ce991`.
+- Follow-up hardening: `callN8nWebhook` now has a bounded timeout, and the fetch exception/timeout catch path also pushes the same natural failure final.
+- Deployed Worker version `610d11c5-a64c-4d6a-a640-f3cb8a5e5836`.
