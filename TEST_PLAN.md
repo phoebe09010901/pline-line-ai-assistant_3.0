@@ -2459,6 +2459,28 @@ Result: `LINE READ CHAT OFF AUTO-READ T3002 PASS`
 
 Next: RELEASE can perform git status, secret scan, commit, and push.
 
+## Codex Delegate Final Sanitizer Regression
+
+Required validation:
+
+- Worker unit: unsafe Codex raw summary containing internal terms/path-like text must not be sent directly to LINE.
+- Worker unit: completed/succeeded/success result record must allow finalization even if task record is stale/non-terminal.
+- Regression: `codex_delegate` create-file path still sends a completion final only after real completion.
+- Regression: `codex_delegate` read-file path sends completion final after a completed result.
+- Regression: failed and duplicate paths still do not fake completion or push twice.
+- Regression: idea_create/Dropbox paths remain unchanged.
+
+FIX validation:
+
+- `npm --prefix worker test`: PASS
+- `npm --prefix monitor test`: PASS
+- `node --check worker/src/index.js`: PASS
+- `node --check monitor/src/monitor.js`: PASS
+- `node --check monitor/src/codex_gateway.js`: PASS
+- Worker version deployed: `b9251772-c031-491d-a300-9d7268022386`
+
+Next TEST handoff: rerun Codex Gateway live B/C from `TEST_EVIDENCE_CODEX_GATEWAY_LIVE.md`.
+
 ## Codex Default Delegation Gate
 
 Current result: `BLOCKED_FOR_DEFAULT_DELEGATION`.

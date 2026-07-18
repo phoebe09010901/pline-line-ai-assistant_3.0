@@ -1022,6 +1022,120 @@ assert.equal(summarizeEvidenceStages(codexFinalizerEvidence.stages).final_push, 
 assert.equal(JSON.stringify(codexFinalizerEvidence).includes("U_RAW_SHOULD_NOT_STORE"), false);
 globalThis.fetch = originalFetch;
 
+const codexSafeFinalKv = createMemoryKv();
+await enqueueCodexTask({
+  RUNTIME_KV: codexSafeFinalKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-CODEX-SAFE-FINAL",
+  gate_marker: "T3301-20260718090103",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
+  message_text: "請 Codex 建立檔案",
+}, {
+  task_id: "codex-safe-final-unit",
+  action: "codex_delegate",
+});
+const codexSafeFinalTask = JSON.parse(await codexSafeFinalKv.get("codex_task:v1:task:codex-safe-final-unit"));
+await codexSafeFinalKv.put("codex_task:v1:task:codex-safe-final-unit", JSON.stringify({
+  ...codexSafeFinalTask,
+  status: "completed",
+}));
+await codexSafeFinalKv.put("codex_task:v1:result:codex-safe-final-unit", JSON.stringify({
+  task_id: "codex-safe-final-unit",
+  status: "completed",
+  summary: "已完成。 在 `runtime/codex-gateway/file.txt` 建立檔案，內容已核對，完全符合： `真正 Codex 執行成功 T3301-20260718090103`。未新增 `TEST_EVIDENCE`，未輸出 _02、secret、token、raw User ID。",
+  tests: "PASS",
+  changed_files: [],
+  commit: null,
+  error: null,
+}));
+const codexSafeFinalCalls = [];
+globalThis.fetch = async (url, options) => {
+  codexSafeFinalCalls.push({ url, options });
+  if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  return new Response("{}", { status: 404 });
+};
+const codexSafeFinalResponse = await handleCodexFinalize(new Request("https://worker.example.test/test/codex-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    task_id: codexSafeFinalTask.task_id,
+    request_id: codexSafeFinalTask.request_id,
+    action: "codex_delegate",
+    status: "completed",
+    finalize_token: codexSafeFinalTask.finalize_token,
+  }),
+}), {
+  RUNTIME_KV: codexSafeFinalKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(codexSafeFinalResponse.status, 200);
+const codexSafeFinalText = JSON.parse(codexSafeFinalCalls[0].options.body).messages[0].text;
+assert.equal(codexSafeFinalText.includes("真正 Codex 執行成功 T3301-20260718090103"), true);
+assert.equal(/(?:_03|_02|\bTEST\b|n8n|Worker|JSON|execution|queued|task_id|runtime\/|\/Users\/|TEST_EVIDENCE|secret|token|raw User ID|webhook|cloudflare)/i.test(codexSafeFinalText), false);
+globalThis.fetch = originalFetch;
+
+const codexReadFinalKv = createMemoryKv();
+await enqueueCodexTask({
+  RUNTIME_KV: codexReadFinalKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-CODEX-READ-FINAL",
+  gate_marker: "T3302-20260718090104",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
+  message_text: "請 Codex 讀取剛才建立的檔案",
+}, {
+  task_id: "codex-read-final-unit",
+  action: "codex_delegate",
+});
+const codexReadFinalTask = JSON.parse(await codexReadFinalKv.get("codex_task:v1:task:codex-read-final-unit"));
+await codexReadFinalKv.put("codex_task:v1:task:codex-read-final-unit", JSON.stringify({
+  ...codexReadFinalTask,
+  status: "claimed",
+}));
+await codexReadFinalKv.put("codex_task:v1:result:codex-read-final-unit", JSON.stringify({
+  task_id: "codex-read-final-unit",
+  status: "completed",
+  summary: "已讀取檔案。內容是：```text\n真正 Codex 執行成功\n```",
+  tests: "PASS",
+  changed_files: [],
+  commit: null,
+  error: null,
+}));
+const codexReadFinalCalls = [];
+globalThis.fetch = async (url, options) => {
+  codexReadFinalCalls.push({ url, options });
+  if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  return new Response("{}", { status: 404 });
+};
+const codexReadFinalResponse = await handleCodexFinalize(new Request("https://worker.example.test/test/codex-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    task_id: codexReadFinalTask.task_id,
+    request_id: codexReadFinalTask.request_id,
+    action: "codex_delegate",
+    status: "completed",
+    finalize_token: codexReadFinalTask.finalize_token,
+  }),
+}), {
+  RUNTIME_KV: codexReadFinalKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(codexReadFinalResponse.status, 200);
+assert.equal((await codexReadFinalResponse.json()).status, "completed");
+assert.equal(JSON.parse(codexReadFinalCalls[0].options.body).messages[0].text.includes("真正 Codex 執行成功"), true);
+const reconciledReadTask = JSON.parse(await codexReadFinalKv.get("codex_task:v1:task:codex-read-final-unit"));
+assert.equal(reconciledReadTask.status, "completed");
+assert.equal(reconciledReadTask.reconciled_from_result, true);
+globalThis.fetch = originalFetch;
+
 const approvalBridgeCalls = [];
 const approvalBridgeKv = createMemoryKv();
 await enqueueCodexTask({

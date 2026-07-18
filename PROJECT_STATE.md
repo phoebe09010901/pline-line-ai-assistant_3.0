@@ -1018,3 +1018,17 @@ Status: `PARTIAL_BLOCKED_ON_COMPUTER_USE_APPROVAL`.
 - Evidence: `FIX_EVIDENCE_LINE_CODEX_GATEWAY_CONNECTION.md`.
 
 Next: TEST can rerun a fresh LINE `codex_delegate` file task. Computer Use Calculator requires the user/host to approve Calculator for Codex Computer Use before that part can pass.
+
+## Codex Delegate Final Sanitizer - 2026-07-18
+
+Status: `DEPLOYED`.
+
+- Investigated TEST live Codex Gateway B/C failures from `TEST_EVIDENCE_CODEX_GATEWAY_LIVE.md`.
+- Create-file task executed successfully, but Worker finalizer forwarded raw Codex result summary text that contained internal terms and paths.
+- Read-file task executed successfully, but Worker finalizer rejected completion when the task record was stale/non-terminal even though the result record was completed.
+- Worker finalizer now reconciles completed/succeeded/success result records back onto the same task id before pushing final.
+- Worker final text now extracts safe content when possible and falls back to `這件事已經處理完成了 ✨` when raw Codex summary contains internal terms.
+- Deployed Worker version `b9251772-c031-491d-a300-9d7268022386`.
+- Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_FINAL_SANITIZER.md`.
+
+Next: TEST can rerun Codex Gateway B/C live checks.

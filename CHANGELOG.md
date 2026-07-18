@@ -402,3 +402,12 @@
 - Verified real Codex `exec --json` create/read file tasks with Codex thread ids and runtime result files.
 - Computer Use Calculator reached Codex but is blocked by host approval for Calculator.
 - Evidence: `FIX_EVIDENCE_LINE_CODEX_GATEWAY_CONNECTION.md`.
+
+## 2026-07-18 - Codex Delegate Final Sanitizer
+
+- Fixed `codex_delegate` completion final text so raw Codex summaries containing internal terms, local paths, evidence filenames, or secret-related vocabulary are not sent directly to LINE.
+- Added safe content extraction for read/create-file results and fallback completed text when summaries are unsafe.
+- Fixed finalizer completion judgment so a completed/succeeded/success result record can reconcile a stale task record and send the final for the same task id.
+- Added focused Worker tests for unsafe raw summary sanitization and read-file completed-result finalization.
+- Deployed Worker version `b9251772-c031-491d-a300-9d7268022386`.
+- Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_FINAL_SANITIZER.md`.

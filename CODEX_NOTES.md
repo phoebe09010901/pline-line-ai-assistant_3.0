@@ -808,6 +808,15 @@ Date: 2026-07-18
 - Computer Use Calculator reached Codex but requires host approval for Calculator.
 - Evidence: `FIX_EVIDENCE_LINE_CODEX_GATEWAY_CONNECTION.md`.
 
+## Codex Delegate Final Sanitizer
+
+- Create-file live failure source: Worker used `result.summary` from the Codex Gateway result record as the LINE completion text via `naturalCodexFinalText`.
+- Prior safety check did not reject internal terms or paths in that summary.
+- Read-file live failure source: Worker finalizer required `codex_task:v1:task:<task_id>.status === completed`; a completed result record alone was not enough.
+- Repair: Worker now checks `codex_task:v1:result:<task_id>` for completed/succeeded/success and reconciles the task record before exactly-once final push.
+- Repair: Codex final text now extracts safe content snippets or uses the completed fallback when the raw summary is unsafe.
+- Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_FINAL_SANITIZER.md`.
+
 ## Codex Default Delegation Implementation
 
 - Implemented `monitor/src/codex_gateway.js`.

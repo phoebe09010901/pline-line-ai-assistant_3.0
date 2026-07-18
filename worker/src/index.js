@@ -1416,12 +1416,25 @@ export async function handleCodexFinalize(request, env = {}) {
   if (callbackStatus !== "completed") {
     return jsonResponse({ status: "rejected", reason: "unsupported_finalize_status" }, 400);
   }
-  if (task.status !== "completed") {
+  const resultRaw = await env.RUNTIME_KV.get(codexResultKey(taskId));
+  const result = parseJsonSafely(resultRaw) || {};
+  const resultCompleted = isCompletedCodexResultStatus(result.status);
+  if (task.status !== "completed" && !resultCompleted) {
     return jsonResponse({ status: "rejected", reason: "codex_task_not_completed" }, 409);
   }
 
-  const result = await pushCodexFinalOnce(env, task);
-  return jsonResponse(result, result.ok ? 200 : 500);
+  const finalTask = task.status === "completed" ? task : {
+    ...task,
+    status: "completed",
+    completed_at: task.completed_at || new Date().toISOString(),
+    reconciled_from_result: true,
+  };
+  if (finalTask !== task) {
+    await env.RUNTIME_KV.put(codexTaskKey(taskId), JSON.stringify(finalTask), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  }
+
+  const pushResult = await pushCodexFinalOnce(env, finalTask);
+  return jsonResponse(pushResult, pushResult.ok ? 200 : 500);
 }
 
 export async function persistWebhookAcceptedEvidenceCheckpoint(env = {}, normalized = {}, details = {}) {
@@ -2359,10 +2372,57 @@ function naturalIdeaReplyText(replyText = "") {
 
 function naturalCodexFinalText(replyText = "") {
   const text = String(replyText || "").replace(/\s+/g, " ").trim();
-  if (!text || text.length > 300) {
+  if (!text) {
     return CODEX_COMPLETED_REPLY_TEXT;
   }
-  return text;
+  const content = extractSafeCodexResultContent(text);
+  if (content) {
+    return `這件事已經處理完成了 ✨\n內容是：「${content}」`;
+  }
+  if (text.length > 160 || hasCodexFinalForbiddenText(text)) {
+    return CODEX_COMPLETED_REPLY_TEXT;
+  }
+  return text.split(/(?<=[。！？!?])/).map((part) => part.trim()).filter(Boolean).slice(0, 2).join("");
+}
+
+function isCompletedCodexResultStatus(status = "") {
+  return ["completed", "succeeded", "success"].includes(String(status || "").toLowerCase());
+}
+
+function extractSafeCodexResultContent(text = "") {
+  const candidates = [];
+  const codeBlockPattern = /```(?:text)?\s*([\s\S]*?)```/gi;
+  for (const match of text.matchAll(codeBlockPattern)) {
+    candidates.push(match[1]);
+  }
+  const backtickPattern = /`([^`]{1,160})`/g;
+  for (const match of text.matchAll(backtickPattern)) {
+    candidates.push(match[1]);
+  }
+  const contentPattern = /(?:內容(?:是|為|：|:)|完全符合[:：]?)\s*([^。；;\n]{1,160})/g;
+  for (const match of text.matchAll(contentPattern)) {
+    candidates.push(match[1]);
+  }
+  for (const candidate of candidates) {
+    const cleaned = sanitizeCodexVisibleContent(candidate);
+    if (cleaned) return cleaned;
+  }
+  return "";
+}
+
+function sanitizeCodexVisibleContent(value = "") {
+  const cleaned = String(value || "")
+    .replace(/^[`"'「『]+|[`"'」』]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned || cleaned.length > 80) return "";
+  if (hasCodexFinalForbiddenText(cleaned)) return "";
+  if (/[\\/]|\.md\b|\.json\b|\.txt\b|TEST_EVIDENCE/i.test(cleaned)) return "";
+  return cleaned;
+}
+
+function hasCodexFinalForbiddenText(text = "") {
+  return /(?:_03|_02|\bTEST\b|n8n|worker|monitor|\bJSON\b|execution|queued|task_id|stack trace|runtime\/|\/Users\/|TEST_EVIDENCE|secret|token|raw User ID|webhook|cloudflare|舊專案|本機絕對路徑|工作流|菲比 LINE 智能助理)/i.test(String(text || ""));
 }
 
 function extractApprovalCode(messageText = "") {
