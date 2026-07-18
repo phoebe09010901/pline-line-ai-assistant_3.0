@@ -33,6 +33,7 @@ const CODEX_FAILED_REPLY_TEXT = "這次沒有順利完成，我先停在安全�
 const CODEX_CAPABILITY_NOT_ENABLED_REPLY_TEXT = "這類操作目前還沒開放，我先不假裝已經執行。等下一階段授權後再處理。";
 const CODEX_APPROVAL_REPLY_PREFIX = "這件事需要妳確認後我才會繼續。請回覆：確認";
 const CODEX_APPROVAL_ACCEPTED_REPLY_TEXT = "收到確認，我會繼續處理。";
+const N8N_CONTRACT_FAILED_REPLY_TEXT = "這次沒有順利接上處理流程，我先不假裝已經開始做。請稍後再試一次 🙏";
 const IDEA_SAVED_FALLBACK_REPLY_TEXT = "已經幫妳記下來了 💡";
 const IDEA_SAVE_FAILED_REPLY_TEXT = "這次沒有成功保存，我先不假裝記好了，請稍後再試一次 🙏";
 const IDEA_FINALIZE_PATH = "/test/idea-finalize";
@@ -430,6 +431,11 @@ export async function processN8nInBackground(normalized, env) {
       reason: n8nResult.reason,
       status: n8nResult.status,
     });
+    const failureNotice = await pushToLine(normalized.user_id, N8N_CONTRACT_FAILED_REPLY_TEXT, env);
+    await persistEvidenceStage(env, normalized, failureNotice.ok ? "n8n_background_failure_notice_completed" : "n8n_background_failure_notice_failed", {
+      status: failureNotice.ok ? "failed_notice_sent" : "failed",
+      reason: failureNotice.ok ? n8nResult.reason : failureNotice.reason,
+    });
     return {
       ok: false,
       reason: n8nResult.reason,
@@ -461,6 +467,11 @@ export async function processN8nInBackground(normalized, env) {
       n8n_path: n8nTarget.path,
       n8n_route_type: n8nTarget.route_type,
       request_id_source: contractResult.request_id_source || undefined,
+    });
+    const failureNotice = await pushToLine(normalized.user_id, N8N_CONTRACT_FAILED_REPLY_TEXT, env);
+    await persistEvidenceStage(env, normalized, failureNotice.ok ? "n8n_background_contract_failure_notice_completed" : "n8n_background_contract_failure_notice_failed", {
+      status: failureNotice.ok ? "failed_notice_sent" : "failed",
+      reason: failureNotice.ok ? contractResult.reason : failureNotice.reason,
     });
     return {
       ok: false,

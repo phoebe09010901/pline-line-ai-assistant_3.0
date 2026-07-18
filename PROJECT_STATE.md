@@ -987,3 +987,15 @@ Status: `PASS`.
 - Evidence: `TEST_EVIDENCE_CODEX_DEFAULT_DELEGATION_GATE.md`.
 
 Unavailable host surfaces: Browser and Computer Use are not exposed through the launchd `codex_exec` adapter; this is recorded as capability manifest output, not a delegation Gateway blocker.
+
+## n8n Contract Failure LINE Notice - 2026-07-18
+
+Status: `DEPLOYED`.
+
+- Investigated the latest LINE command at 20:31 local time.
+- Request id: `pline-v3-01KXTKBMRG5QGQ3MW64GVNGZM2`.
+- Worker received the event and passed `signature_pass`, `admin_pass`, `idempotency_pass`, `line_visible_ack_skipped`, `line_mark_as_read_skipped_disabled`, and `webhook_http_200_returned`.
+- n8n background contract failed with `unsupported_intent`; no `codex_task` pending queue record was created.
+- Root cause of no visible progress: Worker did not send a LINE final on n8n contract failure.
+- Fix: Worker now pushes a natural failure final for `n8n_background_failed` and `n8n_background_contract_failed`, with evidence stages `n8n_background_failure_notice_completed` or `n8n_background_contract_failure_notice_completed`.
+- Deployed Worker version `ae59f6ff-59a4-407e-8b0d-6b0b617ce991`.

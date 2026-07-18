@@ -431,6 +431,48 @@ assert.equal(backgroundResult.intent, "idea_create");
 assert.deepEqual(backgroundCalls, ["https://n8n.example.test/webhook"]);
 globalThis.fetch = originalFetch;
 
+const contractFailureCalls = [];
+const contractFailureKv = createMemoryKv();
+globalThis.fetch = async (url) => {
+  contractFailureCalls.push(url);
+  if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  return new Response(JSON.stringify({
+    request_id: "pline-v3-CONTRACT-FAIL",
+    intent: "unsupported",
+    reply_text: "unsupported",
+    tool_called: "none",
+    status: "accepted",
+  }), { status: 200 });
+};
+const contractFailureResult = await processN8nInBackground({
+  request_id: "pline-v3-CONTRACT-FAIL",
+  line_event_id: "CONTRACT-FAIL",
+  reply_token: "reply-token",
+  user_id: "U_TEST",
+  message_text: "請 Codex 使用 Computer Use 開一個網頁",
+  received_at: "2026-07-18T00:00:00.000Z",
+}, {
+  N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  RUNTIME_KV: contractFailureKv,
+});
+assert.equal(contractFailureResult.ok, false);
+assert.equal(contractFailureResult.reason, "unsupported_intent");
+assert.deepEqual(contractFailureCalls, [
+  "https://n8n.example.test/webhook",
+  "https://api.line.me/v2/bot/message/push",
+]);
+const contractFailureStage = JSON.parse(await contractFailureKv.get("evidence:v1:request:pline-v3-CONTRACT-FAIL:stage:n8n_background_contract_failed"));
+const contractFailureNoticeStage = JSON.parse(await contractFailureKv.get("evidence:v1:request:pline-v3-CONTRACT-FAIL:stage:n8n_background_contract_failure_notice_completed"));
+assert.equal(contractFailureStage.stage, "n8n_background_contract_failed");
+assert.equal(contractFailureStage.reason, "unsupported_intent");
+assert.equal(contractFailureNoticeStage.stage, "n8n_background_contract_failure_notice_completed");
+assert.equal(contractFailureNoticeStage.status, "failed_notice_sent");
+globalThis.fetch = originalFetch;
+
 const codexBackgroundCalls = [];
 const codexTaskKv = createMemoryKv();
 globalThis.fetch = async (url) => {

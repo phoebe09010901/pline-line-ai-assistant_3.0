@@ -381,3 +381,11 @@
 - Verified delegated Codex execution can create a project-runtime file, run a syntax check, and run `git status --short`.
 - Fresh LINE-origin `codex_delegate` visible final delivery remains pending after the latest n8n publish.
 - Added regression coverage for exactly-once delegation, approval resume, Worker webhook/signature/admin/idempotency paths, and idea/Dropbox behavior.
+
+## 2026-07-18 - n8n Contract Failure LINE Notice
+
+- Investigated the 20:31 LINE message `請codex使用computer use開一個網頁`.
+- Durable evidence showed Worker ingress passed (`signature_pass`, `admin_pass`, `idempotency_pass`, `webhook_http_200_returned`) but n8n returned `unsupported_intent`.
+- Root cause of the user-visible silence: Worker recorded `n8n_background_contract_failed` but did not push a final failure notice to LINE.
+- Added a natural failure final for n8n background failures and n8n contract failures, so the user no longer sees silent no-progress behavior.
+- Deployed Worker version `ae59f6ff-59a4-407e-8b0d-6b0b617ce991`.
