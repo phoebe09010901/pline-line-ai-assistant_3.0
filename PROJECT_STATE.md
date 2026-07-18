@@ -865,3 +865,58 @@ Next: TEST sends a fresh idea_create live message without manually starting moni
 - Recovered T2901 task `idea-4a47aede9a419394a2967bd0`; Dropbox JSON `idea-20260718-152127-4a47aede9a41.json`; final status completed.
 - Runner heartbeat returned to `ready`; both `idea_json:v1:pending:` and `codex_task:v1:pending:` are empty.
 - No Worker deploy was needed for this follow-up.
+## LINE Mark As Read - 2026-07-18
+
+Status: FIX completed; TEST live validation required.
+
+- Worker now calls LINE `POST /v2/bot/chat/markAsRead` after signature/admin/idempotency PASS.
+- Token source: `message.markAsReadToken`; transient use only.
+- Durable no-secret stages: `line_mark_as_read_completed`, `line_mark_as_read_skipped_no_token`, `line_mark_as_read_failed`.
+- Mark-as-read failure does not block webhook HTTP 200, n8n, Dropbox JSON, monitor runner, or final reply.
+- No visible ACK was reintroduced.
+- Deployed Worker version: `09d51a3b-6301-4c0b-b0f2-bd3db8229638`.
+
+Next: TEST sends a fresh idea_create marker and checks LINE read-state if visible, plus durable `line_mark_as_read_completed` evidence.
+
+### Follow-up: Chat Off Primary Mode
+
+- User turned `_03` OA Chat off; controller verified `_03` OA `菲比智能客服 測試_03 / @967fvhek` has Chat off and webhook still enabled.
+- TEST T3001 showed LINE desktop read state PASS and idea_create/Dropbox/final PASS.
+- Worker API mark-as-read stage was `line_mark_as_read_failed`, so API mark-as-read is no longer the primary criterion in Chat-off mode.
+- Worker now calls mark-as-read API only when `LINE_MARK_AS_READ_ENABLED === "true"`.
+- Default `_03` TEST behavior records `line_mark_as_read_skipped_disabled` and relies on OA Chat off auto-read.
+- Deployed Worker version: `b39f1e21-f5e3-41e8-a673-1f77e45c98cb`.
+
+### TEST Result: LINE Mark As Read Live Validation
+
+Status: PARTIAL; FIX handoff required.
+
+- TEST sent live T-code `T3001-20260718155646` to LINE target `菲比智能客服 測試_03`.
+- Request id: `pline-v3-01KXT3NXEQXYVE5Y52R97GQNFV`.
+- LINE desktop screenshot showed grey `已讀` near the latest T3001 sent message.
+- Durable Worker evidence showed actual stage `line_mark_as_read_failed`, not `line_mark_as_read_completed`.
+- Webhook delivery remained healthy: `line_event_received`, `signature_pass`, `admin_pass`, `idempotency_pass`, `webhook_http_200_returned`.
+- No visible fixed ACK was reintroduced: `line_visible_ack_skipped` present.
+- idea_create/Dropbox/final path remained PASS: `n8n_background_completed`, `intent=idea_create`, `tool_called=idea_create`, `saved_record=1`, launchd monitor claim, Dropbox JSON parse/schema PASS, `idea_json_final_push_completed`.
+- Pending queues after completion: `idea=0`, `codex=0`.
+- Evidence: `TEST_EVIDENCE_LINE_MARK_AS_READ_LIVE.md`.
+
+Next: hand off to FIX to diagnose the live Mark As Read API failure stage while preserving the successful Chat-off + webhook + idea_create/Dropbox/final path.
+
+### TEST Result: T3002 Chat Off Auto-Read
+
+Status: PASS.
+
+- TEST sent live T-code `T3002-20260718160604` to LINE target `菲比智能客服 測試_03`.
+- Request id: `pline-v3-01KXT46DF26Q4N9C4GS1B6PC58`.
+- Worker health showed `line_mark_as_read.enabled=false` and mode `disabled_chat_off_auto_read`.
+- LINE desktop follow-up screenshot showed grey `已讀` beside the latest T3002 sent message.
+- Durable Worker evidence included `line_mark_as_read_skipped_disabled`.
+- Durable Worker evidence did not include `line_mark_as_read_failed` for this request.
+- Webhook delivery remained healthy: `line_event_received`, `signature_pass`, `admin_pass`, `idempotency_pass`, `webhook_http_200_returned`.
+- No visible fixed ACK was reintroduced: `line_visible_ack_skipped` present.
+- idea_create/Dropbox/final path remained PASS: `n8n_background_completed`, `intent=idea_create`, `tool_called=idea_create`, `saved_record=1`, launchd monitor claim, Dropbox JSON parse/schema PASS, `idea_json_final_push_completed`.
+- Pending queues after completion: `idea=0`, `codex=0`.
+- Evidence: `TEST_EVIDENCE_LINE_READ_CHAT_OFF_T3002.md`.
+
+Next: RELEASE can perform git status, secret scan, commit, and push if the controller is ready to close this TEST scope.

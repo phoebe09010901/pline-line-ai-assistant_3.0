@@ -2395,3 +2395,66 @@ Additional cleanup regression:
 - Pending delete failure is warning-only.
 - Missing or unreadable task records are warning-only and do not abort drain.
 - Active idea task still completes and clears its pending index.
+## LINE Mark As Read Gate
+
+Live validation:
+
+- Send one unique idea_create LINE message.
+- Confirm Worker durable stages include `line_mark_as_read_completed`.
+- If LINE desktop exposes it, confirm the user sees read state near the sent message.
+- Confirm no fixed visible ACK is sent.
+- Confirm final reply still arrives once after Dropbox JSON save.
+- Confirm Dropbox JSON parse/schema/no raw User ID checks remain PASS.
+
+Regression:
+
+- No read token records `line_mark_as_read_skipped_no_token` and continues.
+- Mark-as-read API failure records `line_mark_as_read_failed` but does not block webhook HTTP 200 or background processing.
+- Admin failure must not call mark-as-read.
+- Duplicate event must not repeat final reply.
+
+Current `_03` TEST mode:
+
+- OA Chat off is the primary read receipt mechanism.
+- Worker mark-as-read API is disabled by default.
+- Expected stage in current mode: `line_mark_as_read_skipped_disabled`.
+- If `LINE_MARK_AS_READ_ENABLED === "true"` is explicitly set for future Chat-on mode, then TEST may require `line_mark_as_read_completed`.
+
+### TEST Result: 2026-07-18 T3001
+
+Result: `LINE MARK AS READ LIVE PARTIAL`
+
+- T-code: `T3001-20260718155646`
+- Request id: `pline-v3-01KXT3NXEQXYVE5Y52R97GQNFV`
+- LINE UI: screenshot showed grey `已讀` near the latest sent message.
+- Durable Mark As Read API stage: `line_mark_as_read_failed`.
+- Required API stage `line_mark_as_read_completed`: not met.
+- Webhook: `line_event_received`, `signature_pass`, `admin_pass`, `idempotency_pass`, `webhook_http_200_returned` all present.
+- Fixed ACK: absent; `line_visible_ack_skipped` present.
+- idea_create regression: PASS.
+- Dropbox regression: PASS; JSON parse/schema/no raw User ID checks PASS.
+- Final push: PASS; `idea_json_final_push_completed` and callback completed.
+- Pending queue after completion: `idea=0`, `codex=0`.
+- Evidence: `TEST_EVIDENCE_LINE_MARK_AS_READ_LIVE.md`.
+
+Next: FIX diagnoses live Mark As Read API failure. UI read observation alone is not sufficient to mark the Worker Mark As Read API path PASS.
+
+### TEST Result: 2026-07-18 T3002
+
+Result: `LINE READ CHAT OFF AUTO-READ T3002 PASS`
+
+- T-code: `T3002-20260718160604`
+- Request id: `pline-v3-01KXT46DF26Q4N9C4GS1B6PC58`
+- Worker health: `line_mark_as_read.enabled=false`, mode `disabled_chat_off_auto_read`.
+- LINE UI: follow-up screenshot showed grey `已讀` beside the latest sent message.
+- Durable disabled stage: `line_mark_as_read_skipped_disabled`.
+- Durable failed stage for this request: absent.
+- Webhook: `line_event_received`, `signature_pass`, `admin_pass`, `idempotency_pass`, `webhook_http_200_returned` all present.
+- Fixed ACK: absent; `line_visible_ack_skipped` present.
+- idea_create regression: PASS.
+- Dropbox regression: PASS; JSON parse/schema/no raw User ID checks PASS.
+- Final push: PASS; `idea_json_final_push_completed` and callback completed.
+- Pending queue after completion: `idea=0`, `codex=0`.
+- Evidence: `TEST_EVIDENCE_LINE_READ_CHAT_OFF_T3002.md`.
+
+Next: RELEASE can perform git status, secret scan, commit, and push.

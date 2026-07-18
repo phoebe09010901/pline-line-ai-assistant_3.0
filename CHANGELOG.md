@@ -343,3 +343,17 @@
 - Fixed runner pending-index cleanup so terminal/missing/bad pending entries and delete failures cannot block later active tasks.
 - Recovered T2901 task `idea-4a47aede9a419394a2967bd0`; wrote Dropbox JSON `idea-20260718-152127-4a47aede9a41.json`; final evidence completed.
 - Worker redeploy was not required for this monitor-only follow-up.
+## 2026-07-18 - FIX LINE Mark As Read
+
+- Added Worker mark-as-read support using LINE `message.markAsReadToken`.
+- Mark-as-read runs after signature/admin/idempotency PASS and before background n8n work.
+- Added no-secret evidence stages for completed/skipped/failed mark-as-read.
+- Preserved no visible ACK behavior and existing idea_create/codex_task paths.
+- Deployed Worker version `09d51a3b-6301-4c0b-b0f2-bd3db8229638`.
+
+### Follow-up
+
+- Switched current `_03` TEST mode to OA Chat off auto-read as primary read receipt behavior.
+- Worker mark-as-read API is now disabled by default and requires `LINE_MARK_AS_READ_ENABLED === "true"`.
+- Default durable stage is now `line_mark_as_read_skipped_disabled`, avoiding failed-noise while Chat is off.
+- Deployed Worker version `b39f1e21-f5e3-41e8-a673-1f77e45c98cb`.

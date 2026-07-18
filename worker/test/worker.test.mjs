@@ -10,6 +10,8 @@ import {
   handleIdeaFinalize,
   handleLineWebhook,
   lineAuthorizationHeader,
+  markLineMessageAsRead,
+  markLineMessageAsReadForEvent,
   n8nResponseRequestIdentity,
   n8nResponseShape,
   n8nWebhookAttribution,
@@ -25,6 +27,7 @@ import {
   workerHealth,
 } from "../src/index.js";
 
+const originalFetch = globalThis.fetch;
 const health = workerHealth({});
 assert.equal(health.worker, "pline-v3-test-line-gateway");
 assert.equal(health.resources.runtime_kv, "pline-v3-test-runtime");
@@ -39,6 +42,17 @@ assert.deepEqual(health.n8n.webhook_target, {
 });
 assert.equal(health.n8n.shared_secret_header, "x-pline-v3-shared-secret");
 assert.equal(health.line_reply_mode, "no_visible_ack_background_n8n");
+assert.deepEqual(health.line_mark_as_read, {
+  enabled: false,
+  mode: "disabled_chat_off_auto_read",
+  endpoint: "https://api.line.me/v2/bot/chat/markAsRead",
+  token_source: "message.markAsReadToken",
+  evidence_completed_stage: "line_mark_as_read_completed",
+  evidence_disabled_stage: "line_mark_as_read_skipped_disabled",
+  evidence_skipped_stage: "line_mark_as_read_skipped_no_token",
+  evidence_failed_stage: "line_mark_as_read_failed",
+  transient_token_only: true,
+});
 assert.equal(health.codex_task_final_mode, "monitor_callback_exactly_once");
 assert.equal(health.evidence.persistence, "RUNTIME_KV");
 assert.equal(health.evidence.read_path, "/test/evidence");
@@ -64,6 +78,53 @@ assert.deepEqual(lineAuthorizationHeader({ LINE_CHANNEL_ACCESS_TOKEN: "test-toke
   ok: true,
   value: "Bearer test-token",
 });
+
+const markReadCalls = [];
+globalThis.fetch = async (url, options) => {
+  markReadCalls.push({ url, options });
+  return new Response("", { status: 200 });
+};
+assert.deepEqual(await markLineMessageAsRead("READ-MARK-UNIT", { LINE_CHANNEL_ACCESS_TOKEN: "test-token" }), { ok: true, status: 200 });
+assert.equal(markReadCalls.length, 1);
+assert.equal(markReadCalls[0].url, "https://api.line.me/v2/bot/chat/markAsRead");
+assert.equal(markReadCalls[0].options.headers.authorization, "Bearer test-token");
+assert.deepEqual(JSON.parse(markReadCalls[0].options.body), { markAsReadToken: "READ-MARK-UNIT" });
+globalThis.fetch = originalFetch;
+
+const markReadSkipKv = createMemoryKv();
+assert.deepEqual(await markLineMessageAsReadForEvent({
+  message: { type: "text" },
+}, {
+  request_id: "pline-v3-MARK-SKIP",
+  gate_marker: "T1601-20260718010101",
+}, {
+  RUNTIME_KV: markReadSkipKv,
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  LINE_MARK_AS_READ_ENABLED: "true",
+}), { ok: true, skipped: true, reason: "missing_mark_as_read_token" });
+const markReadSkipEvidence = await readEvidenceForRequest({ RUNTIME_KV: markReadSkipKv }, "pline-v3-MARK-SKIP");
+assert.equal(markReadSkipEvidence.stages.some((stage) => stage.stage === "line_mark_as_read_skipped_no_token"), true);
+
+const markReadDisabledKv = createMemoryKv();
+const markReadDisabledCalls = [];
+globalThis.fetch = async (url) => {
+  markReadDisabledCalls.push(url);
+  return new Response("", { status: 200 });
+};
+assert.deepEqual(await markLineMessageAsReadForEvent({
+  message: { type: "text", markAsReadToken: "READ-MARK-DISABLED" },
+}, {
+  request_id: "pline-v3-MARK-DISABLED",
+  gate_marker: "T1601D-20260718010101",
+}, {
+  RUNTIME_KV: markReadDisabledKv,
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+}), { ok: true, skipped: true, reason: "LINE_MARK_AS_READ_DISABLED" });
+assert.deepEqual(markReadDisabledCalls, []);
+const markReadDisabledEvidence = await readEvidenceForRequest({ RUNTIME_KV: markReadDisabledKv }, "pline-v3-MARK-DISABLED");
+assert.equal(markReadDisabledEvidence.stages.some((stage) => stage.stage === "line_mark_as_read_skipped_disabled"), true);
+assert.equal(JSON.stringify(markReadDisabledEvidence).includes("READ-MARK-DISABLED"), false);
+globalThis.fetch = originalFetch;
 
 assert.deepEqual(await verifyAdmin({ source: { userId: "U_TEST" } }, { LINE_TEST_ADMIN_USER_IDS: "U_TEST" }), { ok: true });
 assert.equal((await verifyAdmin({ source: { userId: "U_OTHER" } }, { LINE_TEST_ADMIN_USER_IDS: "U_TEST" })).reason, "not_test_admin");
@@ -312,7 +373,6 @@ assert.equal(validateN8nContract({
   status: "completed",
 }, "pline-v3-E6").reason, "missing_idea_create_tool_called");
 
-const originalFetch = globalThis.fetch;
 let replyRequest = null;
 globalThis.fetch = async (url, options) => {
   replyRequest = { url, options };
@@ -361,6 +421,9 @@ const codexTaskKv = createMemoryKv();
 globalThis.fetch = async (url) => {
   codexBackgroundCalls.push(url);
   if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  if (url === "https://api.line.me/v2/bot/chat/markAsRead") {
     return new Response("", { status: 200 });
   }
   return new Response(JSON.stringify({
@@ -910,6 +973,7 @@ const rawWebhookBody = JSON.stringify({
     message: {
       id: "M1",
       type: "text",
+      markAsReadToken: "READ-MARK-WEBHOOK1",
       text: "記一下：今天開始建立 _03 T1501-20260718010105",
     },
   }],
@@ -941,9 +1005,10 @@ assert.deepEqual(await webhookResponse.json(), {
   request_id: "pline-v3-WEBHOOK1",
   reply_mode: "no_visible_ack_background_n8n",
 });
-assert.equal(webhookFetchCalls[0].url, "https://n8n.example.test/webhook");
 await Promise.all(waitUntilPromises);
-assert.equal(webhookFetchCalls.length, 1);
+assert.deepEqual(webhookFetchCalls.map((call) => call.url), [
+  "https://n8n.example.test/webhook",
+]);
 const liveEvidenceResponse = await handleEvidenceRead(new Request("https://worker.example.test/test/evidence?marker=T1501-20260718010105", {
   headers: { "x-pline-v3-shared-secret": "unit-test-secret" },
 }), {
@@ -962,6 +1027,9 @@ assert.equal(liveEvidenceBody.summary.fast_ack, false);
 assert.equal(liveEvidenceBody.summary.visible_ack_skipped, true);
 assert.equal(liveEvidenceBody.summary.webhook_http_200, true);
 assert.equal(liveEvidenceBody.stages.some((stage) => stage.stage === "line_visible_ack_skipped"), true);
+assert.equal(liveEvidenceBody.stages.some((stage) => stage.stage === "line_mark_as_read_skipped_disabled"), true);
+assert.equal(liveEvidenceBody.stages.some((stage) => stage.stage === "line_mark_as_read_completed"), false);
+assert.equal(JSON.stringify(liveEvidenceBody).includes("READ-MARK-WEBHOOK1"), false);
 assert.equal(liveEvidenceBody.summary.n8n_started, true);
 const n8nStartedStage = liveEvidenceBody.stages.find((stage) => stage.stage === "n8n_background_started");
 assert.equal(n8nStartedStage.n8n_host, "n8n.example.test");
@@ -975,6 +1043,172 @@ assert.equal(liveEvidenceBody.summary.saved_record, 1);
 assert.equal(liveEvidenceBody.stages.some((stage) => stage.stage === "idea_json_final_outbox_pending"), true);
 assert.equal(liveEvidenceBody.summary.final_push, false);
 assert.ok(liveEvidenceBody.stages.length >= 7);
+globalThis.fetch = originalFetch;
+
+const markReadEnabledCalls = [];
+const markReadEnabledKv = createMemoryKv();
+globalThis.fetch = async (url) => {
+  markReadEnabledCalls.push(url);
+  if (url === "https://api.line.me/v2/bot/chat/markAsRead") {
+    return new Response("", { status: 200 });
+  }
+  return new Response(JSON.stringify({
+    request_id: "pline-v3-WEBHOOK-MARK-ENABLED",
+    intent: "idea_create",
+    reply_text: "已記下",
+    tool_called: "idea_create",
+    saved_record: 1,
+    status: "completed",
+  }), { status: 200 });
+};
+const markReadEnabledBody = JSON.stringify({
+  events: [{
+    type: "message",
+    webhookEventId: "WEBHOOK-MARK-ENABLED",
+    replyToken: "reply-token",
+    source: { userId: "U_TEST" },
+    message: {
+      id: "M-MARK-ENABLED",
+      type: "text",
+      markAsReadToken: "READ-MARK-ENABLED",
+      text: "記一下：mark read enabled T1604-20260718010104",
+    },
+  }],
+});
+const markReadEnabledWaitUntil = [];
+const markReadEnabledResponse = await handleLineWebhook(new Request("https://worker.example.test/line/webhook", {
+  method: "POST",
+  headers: {
+    "x-line-signature": await signLineBody(markReadEnabledBody, channelSecret),
+  },
+  body: markReadEnabledBody,
+}), {
+  LINE_CHANNEL_SECRET: channelSecret,
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  LINE_MARK_AS_READ_ENABLED: "true",
+  LINE_TEST_ADMIN_USER_IDS: "U_TEST",
+  N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
+  N8N_SHARED_SECRET: "unit-test-secret",
+  RUNTIME_KV: markReadEnabledKv,
+  IDEMPOTENCY_KV: {
+    get: async () => null,
+    put: async () => {},
+  },
+}, {
+  waitUntil: (promise) => markReadEnabledWaitUntil.push(promise),
+});
+assert.equal(markReadEnabledResponse.status, 200);
+await Promise.all(markReadEnabledWaitUntil);
+assert.deepEqual(markReadEnabledCalls, [
+  "https://api.line.me/v2/bot/chat/markAsRead",
+  "https://n8n.example.test/webhook",
+]);
+const markReadEnabledEvidence = await readEvidenceForRequest({ RUNTIME_KV: markReadEnabledKv }, "pline-v3-WEBHOOK-MARK-ENABLED");
+assert.equal(markReadEnabledEvidence.stages.some((stage) => stage.stage === "line_mark_as_read_completed"), true);
+assert.equal(JSON.stringify(markReadEnabledEvidence).includes("READ-MARK-ENABLED"), false);
+globalThis.fetch = originalFetch;
+
+const markReadFailureCalls = [];
+const markReadFailureKv = createMemoryKv();
+globalThis.fetch = async (url) => {
+  markReadFailureCalls.push(url);
+  if (url === "https://api.line.me/v2/bot/chat/markAsRead") {
+    return new Response("", { status: 500 });
+  }
+  return new Response(JSON.stringify({
+    request_id: "pline-v3-WEBHOOK-MARK-FAIL",
+    intent: "idea_create",
+    reply_text: "已記下",
+    tool_called: "idea_create",
+    saved_record: 1,
+    status: "completed",
+  }), { status: 200 });
+};
+const markReadFailureBody = JSON.stringify({
+  events: [{
+    type: "message",
+    webhookEventId: "WEBHOOK-MARK-FAIL",
+    replyToken: "reply-token",
+    source: { userId: "U_TEST" },
+    message: {
+      id: "M-MARK-FAIL",
+      type: "text",
+      markAsReadToken: "READ-MARK-FAIL",
+      text: "記一下：mark read failure T1602-20260718010102",
+    },
+  }],
+});
+const markReadFailureWaitUntil = [];
+const markReadFailureResponse = await handleLineWebhook(new Request("https://worker.example.test/line/webhook", {
+  method: "POST",
+  headers: {
+    "x-line-signature": await signLineBody(markReadFailureBody, channelSecret),
+  },
+  body: markReadFailureBody,
+}), {
+  LINE_CHANNEL_SECRET: channelSecret,
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  LINE_MARK_AS_READ_ENABLED: "true",
+  LINE_TEST_ADMIN_USER_IDS: "U_TEST",
+  N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
+  N8N_SHARED_SECRET: "unit-test-secret",
+  RUNTIME_KV: markReadFailureKv,
+  IDEMPOTENCY_KV: {
+    get: async () => null,
+    put: async () => {},
+  },
+}, {
+  waitUntil: (promise) => markReadFailureWaitUntil.push(promise),
+});
+assert.equal(markReadFailureResponse.status, 200);
+await Promise.all(markReadFailureWaitUntil);
+assert.deepEqual(markReadFailureCalls, [
+  "https://api.line.me/v2/bot/chat/markAsRead",
+  "https://n8n.example.test/webhook",
+]);
+const markReadFailureEvidence = await readEvidenceForRequest({ RUNTIME_KV: markReadFailureKv }, "pline-v3-WEBHOOK-MARK-FAIL");
+assert.equal(markReadFailureEvidence.stages.some((stage) => stage.stage === "line_mark_as_read_failed"), true);
+assert.equal(markReadFailureEvidence.stages.some((stage) => stage.stage === "n8n_background_completed"), true);
+assert.equal(JSON.stringify(markReadFailureEvidence).includes("READ-MARK-FAIL"), false);
+globalThis.fetch = originalFetch;
+
+const adminFailedMarkReadCalls = [];
+globalThis.fetch = async (url) => {
+  adminFailedMarkReadCalls.push(url);
+  return new Response("", { status: 200 });
+};
+const adminFailedMarkReadBody = JSON.stringify({
+  events: [{
+    type: "message",
+    webhookEventId: "WEBHOOK-MARK-ADMIN-FAIL",
+    replyToken: "reply-token",
+    source: { userId: "U_OTHER" },
+    message: {
+      id: "M-MARK-ADMIN-FAIL",
+      type: "text",
+      markAsReadToken: "READ-MARK-ADMIN-FAIL",
+      text: "記一下：admin fail T1603-20260718010103",
+    },
+  }],
+});
+const adminFailedMarkReadResponse = await handleLineWebhook(new Request("https://worker.example.test/line/webhook", {
+  method: "POST",
+  headers: {
+    "x-line-signature": await signLineBody(adminFailedMarkReadBody, channelSecret),
+  },
+  body: adminFailedMarkReadBody,
+}), {
+  LINE_CHANNEL_SECRET: channelSecret,
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  LINE_TEST_ADMIN_USER_IDS: "U_TEST",
+  RUNTIME_KV: createMemoryKv(),
+  IDEMPOTENCY_KV: {
+    get: async () => null,
+    put: async () => {},
+  },
+});
+assert.equal(adminFailedMarkReadResponse.status, 403);
+assert.deepEqual(adminFailedMarkReadCalls, []);
 globalThis.fetch = originalFetch;
 
 const failedEvidenceResult = await persistEvidenceStage({

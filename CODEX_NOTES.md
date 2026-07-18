@@ -716,3 +716,46 @@ Date: 2026-07-18
 - Fix: delete is now best-effort, per-key failures are isolated, terminal/missing/bad pending entries do not block later active tasks.
 - Recovered T2901 request `pline-v3-01KXT1KRBW5MSP8WDT9QR2A3Y4` / task `idea-4a47aede9a419394a2967bd0`; Dropbox JSON `idea-20260718-152127-4a47aede9a41.json`; final push evidence completed.
 - Runner heartbeat is `ready`; pending prefixes are empty.
+## LINE Mark As Read
+
+- Added Worker mark-as-read support using LINE `message.markAsReadToken`.
+- Call position: after signature/admin/idempotency PASS, before background n8n scheduling.
+- Token is not included in normalized payload, KV, evidence, docs, or logs.
+- Failure is warning-only: records `line_mark_as_read_failed` with sanitized reason and continues webhook/n8n/final paths.
+- Deployed Worker version `09d51a3b-6301-4c0b-b0f2-bd3db8229638`.
+
+### Chat Off Primary Mode
+
+- After user turned `_03` OA Chat off, TEST T3001 proved visual read state and idea_create path PASS while API mark-as-read produced `line_mark_as_read_failed`.
+- Worker now defaults mark-as-read API to disabled.
+- `LINE_MARK_AS_READ_ENABLED === "true"` is required to call the API for future Chat-on mode.
+- Default evidence is `line_mark_as_read_skipped_disabled`.
+- Deployed Worker version `b39f1e21-f5e3-41e8-a673-1f77e45c98cb`.
+
+## LINE Mark As Read Live TEST
+
+- Live marker: `T3001-20260718155646`.
+- Request id: `pline-v3-01KXT3NXEQXYVE5Y52R97GQNFV`.
+- LINE desktop screenshot showed grey `已讀` near the latest sent message; recorded as UI observation only.
+- Durable evidence did not PASS the API criterion: actual stage was `line_mark_as_read_failed`.
+- No read token value, raw LINE User ID, or full webhook payload was written.
+- Chat off did not break webhook delivery or background processing.
+- idea_create/Dropbox/final remained PASS with Dropbox JSON `idea-20260718-155735-8a4dff845617.json`.
+- Pending queues returned to `idea=0`, `codex=0`.
+- Evidence: `TEST_EVIDENCE_LINE_MARK_AS_READ_LIVE.md`.
+- Next: FIX should inspect why live Mark As Read API produced `line_mark_as_read_failed` while the LINE UI still showed read state.
+
+## T3002 Chat Off Auto-Read TEST
+
+- Live marker: `T3002-20260718160604`.
+- Request id: `pline-v3-01KXT46DF26Q4N9C4GS1B6PC58`.
+- Worker health confirmed `line_mark_as_read.enabled=false` and `disabled_chat_off_auto_read`.
+- LINE desktop screenshot showed grey `已讀` beside the latest T3002 sent message.
+- Durable evidence included `line_mark_as_read_skipped_disabled`.
+- Durable evidence did not include `line_mark_as_read_failed` for this request.
+- No read token value, raw LINE User ID, or full webhook payload was written.
+- Chat off did not break webhook delivery or background processing.
+- idea_create/Dropbox/final remained PASS with Dropbox JSON `idea-20260718-160636-04fe510ef176.json`.
+- Pending queues returned to `idea=0`, `codex=0`.
+- Evidence: `TEST_EVIDENCE_LINE_READ_CHAT_OFF_T3002.md`.
+- Next: RELEASE can perform git status, secret scan, commit, and push if the controller is ready.

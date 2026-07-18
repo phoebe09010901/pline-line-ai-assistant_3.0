@@ -204,3 +204,30 @@ The runner heartbeat is no-secret local runtime state under:
 ```text
 runtime/monitor-runner/heartbeat.json
 ```
+## LINE Mark As Read Boundary
+
+The Worker may call LINE mark-as-read only after signature, admin, and idempotency checks pass.
+
+Allowed token source:
+
+```text
+message.markAsReadToken
+```
+
+The read token is transient only. It must not be written to KV, evidence, docs, logs, task records, n8n payloads, or local files.
+
+No raw LINE User ID is used for mark-as-read. The endpoint is fixed:
+
+```text
+https://api.line.me/v2/bot/chat/markAsRead
+```
+
+Failures are recorded only as sanitized categories and must not block webhook HTTP 200 or final reply paths.
+
+Current `_03` TEST default:
+
+```text
+LINE_MARK_AS_READ_ENABLED=false
+```
+
+With OA Chat off, LINE handles read state automatically. Worker records `line_mark_as_read_skipped_disabled` and does not call the mark-as-read API. The API path is retained only for a future Chat-on mode explicitly enabled by environment flag.

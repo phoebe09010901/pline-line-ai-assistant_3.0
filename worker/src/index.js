@@ -38,6 +38,7 @@ const CODEX_FINALIZE_PATH = "/test/codex-finalize";
 const EVIDENCE_PREFIX = "evidence:v1";
 const EVIDENCE_TTL_SECONDS = 172800;
 const WEBHOOK_ACCEPT_EVIDENCE_CHECKPOINT_TIMEOUT_MS = 1500;
+const LINE_MARK_AS_READ_TIMEOUT_MS = 1500;
 const GATE_MARKER_PATTERN = /\bT\d{4}[A-Z]?-\d{14}\b/;
 const INTERNAL_REPLY_PATTERN = /(?:_03|TEST|n8n|worker|monitor|task|json|execution|webhook|cloudflare|測試|任務|工作流|執行)/i;
 
@@ -159,6 +160,13 @@ export async function handleLineWebhook(request, env, ctx = {}) {
     request_id: normalized.request_id,
   });
 
+  const markAsReadTask = markLineMessageAsReadForEvent(event, normalized, env);
+  if (ctx.waitUntil) {
+    ctx.waitUntil(markAsReadTask);
+  } else {
+    await markAsReadTask;
+  }
+
   queueEvidenceStage(ctx, env, normalized, "line_visible_ack_skipped", {
     reply_mode: LINE_REPLY_MODE,
   });
@@ -228,6 +236,17 @@ export function workerHealth(env = {}) {
       shared_secret_header: N8N_SHARED_SECRET_HEADER,
     },
     line_reply_mode: LINE_REPLY_MODE,
+    line_mark_as_read: {
+      enabled: env.LINE_MARK_AS_READ_ENABLED === "true",
+      mode: env.LINE_MARK_AS_READ_ENABLED === "true" ? "api_enabled_chat_on_optional" : "disabled_chat_off_auto_read",
+      endpoint: "https://api.line.me/v2/bot/chat/markAsRead",
+      token_source: "message.markAsReadToken",
+      evidence_completed_stage: "line_mark_as_read_completed",
+      evidence_disabled_stage: "line_mark_as_read_skipped_disabled",
+      evidence_skipped_stage: "line_mark_as_read_skipped_no_token",
+      evidence_failed_stage: "line_mark_as_read_failed",
+      transient_token_only: true,
+    },
     codex_task_final_mode: CODEX_TASK_FINAL_MODE,
     supported_intents: ACCEPTED_N8N_INTENTS,
     gate_test_intents: GATE_TEST_INTENTS,
@@ -1034,6 +1053,92 @@ export async function pushToLine(userId, replyText, env) {
   return { ok: true };
 }
 
+export async function markLineMessageAsRead(markAsReadToken, env = {}) {
+  const authorization = lineAuthorizationHeader(env);
+  if (!authorization.ok) {
+    return authorization;
+  }
+  if (!markAsReadToken) {
+    return { ok: false, reason: "missing_mark_as_read_token", status: 400 };
+  }
+
+  let response;
+  try {
+    const timeoutMs = Number(env.LINE_MARK_AS_READ_TIMEOUT_MS || LINE_MARK_AS_READ_TIMEOUT_MS);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    response = await fetch("https://api.line.me/v2/bot/chat/markAsRead", {
+      method: "POST",
+      headers: {
+        authorization: authorization.value,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ markAsReadToken }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+  } catch (error) {
+    return { ok: false, reason: `line_mark_as_read_exception_${error?.name || "Error"}`, status: 502 };
+  }
+
+  if (!response.ok) {
+    return { ok: false, reason: `line_mark_as_read_http_${response.status}`, status: response.status };
+  }
+
+  return { ok: true, status: 200 };
+}
+
+export async function markLineMessageAsReadForEvent(event = {}, normalized = {}, env = {}) {
+  if (env.LINE_MARK_AS_READ_ENABLED !== "true") {
+    await persistEvidenceStage(env, normalized, "line_mark_as_read_skipped_disabled", {
+      status: "skipped",
+      reason: "LINE_MARK_AS_READ_DISABLED",
+    });
+    logStage("line_mark_as_read_skipped_disabled", {
+      request_id: normalized.request_id,
+      status: "skipped",
+    });
+    return { ok: true, skipped: true, reason: "LINE_MARK_AS_READ_DISABLED" };
+  }
+
+  const token = event.message?.markAsReadToken || event.markAsReadToken || "";
+  if (!token) {
+    await persistEvidenceStage(env, normalized, "line_mark_as_read_skipped_no_token", {
+      status: "skipped",
+      reason: "missing_mark_as_read_token",
+    });
+    logStage("line_mark_as_read_skipped_no_token", {
+      request_id: normalized.request_id,
+      status: "skipped",
+    });
+    return { ok: true, skipped: true, reason: "missing_mark_as_read_token" };
+  }
+
+  const result = await markLineMessageAsRead(token, env);
+  if (result.ok) {
+    await persistEvidenceStage(env, normalized, "line_mark_as_read_completed", {
+      status: "completed",
+    });
+    logStage("line_mark_as_read_completed", {
+      request_id: normalized.request_id,
+      status: "completed",
+    });
+    return result;
+  }
+
+  const reason = markAsReadFailureCategory(result.reason, result.status);
+  await persistEvidenceStage(env, normalized, "line_mark_as_read_failed", {
+    status: "failed",
+    reason,
+  });
+  logStage("line_mark_as_read_failed", {
+    request_id: normalized.request_id,
+    status: "failed",
+    reason,
+  });
+  return { ...result, reason };
+}
+
 export function lineAuthorizationHeader(env = {}) {
   const token = (env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
   if (!token) {
@@ -1043,6 +1148,25 @@ export function lineAuthorizationHeader(env = {}) {
     ok: true,
     value: token.toLowerCase().startsWith("bearer ") ? token : `Bearer ${token}`,
   };
+}
+
+function markAsReadFailureCategory(reason = "", status = 0) {
+  if (status === 401 || status === 403) {
+    return `line_mark_as_read_auth_${status}`;
+  }
+  if (String(reason || "").includes("missing_LINE_CHANNEL_ACCESS_TOKEN")) {
+    return "missing_LINE_CHANNEL_ACCESS_TOKEN";
+  }
+  if (String(reason || "").includes("AbortError")) {
+    return "line_mark_as_read_timeout";
+  }
+  if (String(reason || "").startsWith("line_mark_as_read_http_")) {
+    return String(reason).slice(0, 80);
+  }
+  if (String(reason || "").startsWith("line_mark_as_read_exception_")) {
+    return "line_mark_as_read_exception";
+  }
+  return "line_mark_as_read_failed";
 }
 
 export function firstTextEvent(payload) {
