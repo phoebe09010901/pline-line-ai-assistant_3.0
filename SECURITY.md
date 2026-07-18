@@ -76,6 +76,19 @@ Latest TEST rerun after Worker version `3ba57849-b02c-4b6e-a066-8da95575563c` co
 
 Latest accepted TEST rerun after Worker version `cbadc5a1-4e07-44b2-853d-335c5486b11b` confirmed three additional `_03` Dropbox JSON files use exactly the allowed 9-field schema and irreversible fingerprint fields. Durable `idea_json_final_push_completed` evidence existed for each run. Repeated finalizer callback returned `already_completed`, `pushed=false`, and added no file or second final push. No raw LINE User ID, secret, signature, finalize token, line user reference, or full webhook payload was recorded. The path is marked `DROPBOX IDEA JSON PATH PASS`. Evidence: `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.
 
+## idea_create Natural Final Reply Guard
+
+The normal `idea_create` path must not send a user-visible processing ACK before Dropbox JSON save completes.
+
+- Worker still returns HTTP `200` to LINE webhook delivery.
+- Durable evidence records `line_visible_ack_skipped` and `webhook_http_200_returned`.
+- Success final is allowed only after monitor callback proves `save_idea_json` completed.
+- n8n natural `reply_text` may be used only after Worker sanitizes it for length and internal implementation words.
+- If the n8n final text is missing or unsafe, fallback `已經幫妳記下來了 💡` is allowed only after save success.
+- If save fails, Worker must not send success text and must use a truthful failure final.
+- Duplicate/repeated finalizer callbacks must not send another final.
+- Secret values, raw LINE User ID, encrypted line user reference, finalize token, signatures, and full webhook payload must never be written to repo, durable evidence, or final reports.
+
 ## CODEX_BIN Requirement
 
 Future monitor implementation must:
@@ -89,3 +102,7 @@ Future monitor implementation must:
 ## Out-of-Scope Features
 
 Do not add Google Calendar, accounting, email, attachments, multiple agents, FORMAL mode, real-time wake, WebSocket, complex queueing, complex state machines, compatibility layers, or broad regex/if/else routing in the first version.
+
+## TEST Result: Natural Final Without Visible ACK
+
+Live `_03` evidence confirmed normal `idea_create` skips visible fixed ACK, retains webhook HTTP 200, saves Dropbox JSON, and sends one natural final after save. Failure and AI fallback behavior passed safe local mocks. Repeated finalizer callback produced no duplicate final. Two-stage secret scan effective hit_count was `0`. LINE desktop read-receipt display remains a separate UI/OA setting observation. Result: `IDEA NATURAL FINAL REPLY WITHOUT ACK PASS`. Evidence: `TEST_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.

@@ -122,6 +122,8 @@ Latest TEST status after Worker version `3ba57849-b02c-4b6e-a066-8da95575563c`: 
 
 Latest accepted TEST status after Worker version `cbadc5a1-4e07-44b2-853d-335c5486b11b`: durable exactly-once finalizer decouples formal LINE final push from monitor timing. The monitor writes JSON and calls `/test/idea-finalize`; Worker validates task identity/token and records final state before emitting the success final exactly once. TEST proved three valid Dropbox JSON writes, three `idea_json_final_push_completed` stages, and repeated callback `already_completed` with no second push. Current result: `DROPBOX IDEA JSON PATH PASS`. Evidence: `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.
 
+Latest FIX status after Worker version `dbda345b-a3b4-41ca-bc8b-a12c8547179c`: the normal `idea_create` path no longer emits a LINE-visible fixed processing ACK. The webhook still returns HTTP `200`, records `line_visible_ack_skipped` and `webhook_http_200_returned`, continues n8n/monitor background processing, and emits exactly one natural final after Dropbox JSON save via the existing durable finalizer. Worker uses n8n `reply_text` when safe, otherwise the saved-success fallback only after save success. TEST must rerun `IDEA NATURAL FINAL REPLY WITHOUT ACK`.
+
 ### idea_create JSON
 
 Allowed fields only:
@@ -141,3 +143,7 @@ Raw LINE User ID, secrets, signatures, and full webhook payloads are not stored.
 ## Explicit Non-Goals
 
 No Google Calendar, accounting, email, attachments, multiple agents, FORMAL mode, real-time wake, WebSocket, complex queue, complex state machine, compatibility layer, or broad regex/if/else intent routing.
+
+## TEST Status: Natural Final Without Visible ACK
+
+Live `_03` Gate proved no visible fixed ACK for normal `idea_create`, retained webhook HTTP `200`, saved Dropbox JSON, and emitted one natural final after save. Repeated finalizer callback remained exactly-once. LINE desktop read-receipt display is tracked separately as UI/OA setting observation. Current result: `IDEA NATURAL FINAL REPLY WITHOUT ACK PASS`. Evidence: `TEST_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.

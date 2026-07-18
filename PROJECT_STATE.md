@@ -439,3 +439,42 @@ Hand off to `PLine03｜FIX｜Worker 與程式` to repair formal LINE success fin
 ## Next Stage
 
 Hand off to `PLine03｜RELEASE｜部署與收尾` for git status, secret scan, commit, and push to `v1/minimal-dual-path`.
+
+## idea_create Natural Final Without Visible ACK
+
+- FIX removed the LINE-visible fixed processing ACK from the normal `idea_create` path.
+- Worker still returns HTTP `200` to the LINE webhook and records no-secret evidence `line_visible_ack_skipped` plus `webhook_http_200_returned`.
+- idea final remains durable exactly-once through monitor callback `/test/idea-finalize`.
+- After Dropbox JSON save succeeds, Worker uses n8n natural `reply_text`; if missing/invalid/internal, Worker uses fallback `已經幫妳記下來了 💡`.
+- If save fails, Worker sends only the truthful failure message and does not send success text.
+- Duplicate/repeated finalizer callback remains suppressed and does not create a new JSON or second LINE final.
+- Worker deployed version: `dbda345b-a3b4-41ca-bc8b-a12c8547179c`.
+- No-secret evidence file: `FIX_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.
+
+## Next Stage
+
+Hand off to `PLine03｜TEST｜測試與驗收` to rerun `IDEA NATURAL FINAL REPLY WITHOUT ACK` Gate: idea_create should show no first ACK and exactly one natural final after Dropbox JSON save.
+
+## IDEA NATURAL FINAL REPLY WITHOUT ACK Gate
+
+- TEST reran the Gate after Worker version `dbda345b-a3b4-41ca-bc8b-a12c8547179c`.
+- Scope stayed inside `/Users/phoebe/Documents/菲比 LINE 智能助理_03` plus fixed Dropbox directory `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`.
+- LINE app target was `菲比智能客服 測試_03`.
+- Live idea markers: `T2301-20260718092056`, `T2302-20260718092156`, `T2303-20260718092325`.
+- Dropbox JSON files written:
+  - `idea-20260718-092105-016e468ba6d0.json`
+  - `idea-20260718-092204-b7107d1c1dc3.json`
+  - `idea-20260718-092333-3cd6f7b5427f.json`
+- Each run had durable `line_visible_ack_skipped`, `webhook_http_200_returned`, n8n background completed, Dropbox JSON write, and final push completion evidence.
+- Third run had a transient `line_push_http_525`; task-scoped finalizer retry completed successfully without duplicate JSON or duplicate final.
+- Repeated finalizer callback returned `already_completed`, `pushed=false`; Dropbox JSON count stayed `29 -> 29`; n8n completion stage count stayed `1`.
+- Failure and AI fallback paths were covered by safe local Worker mocks.
+- Codex regression marker `T2390-20260718092857` routed to `codex_task`, wrote smoke file, and did not create Dropbox idea JSON.
+- LINE desktop read-receipt display was not stable and is recorded only as UI/OA setting observation, not Gate evidence.
+- Two-stage secret scan effective hit_count: `0`.
+- `IDEA NATURAL FINAL REPLY WITHOUT ACK PASS` is marked.
+- Evidence: `TEST_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.
+
+## Next Stage
+
+Hand off to `PLine03｜RELEASE｜部署與收尾` for git status, secret scan, commit, and push to `v1/minimal-dual-path`. Optional separate follow-up can inspect `_03` LINE Developers / LINE OA Manager read-receipt settings with Computer Use.

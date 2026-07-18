@@ -1526,3 +1526,64 @@ Required next step:
 ```text
 RELEASE must run git status, secret scan, commit, and push to v1/minimal-dual-path.
 ```
+
+## IDEA NATURAL FINAL REPLY WITHOUT ACK Gate
+
+Date: 2026-07-18
+
+Preconditions:
+
+- Worker version is at least `dbda345b-a3b4-41ca-bc8b-a12c8547179c`.
+- `/health` reports `line_reply_mode=no_visible_ack_background_n8n`.
+- Dropbox idea JSON path is already PASS.
+- Monitor finalizer path `/test/idea-finalize` remains ready.
+
+Expected live behavior for each idea_create event:
+
+- LINE app shows no first processing ACK.
+- Worker returns HTTP `200` to the webhook.
+- Durable evidence includes `line_visible_ack_skipped`.
+- Durable evidence includes `webhook_http_200_returned`.
+- Durable evidence must not count `line_fast_reply_completed` for idea_create.
+- Monitor writes one Dropbox idea JSON file after `save_idea_json`.
+- Worker sends exactly one natural final LINE message after JSON save.
+- Durable evidence includes `idea_json_final_push_completed`.
+- Final text must not expose internal words such as `_03`, `TEST`, n8n, Worker, task, JSON, execution, or webhook.
+
+Duplicate/repeated callback expectation:
+
+- No new Dropbox JSON file.
+- No second LINE final.
+- Durable evidence records suppression or already-completed behavior.
+
+Failure expectation:
+
+- If save fails, Worker must not send saved-success text.
+- Failure final should truthfully say the save did not complete.
+
+### TEST Result 2026-07-18
+
+Live markers:
+
+- `T2301-20260718092056`
+- `T2302-20260718092156`
+- `T2303-20260718092325`
+
+Evidence summary:
+
+- `line_visible_ack_skipped`: PASS for all three.
+- `webhook_http_200_returned`: PASS for all three.
+- n8n background completed: PASS for all three.
+- Dropbox JSON parse/schema/content/fingerprint: PASS for all three.
+- `idea_json_final_push_completed`: PASS for all three after retry on the third.
+- Repeated finalizer callback: PASS, `already_completed`, `pushed=false`.
+- Failure and AI fallback mocks: PASS.
+- Codex regression marker `T2390-20260718092857`: PASS.
+- Effective secret scan hit_count: `0`.
+- LINE desktop read-receipt display: UI/OA setting observation only.
+
+```text
+IDEA NATURAL FINAL REPLY WITHOUT ACK PASS
+```
+
+Evidence: `TEST_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.

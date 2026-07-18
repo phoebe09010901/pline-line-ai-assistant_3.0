@@ -26,7 +26,7 @@ assert.equal(health.resources.runtime_kv, "pline-v3-test-runtime");
 assert.equal(health.resources.idempotency_kv, "pline-v3-test-idempotency");
 assert.equal(health.n8n.webhook_url, "https://n8nphy.app.n8n.cloud/webhook/pline-v3-test-ai-agent");
 assert.equal(health.n8n.shared_secret_header, "x-pline-v3-shared-secret");
-assert.equal(health.line_reply_mode, "fast_ack_then_background_n8n");
+assert.equal(health.line_reply_mode, "no_visible_ack_background_n8n");
 assert.equal(health.codex_task_final_mode, "background_push_final");
 assert.equal(health.evidence.persistence, "RUNTIME_KV");
 assert.equal(health.evidence.read_path, "/test/evidence");
@@ -112,6 +112,8 @@ assert.deepEqual(summarizeEvidenceStages(evidenceRead.stages), {
   admin: false,
   idempotency: false,
   fast_ack: false,
+  visible_ack_skipped: false,
+  webhook_http_200: false,
   n8n_started: false,
   n8n_completed: true,
   n8n_failed: false,
@@ -212,6 +214,13 @@ assert.equal(validateN8nContract([{ json: {
   saved_record: 1,
   status: "completed",
 } }], "pline-v3-E5").ok, true);
+assert.equal(validateN8nContract({
+  request_id: "pline-v3-E5B",
+  intent: "idea_create",
+  tool_called: "idea_create",
+  saved_record: 1,
+  status: "completed",
+}, "pline-v3-E5B").ok, true);
 
 const clarifyResult = validateN8nContract({
   request_id: "pline-v3-E3",
@@ -228,7 +237,7 @@ const unsupportedResult = validateN8nContract({
   status: "completed",
 }, "pline-v3-E4");
 assert.equal(unsupportedResult.ok, true);
-assert.equal(unsupportedResult.body.reply_text, "目前 _03 TEST 只支援記錄一句想法或建立 Codex 測試檔案。");
+assert.equal(unsupportedResult.body.reply_text, "目前我只能先幫妳記想法，或處理指定的小任務。");
 
 assert.equal(normalizeReplyText("idea_create", ""), "");
 
@@ -450,6 +459,8 @@ await enqueueIdeaTask({
   user_id: "U_RAW_SHOULD_NOT_STORE",
   message_text: "記一下：finalize callback T1704-20260718010104",
   gate_marker: "T1704-20260718010104",
+}, {
+  reply_text: "幫妳收好了，這個想法我先替妳放好 💡",
 });
 const finalizerKeys = await finalizerKv.list({ prefix: "idea_json:v1:task:" });
 const finalizerTask = JSON.parse(await finalizerKv.get(finalizerKeys.keys[0].name));
@@ -484,7 +495,7 @@ const finalizerResponse = await handleIdeaFinalize(new Request("https://worker.e
 assert.equal(finalizerResponse.status, 200);
 assert.equal((await finalizerResponse.json()).status, "completed");
 assert.deepEqual(finalizerCalls.map((call) => call.url), ["https://api.line.me/v2/bot/message/push"]);
-assert.equal(JSON.parse(finalizerCalls[0].options.body).messages[0].text, "已幫妳記下這個想法 💡");
+assert.equal(JSON.parse(finalizerCalls[0].options.body).messages[0].text, "幫妳收好了，這個想法我先替妳放好 💡");
 const repeatedFinalizerResponse = await handleIdeaFinalize(new Request("https://worker.example.test/test/idea-finalize", {
   method: "POST",
   headers: { "content-type": "application/json" },
@@ -501,6 +512,53 @@ const finalizerEvidenceRead = await readEvidenceForRequest({ RUNTIME_KV: finaliz
 assert.equal(finalizerEvidenceRead.stages.some((stage) => stage.stage === "idea_json_final_push_completed"), true);
 assert.equal(summarizeEvidenceStages(finalizerEvidenceRead.stages).final_push, true);
 assert.equal(JSON.stringify(finalizerEvidenceRead).includes("U_RAW_SHOULD_NOT_STORE"), false);
+globalThis.fetch = originalFetch;
+
+const fallbackFinalizerCalls = [];
+const fallbackFinalizerKv = createMemoryKv();
+await enqueueIdeaTask({
+  RUNTIME_KV: fallbackFinalizerKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-IDEA-FALLBACK-FINALIZE",
+  line_event_id: "LINE-EVENT-FALLBACK-FINALIZE",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
+  message_text: "記一下：fallback callback T1704A-20260718010104",
+  gate_marker: "T1704A-20260718010104",
+}, {
+  reply_text: "已寫入 _03 JSON task",
+});
+const fallbackFinalizerKeys = await fallbackFinalizerKv.list({ prefix: "idea_json:v1:task:" });
+const fallbackFinalizerTask = JSON.parse(await fallbackFinalizerKv.get(fallbackFinalizerKeys.keys[0].name));
+await fallbackFinalizerKv.put(fallbackFinalizerKeys.keys[0].name, JSON.stringify({
+  ...fallbackFinalizerTask,
+  status: "completed",
+  file_written: true,
+}));
+globalThis.fetch = async (url, options) => {
+  fallbackFinalizerCalls.push({ url, options });
+  if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  return new Response("{}", { status: 404 });
+};
+const fallbackFinalizerResponse = await handleIdeaFinalize(new Request("https://worker.example.test/test/idea-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    task_id: fallbackFinalizerTask.task_id,
+    request_id: fallbackFinalizerTask.request_id,
+    action: "save_idea_json",
+    status: "completed",
+    finalize_token: fallbackFinalizerTask.finalize_token,
+  }),
+}), {
+  RUNTIME_KV: fallbackFinalizerKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(fallbackFinalizerResponse.status, 200);
+assert.equal(JSON.parse(fallbackFinalizerCalls[0].options.body).messages[0].text, "已經幫妳記下來了 💡");
 globalThis.fetch = originalFetch;
 
 const duplicateCallbackCalls = [];
@@ -587,8 +645,9 @@ const failedCallbackResponse = await handleIdeaFinalize(new Request("https://wor
   LINE_CHANNEL_ACCESS_TOKEN: "test-token",
 });
 assert.equal(failedCallbackResponse.status, 200);
-assert.equal((await failedCallbackResponse.json()).status, "no_success_push");
-assert.equal(failedCallbackCalls.length, 0);
+assert.equal((await failedCallbackResponse.json()).status, "failure_notice_completed");
+assert.equal(failedCallbackCalls.length, 1);
+assert.equal(JSON.parse(failedCallbackCalls[0].options.body).messages[0].text, "這次沒有成功保存，我先不假裝記好了，請稍後再試一次 🙏");
 const failedCallbackEvidence = await readEvidenceForRequest({ RUNTIME_KV: failedCallbackKv }, "pline-v3-IDEA-FAILED-CALLBACK");
 assert.equal(failedCallbackEvidence.stages.some((stage) => stage.stage === "idea_json_final_push_completed"), false);
 assert.equal(JSON.stringify(failedCallbackEvidence).includes("U_RAW_SHOULD_NOT_STORE"), false);
@@ -652,12 +711,11 @@ assert.equal(webhookResponse.status, 200);
 assert.deepEqual(await webhookResponse.json(), {
   status: "accepted",
   request_id: "pline-v3-WEBHOOK1",
-  reply_mode: "fast_ack_then_background_n8n",
+  reply_mode: "no_visible_ack_background_n8n",
 });
-assert.equal(webhookFetchCalls[0].url, "https://api.line.me/v2/bot/message/reply");
-assert.equal(webhookFetchCalls[1].url, "https://n8n.example.test/webhook");
+assert.equal(webhookFetchCalls[0].url, "https://n8n.example.test/webhook");
 await Promise.all(waitUntilPromises);
-assert.equal(webhookFetchCalls.length, 2);
+assert.equal(webhookFetchCalls.length, 1);
 const liveEvidenceResponse = await handleEvidenceRead(new Request("https://worker.example.test/test/evidence?marker=T1501-20260718010105", {
   headers: { "x-pline-v3-shared-secret": "unit-test-secret" },
 }), {
@@ -672,7 +730,10 @@ assert.equal(liveEvidenceBody.summary.line_event, true);
 assert.equal(liveEvidenceBody.summary.signature, true);
 assert.equal(liveEvidenceBody.summary.admin, true);
 assert.equal(liveEvidenceBody.summary.idempotency, true);
-assert.equal(liveEvidenceBody.summary.fast_ack, true);
+assert.equal(liveEvidenceBody.summary.fast_ack, false);
+assert.equal(liveEvidenceBody.summary.visible_ack_skipped, true);
+assert.equal(liveEvidenceBody.summary.webhook_http_200, true);
+assert.equal(liveEvidenceBody.stages.some((stage) => stage.stage === "line_visible_ack_skipped"), true);
 assert.equal(liveEvidenceBody.summary.n8n_started, true);
 assert.equal(liveEvidenceBody.summary.n8n_completed, true);
 assert.equal(liveEvidenceBody.summary.intent, "idea_create");
@@ -751,9 +812,9 @@ assert.equal(blockedEvidenceResponse.status, 200);
 assert.deepEqual(await blockedEvidenceResponse.json(), {
   status: "accepted",
   request_id: "pline-v3-WEBHOOK2",
-  reply_mode: "fast_ack_then_background_n8n",
+  reply_mode: "no_visible_ack_background_n8n",
 });
-assert.deepEqual(blockedEvidenceFetchCalls, ["https://api.line.me/v2/bot/message/reply"]);
+assert.deepEqual(blockedEvidenceFetchCalls, []);
 assert.ok(blockedEvidenceWaitUntil.length >= 6);
 globalThis.fetch = originalFetch;
 

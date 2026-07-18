@@ -173,3 +173,24 @@
 - Verified repeated finalizer callback returned `already_completed`, `pushed=false`, Dropbox JSON count stayed `20 -> 20`, and no second final push was produced.
 - Marked `DROPBOX IDEA JSON PATH PASS`.
 - Updated no-secret evidence file `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.
+
+## 2026-07-18 - FIX idea_create Natural Final Without Visible ACK
+
+- Removed the LINE-visible fixed Worker ACK `已收到 _03 TEST 訊息，我會繼續處理。` from normal idea_create processing.
+- Kept LINE webhook HTTP `200` acceptance and added durable evidence `line_visible_ack_skipped` and `webhook_http_200_returned`.
+- Worker finalizer now uses n8n natural `reply_text` after Dropbox JSON save succeeds, with safe saved fallback only after save success.
+- Save failure now sends a truthful failure final and never sends saved-success text.
+- Duplicate/repeated finalizer callbacks remain exactly-once with no second final.
+- Deployed Worker version `dbda345b-a3b4-41ca-bc8b-a12c8547179c`.
+- Added no-secret evidence file `FIX_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.
+
+## 2026-07-18 - TEST IDEA NATURAL FINAL REPLY WITHOUT ACK Gate PASS
+
+- Reran live `_03` natural final Gate after Worker version `dbda345b-a3b4-41ca-bc8b-a12c8547179c`.
+- Verified three `idea_create` messages produced no visible fixed ACK, retained webhook HTTP 200 evidence, saved Dropbox JSON, and produced one natural user-visible final.
+- Verified durable evidence `line_visible_ack_skipped`, `webhook_http_200_returned`, and `idea_json_final_push_completed`.
+- Noted one transient LINE push HTTP 525 on the third run; task-scoped finalizer retry completed and repeated callback remained exactly-once.
+- Verified safe local failure and AI fallback paths, live Codex regression, Dropbox regression, raw User ID count 0, and effective secret scan hit_count 0.
+- Recorded LINE desktop read-receipt display as UI/OA setting observation only.
+- Marked `IDEA NATURAL FINAL REPLY WITHOUT ACK PASS`.
+- Added no-secret evidence file `TEST_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.

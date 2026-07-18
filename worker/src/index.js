@@ -12,10 +12,9 @@ const ADMIN_BOOTSTRAP_PHRASE = "PLine03 admin bootstrap";
 const ADMIN_BOOTSTRAP_KV_KEY = "admin:line_test_admin_user_id";
 const SAFE_REPLY_TEXT = {
   clarify: "請再補充一句你想記錄或請 Codex 執行的內容。",
-  unsupported: "目前 _03 TEST 只支援記錄一句想法或建立 Codex 測試檔案。",
+  unsupported: "目前我只能先幫妳記想法，或處理指定的小任務。",
 };
-const FAST_ACK_REPLY_TEXT = "已收到 _03 TEST 訊息，我會繼續處理。";
-const LINE_REPLY_MODE = "fast_ack_then_background_n8n";
+const LINE_REPLY_MODE = "no_visible_ack_background_n8n";
 const CODEX_TASK_FINAL_MODE = "background_push_final";
 const CODEX_TASK_PREFIX = "codex_task:v1";
 const IDEA_TASK_PREFIX = "idea_json:v1";
@@ -25,13 +24,14 @@ const IDEA_TASK_ACTION = "save_idea_json";
 const CODEX_SMOKE_FILE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/codex-smoke.txt";
 const CODEX_SMOKE_FILE_CONTENT = "Codex 已打通";
 const DROPBOX_IDEA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03";
-const IDEA_SAVED_REPLY_TEXT = "已幫妳記下這個想法 💡";
-const IDEA_SAVE_FAILED_REPLY_TEXT = "這次想法沒有成功寫入，我已保留失敗狀態供測試查證。";
+const IDEA_SAVED_FALLBACK_REPLY_TEXT = "已經幫妳記下來了 💡";
+const IDEA_SAVE_FAILED_REPLY_TEXT = "這次沒有成功保存，我先不假裝記好了，請稍後再試一次 🙏";
 const IDEA_FINALIZE_PATH = "/test/idea-finalize";
 const EVIDENCE_PREFIX = "evidence:v1";
 const EVIDENCE_TTL_SECONDS = 172800;
-const FAST_ACK_EVIDENCE_CHECKPOINT_TIMEOUT_MS = 1500;
+const WEBHOOK_ACCEPT_EVIDENCE_CHECKPOINT_TIMEOUT_MS = 1500;
 const GATE_MARKER_PATTERN = /\bT\d{4}[A-Z]?-\d{14}\b/;
+const INTERNAL_REPLY_PATTERN = /(?:_03|TEST|n8n|worker|monitor|task|json|execution|webhook|cloudflare|測試|任務|工作流|執行)/i;
 
 export default {
   async fetch(request, env, ctx) {
@@ -120,7 +120,7 @@ export async function handleLineWebhook(request, env, ctx = {}) {
   });
 
   if (adminResult.bootstrapped) {
-    await replyToLine(normalized.reply_token, "已收到 _03 TEST 管理員事件。", env);
+    await replyToLine(normalized.reply_token, "已收到管理員確認訊息。", env);
     queueEvidenceStage(ctx, env, normalized, "admin_bootstrap_captured");
     return jsonResponse({
       status: "accepted",
@@ -147,41 +147,27 @@ export async function handleLineWebhook(request, env, ctx = {}) {
     request_id: normalized.request_id,
   });
 
-  const replyResult = await replyToLine(normalized.reply_token, FAST_ACK_REPLY_TEXT, env);
-  if (!replyResult.ok) {
-    queueEvidenceStage(ctx, env, normalized, "line_fast_reply_failed", {
-      reason: replyResult.reason,
-      status: replyResult.status,
-    });
-    logStage("line_fast_reply_failed", {
-      request_id: normalized.request_id,
-      reason: replyResult.reason,
-      status: replyResult.status,
-    });
-    return jsonResponse({
-      status: "failed",
-      reason: replyResult.reason,
-      request_id: normalized.request_id,
-    }, replyResult.status);
-  }
-  queueEvidenceStage(ctx, env, normalized, "line_fast_reply_completed", {
+  queueEvidenceStage(ctx, env, normalized, "line_visible_ack_skipped", {
     reply_mode: LINE_REPLY_MODE,
   });
-  logStage("line_fast_reply_completed", {
+  logStage("line_visible_ack_skipped", {
     request_id: normalized.request_id,
     reply_mode: LINE_REPLY_MODE,
   });
 
-  const fastAckCheckpointTask = persistFastAckEvidenceCheckpoint(env, normalized, {
+  const webhookAcceptedCheckpointTask = persistWebhookAcceptedEvidenceCheckpoint(env, normalized, {
     bootstrap: Boolean(adminResult.bootstrapped),
   });
   if (ctx.waitUntil) {
-    ctx.waitUntil(fastAckCheckpointTask);
+    ctx.waitUntil(webhookAcceptedCheckpointTask);
   }
-  const fastAckCheckpointResult = await waitForEvidenceCheckpoint(fastAckCheckpointTask, FAST_ACK_EVIDENCE_CHECKPOINT_TIMEOUT_MS);
-  logStage("evidence_fast_ack_checkpoint", {
+  const webhookAcceptedCheckpointResult = await waitForEvidenceCheckpoint(
+    webhookAcceptedCheckpointTask,
+    WEBHOOK_ACCEPT_EVIDENCE_CHECKPOINT_TIMEOUT_MS,
+  );
+  logStage("evidence_webhook_accept_checkpoint", {
     request_id: normalized.request_id,
-    status: fastAckCheckpointResult.status,
+    status: webhookAcceptedCheckpointResult.status,
   });
 
   if (ctx.waitUntil && env.IDEMPOTENCY_KV) {
@@ -196,6 +182,10 @@ export async function handleLineWebhook(request, env, ctx = {}) {
   } else {
     await backgroundTask;
   }
+
+  queueEvidenceStage(ctx, env, normalized, "webhook_http_200_returned", {
+    reply_mode: LINE_REPLY_MODE,
+  });
 
   return jsonResponse({
     status: "accepted",
@@ -394,7 +384,7 @@ export async function processN8nInBackground(normalized, env) {
   }
 
   if (contractResult.body.intent === "idea_create") {
-    const enqueueResult = await enqueueIdeaTask(env, normalized);
+    const enqueueResult = await enqueueIdeaTask(env, normalized, contractResult.body);
     await persistEvidenceStage(env, normalized, enqueueResult.ok ? "idea_json_save_enqueued" : "idea_json_save_enqueue_failed", {
       intent: contractResult.body.intent,
       action: IDEA_TASK_ACTION,
@@ -541,7 +531,7 @@ export async function enqueueCodexTask(env = {}, normalized = {}, body = {}) {
   return { ok: true, key };
 }
 
-export async function enqueueIdeaTask(env = {}, normalized = {}) {
+export async function enqueueIdeaTask(env = {}, normalized = {}, body = {}) {
   if (!env.RUNTIME_KV) {
     return { ok: false, reason: "missing_RUNTIME_KV" };
   }
@@ -586,6 +576,7 @@ export async function enqueueIdeaTask(env = {}, normalized = {}) {
     marker: normalized.gate_marker,
     line_user_ref: lineUserRef.value,
     finalize_token: createFinalizeToken(),
+    final_reply_text: naturalIdeaReplyText(body.reply_text),
     idea: {
       idea_id: ideaId,
       content,
@@ -656,7 +647,7 @@ export function validateN8nContract(body, requestId) {
     return { ok: false, reason: "unsupported_intent" };
   }
   const replyText = normalizeReplyText(body.intent, body.reply_text);
-  if (!replyText) {
+  if (!replyText && body.intent !== "idea_create") {
     return { ok: false, reason: "missing_reply_text" };
   }
   if (body.intent === "codex_task" && !body.task_id) {
@@ -682,7 +673,7 @@ export function validateN8nContract(body, requestId) {
     return { ok: false, reason: "unsupported_status" };
   }
 
-  return { ok: true, body: { ...body, reply_text: replyText } };
+  return { ok: true, body: { ...body, reply_text: replyText || "" } };
 }
 
 function contractEvidenceForLog(body) {
@@ -920,7 +911,8 @@ export async function handleIdeaFinalize(request, env = {}) {
       status: "failed",
       reason: "monitor_task_failed",
     });
-    return jsonResponse({ status: "no_success_push", reason: "monitor_task_failed", request_id: task.request_id });
+    const failedResult = await pushIdeaFailureOnce(env, task, "monitor_task_failed");
+    return jsonResponse(failedResult, failedResult.ok ? 200 : 500);
   }
 
   if (callbackStatus !== "completed" && callbackStatus !== "duplicate") {
@@ -939,13 +931,13 @@ export async function handleIdeaFinalize(request, env = {}) {
   return jsonResponse(result, result.ok ? 200 : 500);
 }
 
-export async function persistFastAckEvidenceCheckpoint(env = {}, normalized = {}, details = {}) {
+export async function persistWebhookAcceptedEvidenceCheckpoint(env = {}, normalized = {}, details = {}) {
   return persistEvidenceStages(env, normalized, [
     ["line_event_received", { marker: normalized.gate_marker }],
     ["signature_pass", {}],
     ["admin_pass", { bootstrap: Boolean(details.bootstrap) }],
     ["idempotency_pass", {}],
-    ["line_fast_reply_completed", { reply_mode: LINE_REPLY_MODE }],
+    ["line_visible_ack_skipped", { reply_mode: LINE_REPLY_MODE }],
   ]);
 }
 
@@ -998,7 +990,7 @@ async function pushIdeaFinalOnce(env = {}, task = {}) {
     return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
   }
 
-  const pushResult = await pushToLine(userId.value, IDEA_SAVED_REPLY_TEXT, env);
+  const pushResult = await pushToLine(userId.value, naturalIdeaReplyText(task.final_reply_text), env);
   if (!pushResult.ok) {
     await env.RUNTIME_KV.put(finalKey, JSON.stringify({
       schema: "pline-v3-test-idea-final/v1",
@@ -1071,6 +1063,77 @@ async function suppressIdeaFinalOnce(env = {}, task = {}, reason = "duplicate_id
     reason,
   });
   return { ok: true, status: "suppressed", pushed: false, request_id: task.request_id };
+}
+
+async function pushIdeaFailureOnce(env = {}, task = {}, reason = "monitor_task_failed") {
+  const finalKey = ideaFinalKey(task.task_id);
+  const existingRaw = await env.RUNTIME_KV.get(finalKey);
+  if (existingRaw) {
+    const existing = parseJsonSafely(existingRaw);
+    if (existing?.status === "completed" || existing?.status === "sending" || existing?.status === "failure_notice_completed") {
+      return {
+        ok: true,
+        status: existing.status,
+        pushed: false,
+        request_id: task.request_id,
+      };
+    }
+  }
+
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-idea-final/v1",
+    status: "sending",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    reason,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+
+  const userId = await openLineUserRef(task.line_user_ref, env);
+  if (!userId.ok) {
+    await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+      schema: "pline-v3-test-idea-final/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: userId.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
+  }
+
+  const pushResult = await pushToLine(userId.value, IDEA_SAVE_FAILED_REPLY_TEXT, env);
+  if (!pushResult.ok) {
+    await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+      schema: "pline-v3-test-idea-final/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: pushResult.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    await persistEvidenceStage(env, ideaTaskEvidenceTarget(task), "idea_json_final_push_failed", {
+      action: IDEA_TASK_ACTION,
+      status: "failed",
+      reason: pushResult.reason,
+    });
+    return { ok: false, status: "failed", reason: pushResult.reason, request_id: task.request_id };
+  }
+
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-idea-final/v1",
+    status: "failure_notice_completed",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    reason,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await persistEvidenceStage(env, ideaTaskEvidenceTarget(task), "idea_json_final_failure_notice_completed", {
+    action: IDEA_TASK_ACTION,
+    status: "failed",
+    reason,
+  });
+  return { ok: true, status: "failure_notice_completed", pushed: true, request_id: task.request_id };
 }
 
 function ideaTaskEvidenceTarget(task = {}) {
@@ -1267,6 +1330,8 @@ export function summarizeEvidenceStages(stages = []) {
     admin: false,
     idempotency: false,
     fast_ack: false,
+    visible_ack_skipped: false,
+    webhook_http_200: false,
     n8n_started: false,
     n8n_completed: false,
     n8n_failed: false,
@@ -1283,6 +1348,8 @@ export function summarizeEvidenceStages(stages = []) {
     if (stage.stage === "admin_pass") summary.admin = true;
     if (stage.stage === "idempotency_pass") summary.idempotency = true;
     if (stage.stage === "line_fast_reply_completed") summary.fast_ack = true;
+    if (stage.stage === "line_visible_ack_skipped") summary.visible_ack_skipped = true;
+    if (stage.stage === "webhook_http_200_returned") summary.webhook_http_200 = true;
     if (stage.stage === "n8n_background_started") summary.n8n_started = true;
     if (stage.stage === "n8n_background_completed") summary.n8n_completed = true;
     if (stage.stage === "n8n_background_failed" || stage.stage === "n8n_background_contract_failed") summary.n8n_failed = true;
@@ -1351,6 +1418,7 @@ function sanitizeIdeaTaskRecord(record) {
     target_dir: DROPBOX_IDEA_DIR,
     line_user_ref: String(record.line_user_ref || ""),
     finalize_token: sanitizeEvidenceId(record.finalize_token || ""),
+    final_reply_text: naturalIdeaReplyText(record.final_reply_text || ""),
     idea: sanitizeIdeaJson(record.idea || {}),
     created_at: record.created_at,
   };
@@ -1375,6 +1443,14 @@ function extractIdeaContent(messageText = "") {
     .replace(GATE_MARKER_PATTERN, "")
     .replace(/^\s*記一下[:：]\s*/, "")
     .trim();
+}
+
+function naturalIdeaReplyText(replyText = "") {
+  const text = String(replyText || "").replace(/\s+/g, " ").trim();
+  if (!text || text.length > 120 || INTERNAL_REPLY_PATTERN.test(text)) {
+    return IDEA_SAVED_FALLBACK_REPLY_TEXT;
+  }
+  return text;
 }
 
 async function fingerprint(value, env = {}) {

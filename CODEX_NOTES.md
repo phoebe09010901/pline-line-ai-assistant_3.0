@@ -353,3 +353,33 @@ Date: 2026-07-18
 - Repeated finalizer callback for `T2203-20260718084935` returned `already_completed`, `pushed=false`, with no new Dropbox JSON and no second final push.
 - Result: `DROPBOX IDEA JSON PATH PASS`.
 - Evidence: `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.
+
+## idea_create Natural Final Without Visible ACK
+
+Date: 2026-07-18
+
+- Worker no longer sends the user-visible fixed processing ACK on the normal idea_create path.
+- Worker still returns HTTP `200` quickly to LINE webhook delivery.
+- Durable evidence now distinguishes no visible ACK from HTTP acceptance with `line_visible_ack_skipped` and `webhook_http_200_returned`.
+- Success final remains monitor-callback driven and exactly-once after Dropbox JSON save.
+- Final success text uses n8n natural `reply_text` if accepted by the Worker guard; otherwise fallback `已經幫妳記下來了 💡` is used only after save success.
+- Save failure sends only the truthful failure text and no saved-success text.
+- Worker version: `dbda345b-a3b4-41ca-bc8b-a12c8547179c`.
+- Evidence: `FIX_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.
+- Next: TEST reruns `IDEA NATURAL FINAL REPLY WITHOUT ACK`.
+
+## IDEA NATURAL FINAL REPLY WITHOUT ACK Gate PASS
+
+Date: 2026-07-18
+
+- TEST reran live `_03` Gate after Worker version `dbda345b-a3b4-41ca-bc8b-a12c8547179c`.
+- Live idea markers: `T2301-20260718092056`, `T2302-20260718092156`, `T2303-20260718092325`.
+- Fixed visible ACK was absent; durable `line_visible_ack_skipped` and `webhook_http_200_returned` were present.
+- Dropbox JSON parse/schema/content/fingerprint checks passed for all three files.
+- Natural final push evidence `idea_json_final_push_completed` was present for all three runs; the third required retry after transient `line_push_http_525`.
+- Repeated finalizer callback returned `already_completed`, `pushed=false`, with no extra JSON and no second AI/final.
+- Failure/fallback paths were covered by safe local Worker tests.
+- Codex regression routed to `codex_task` and did not create Dropbox idea JSON.
+- LINE desktop read-receipt display remains a separate UI/OA setting observation.
+- Result: `IDEA NATURAL FINAL REPLY WITHOUT ACK PASS`.
+- Evidence: `TEST_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.

@@ -91,3 +91,14 @@ Latest TEST rerun after Worker version `cbadc5a1-4e07-44b2-853d-335c5486b11b`:
 - Formal LINE final success evidence `idea_json_final_push_completed`: PASS
 - Repeated finalizer callback: PASS, `already_completed`, `pushed=false`
 - Current marker: `DROPBOX IDEA JSON PATH PASS`
+
+Latest TEST natural reply Gate after Worker version `dbda345b-a3b4-41ca-bc8b-a12c8547179c`:
+
+- Fixed visible ACK removed for normal `idea_create`: PASS
+- Webhook HTTP 200 retained with `webhook_http_200_returned`: PASS
+- `line_visible_ack_skipped`: PASS
+- Natural final after Dropbox JSON save: PASS
+- Repeated finalizer callback exactly-once: PASS
+- LINE desktop read-receipt display: UI/OA setting observation, not a hard Gate blocker
+- Current marker: `IDEA NATURAL FINAL REPLY WITHOUT ACK PASS`
+- Evidence: `TEST_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`
