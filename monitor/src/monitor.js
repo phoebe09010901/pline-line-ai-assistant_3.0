@@ -345,6 +345,7 @@ export async function claimOnce(options = {}) {
 
     const execution = await runTask(task, env, {
       ...options,
+      kv,
       onCodexStarted: notifyProcessingStarted,
     });
     if (execution.ok && execution.status === APPROVAL_STATUS) {
@@ -1204,6 +1205,9 @@ async function getLatestCreatedFileContext(kv) {
   const directRaw = await kv.get(CODEX_LAST_CREATED_FILE_KEY);
   const direct = normalizeCreatedFileContext(parseJsonSafely(directRaw));
   if (direct.ok) return direct;
+  if (directRaw) {
+    return { ok: false, reason: "last_created_file_context_invalid" };
+  }
 
   const resultKeys = await kv.list(`${TASK_PREFIX}:result:`);
   const contexts = [];

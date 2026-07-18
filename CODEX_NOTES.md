@@ -826,6 +826,12 @@ Date: 2026-07-18
 - Missing context returns `last_created_file_context_not_found` and does not submit to Codex.
 - Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_RECENT_FILE_CONTEXT.md`.
 
+### Follow-up
+
+- Remote KV context existed for B/T3401, but C failed because `claimOnce()` did not pass its internally-created remote KV adapter into `runTask()`.
+- `claimOnce()` now forwards `kv`, so read-file context resolution uses the same backend that the runner used to claim the task.
+- Existing malformed context now returns `last_created_file_context_invalid`, making invalid vs absent context distinguishable.
+
 ## Codex Default Delegation Implementation
 
 - Implemented `monitor/src/codex_gateway.js`.

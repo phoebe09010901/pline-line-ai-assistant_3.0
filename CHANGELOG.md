@@ -419,3 +419,9 @@
 - Added truthful failure when a recent-file read request has no successful created-file context.
 - Added focused monitor tests for old/new created-file selection and missing-context failure.
 - Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_RECENT_FILE_CONTEXT.md`.
+
+### Follow-up
+
+- Fixed live runner context read by passing the same KV adapter from `claimOnce()` into `runTask()`.
+- Added invalid-context reason split: existing malformed latest-created-file context now fails as `last_created_file_context_invalid`.
+- Verified remote B context key points to the current T3401 runtime text file and content hash.

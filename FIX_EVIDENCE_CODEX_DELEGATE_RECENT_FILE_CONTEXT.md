@@ -61,6 +61,9 @@ Focused coverage:
 - Worker deploy required: no
 - Monitor code changed: yes
 - Monitor runner reload required: yes
+- Monitor launchd reload: completed after ensuring `runtime/monitor-runner` exists.
+- Monitor launchd state: running
+- Monitor heartbeat after reload: `ready`
 - Monitor launchd reload: completed
 - Monitor heartbeat after reload: `ready`
 - Worker `/health`: reachable
@@ -69,3 +72,40 @@ Focused coverage:
 ## TEST Handoff
 
 TEST can rerun C after a successful B create-file task. The read-file task should now read the latest successful created file from the same `_03` runtime scope, not an older runtime file.
+
+## Follow-up: Remote KV Context Read Fix
+
+TEST rerun:
+
+- B task: `codex-delegate-01KXTQ5P7SZC10KMEP8JM1XZSZ`
+- B content marker: `T3401-20260718213807`
+- C task: `codex-delegate-01KXTQBDGNTBHSMCZ06N0HJPD6`
+- C failure reason: `last_created_file_context_not_found`
+
+Trace result:
+
+- Remote KV key `codex_task:v1:context:last_created_file` exists.
+- The key points to the B task and `_03` runtime text file.
+- The local runtime file exists.
+- The recorded SHA-256 matches the local file content hash.
+- Root cause: `claimOnce()` created the remote KV adapter internally, but did not pass that adapter down into `runTask()`. `runTask()` therefore saw no KV adapter and returned `last_created_file_context_not_found` before Gateway prompt construction.
+
+Follow-up repair:
+
+- `claimOnce()` now passes the same `kv` adapter to `runTask()`.
+- If `codex_task:v1:context:last_created_file` exists but fails validation, the reason is now `last_created_file_context_invalid` instead of `last_created_file_context_not_found`.
+
+Follow-up verification:
+
+- `npm --prefix monitor test`: PASS
+- `npm --prefix worker test`: PASS
+- `node --check monitor/src/monitor.js`: PASS
+- `node --check monitor/src/codex_gateway.js`: PASS
+- `node --check worker/src/index.js`: PASS
+
+Follow-up deployment / reload:
+
+- Worker code changed: no
+- Worker deploy required: no
+- Monitor code changed: yes
+- Monitor runner reload required: yes

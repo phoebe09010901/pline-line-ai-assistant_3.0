@@ -363,6 +363,47 @@ assert.equal(missingContextGatewayCalled, false);
 const missingContextTask = JSON.parse(await missingContextKv.get(`${TASK_PREFIX}:task:codex-read-missing-context`));
 assert.equal(missingContextTask.status, "failed");
 
+const invalidContextKv = createMemoryKv();
+await invalidContextKv.put(CODEX_LAST_CREATED_FILE_KEY, JSON.stringify({
+  task_id: "codex-invalid-context",
+  created_at: "2026-07-18T13:26:30.000Z",
+  path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-gateway/not-a-text-file.md",
+  relative_path: "runtime/codex-gateway/not-a-text-file.md",
+  content_sha256: "not-a-valid-hash",
+}));
+await invalidContextKv.put(`${TASK_PREFIX}:task:codex-read-invalid-context`, JSON.stringify({
+  schema: "pline-v3-test-codex-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: "codex-read-invalid-context",
+  task_type: "codex_task",
+  project: "菲比 LINE 智能助理_03",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03",
+  instruction: "請 Codex 讀取剛才建立的檔案",
+  original_user_text: "請 Codex 讀取剛才建立的檔案",
+  request_id: "pline-v3-read-invalid-context",
+  marker: "T3302I-20260718212430",
+  action: CODEX_DELEGATE_ACTION,
+  finalize_token: "test-finalize-token",
+  line_user_ref: "v1.encrypted.ref",
+  created_at: "2026-07-18T13:26:30.000Z",
+}));
+await invalidContextKv.put(`${TASK_PREFIX}:pending:codex-read-invalid-context`, `${TASK_PREFIX}:task:codex-read-invalid-context`);
+let invalidContextGatewayCalled = false;
+const invalidContextClaim = await claimOnce({
+  kv: invalidContextKv,
+  env: { CODEX_BIN: fakeCodex, PATH: "", CODEX_FINALIZE_DISABLED: "1" },
+  gateway: {
+    async submit_task() {
+      invalidContextGatewayCalled = true;
+      return { ok: true, status: "completed" };
+    },
+  },
+});
+assert.equal(invalidContextClaim.ok, false);
+assert.equal(invalidContextClaim.reason, "last_created_file_context_invalid");
+assert.equal(invalidContextGatewayCalled, false);
+
 const delegateProcessingKv = createMemoryKv();
 await delegateProcessingKv.put(`${TASK_PREFIX}:task:delegate-processing-unit`, JSON.stringify({
   schema: "pline-v3-test-codex-task/v1",

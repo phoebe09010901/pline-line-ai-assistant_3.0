@@ -2502,6 +2502,20 @@ FIX validation:
 
 Next TEST handoff: rerun C after B on `gate/codex-default-delegation`.
 
+### Follow-up: Remote KV Adapter Regression
+
+Required validation:
+
+- Live runner must use the same remote KV backend for claim, latest-created-file context read, task result write, and final callback.
+- Existing valid `codex_task:v1:context:last_created_file` must be passed into Gateway prompt for C.
+- Existing malformed context must fail as `last_created_file_context_invalid`, not `last_created_file_context_not_found`.
+
+FIX validation:
+
+- `npm --prefix monitor test`: PASS
+- `npm --prefix worker test`: PASS
+- syntax checks: PASS
+
 ## Codex Default Delegation Gate
 
 Current result: `BLOCKED_FOR_DEFAULT_DELEGATION`.

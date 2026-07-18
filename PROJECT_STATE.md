@@ -1046,3 +1046,17 @@ Status: `READY_FOR_TEST`.
 - Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_RECENT_FILE_CONTEXT.md`.
 
 Next: TEST can rerun C after B.
+
+## Codex Delegate Recent File Context Follow-up - 2026-07-18
+
+Status: `READY_FOR_TEST`.
+
+- TEST rerun B wrote remote `codex_task:v1:context:last_created_file` for marker `T3401-20260718213807`.
+- C still failed with `last_created_file_context_not_found`.
+- Root cause: live `claimOnce()` used an internally-created remote KV adapter but did not pass it to `runTask()`, so `runTask()` could not read the existing context.
+- `claimOnce()` now passes the same KV adapter to `runTask()`.
+- Existing-but-invalid context now returns `last_created_file_context_invalid`.
+- Monitor runner was reloaded and heartbeat is `ready`.
+- Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_RECENT_FILE_CONTEXT.md`.
+
+Next: TEST can rerun C.
