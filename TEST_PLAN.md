@@ -2459,6 +2459,22 @@ Result: `LINE READ CHAT OFF AUTO-READ T3002 PASS`
 
 Next: RELEASE can perform git status, secret scan, commit, and push.
 
+## Codex Default Delegation Gate
+
+Current result: `BLOCKED_FOR_DEFAULT_DELEGATION`.
+
+Do not run a live default-delegation Gate yet. FIX investigation found that the durable monitor does not create Codex threads or turns; it only runs the fixed local smoke-file action and checks that `CODEX_BIN` is executable.
+
+Before TEST can validate default delegation, a separate implementation Gate must provide:
+
+- A formal Codex host/API or CLI contract usable by the launchd monitor.
+- Strict sandbox and approval policy.
+- No-secret streamed event/result parsing.
+- Exactly-once task result/finalizer behavior.
+- Proof that original LINE instructions are passed only through the approved schema.
+
+Evidence: `FIX_EVIDENCE_CODEX_DEFAULT_DELEGATION_INVESTIGATION.md`.
+
 ## N8N idea_create Natural Reply Regression
 
 Synthetic n8n validation:

@@ -951,3 +951,16 @@ Status: PASS.
 - Evidence: `TEST_EVIDENCE_IDEA_CREATE_AI_NATURAL_FINAL_LIVE.md`.
 
 Next: RELEASE can perform git status, secret scan, commit, and push if the controller is ready.
+
+## Codex Default Delegation Investigation - 2026-07-18
+
+Status: `BLOCKED_FOR_DEFAULT_DELEGATION`.
+
+- FIX traced the current durable monitor executor before any implementation change.
+- Current `codex_task` execution is local fixed smoke-file code in `monitor/src/monitor.js`; `CODEX_BIN` is only an executable health check.
+- Worker still replaces codex_task work with fixed `create_smoke_file` project/path/content/instruction and guards other capabilities as `capability_not_yet_enabled`.
+- No Codex thread, Codex turn, desktop tool surface, plugin/skill/MCP listing, streamed turn event, or approval bridge is available to the launchd monitor.
+- Codex CLI `0.142.5` is installed and exposes non-interactive `exec` plus experimental app-server/remote-control commands, but `_03` has no selected Gateway protocol or client.
+- Evidence: `FIX_EVIDENCE_CODEX_DEFAULT_DELEGATION_INVESTIGATION.md`.
+
+Next: do not implement default delegation until a formal Codex host/API/permission contract is selected and authorized.

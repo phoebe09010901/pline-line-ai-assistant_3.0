@@ -786,3 +786,13 @@ Date: 2026-07-18
 - Pending queues returned to `idea=0`, `codex=0`.
 - Evidence: `TEST_EVIDENCE_IDEA_CREATE_AI_NATURAL_FINAL_LIVE.md`.
 - Next: RELEASE can perform git status, secret scan, commit, and push if the controller is ready.
+
+## Codex Default Delegation Investigation
+
+- Current `_03` monitor runner is `launchd` + Node.js, not a Codex turn runner.
+- `CODEX_BIN` is resolved by health/startup checks, but `runTask` does not spawn Codex. It writes the fixed smoke file directly and records `codex_execution=true`.
+- Worker task enqueue sanitizes every enabled codex_task to fixed `create_smoke_file` constants and does not pass the original LINE instruction to Codex.
+- The controller thread's Apps, Plugins, Skills, MCP tools, and Computer Use are not callable by the durable monitor process.
+- Codex CLI `0.142.5` shows `exec --json` and experimental app-server/remote-control surfaces, but no `_03` Gateway client, auth boundary, streamed event parser, or approval bridge exists.
+- Conclusion: default Codex delegation is blocked until a formal Gateway/host contract is selected.
+- Evidence: `FIX_EVIDENCE_CODEX_DEFAULT_DELEGATION_INVESTIGATION.md`.
