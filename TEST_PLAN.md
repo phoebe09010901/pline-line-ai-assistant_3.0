@@ -2475,6 +2475,26 @@ Before TEST can validate default delegation, a separate implementation Gate must
 
 Evidence: `FIX_EVIDENCE_CODEX_DEFAULT_DELEGATION_INVESTIGATION.md`.
 
+## LINE to Codex Gateway Connection Retest
+
+FIX deployed Worker version `fc7ed508-ab6d-4ca8-8f97-33086fc3c2eb`.
+
+TEST should rerun a fresh LINE command that clearly asks Codex to create a file in the approved `_03` runtime folder.
+
+Expected durable path:
+
+- Worker ingress/signature/admin/idempotency PASS.
+- If n8n returns `codex_delegate`, normal `codex_task_enqueued` path is used.
+- If n8n still returns `unsupported_intent` for explicit Codex text, Worker must record `codex_delegate_fallback_from_unsupported_intent` and still enqueue `codex_delegate`.
+- Monitor claim occurs.
+- Gateway observes Codex `thread.started` and `turn.started`.
+- Processing LINE notice is sent only after Codex turn starts.
+- Codex creates the requested runtime file.
+- Final LINE reply is sent only after actual completion.
+- Repeated same LINE event does not re-execute.
+
+Computer Use Calculator is not expected to PASS until the Codex host is approved to use Calculator. Evidence: `FIX_EVIDENCE_LINE_CODEX_GATEWAY_CONNECTION.md`.
+
 Implementation result: `PASS`.
 
 Required regression for this Gate:

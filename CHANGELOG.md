@@ -391,3 +391,14 @@
 - Deployed Worker version `ae59f6ff-59a4-407e-8b0d-6b0b617ce991`.
 - Extended the protection with a bounded n8n webhook timeout and catch-path failure notice; n8n timeout/exception now also produces a natural LINE failure final.
 - Deployed Worker version `610d11c5-a64c-4d6a-a640-f3cb8a5e5836`.
+
+## 2026-07-18 - LINE to Codex Gateway Connection
+
+- Rechecked the 20:31 and 20:43 live Codex LINE commands.
+- Both stopped at n8n `unsupported_intent`, before task creation, monitor claim, or Gateway invocation.
+- Added a narrow Worker fallback: explicit Codex text plus n8n `unsupported_intent` now records `codex_delegate_fallback_from_unsupported_intent` and enqueues a durable `codex_delegate` task.
+- Preserved non-Codex unsupported failure behavior.
+- Deployed Worker version `fc7ed508-ab6d-4ca8-8f97-33086fc3c2eb`.
+- Verified real Codex `exec --json` create/read file tasks with Codex thread ids and runtime result files.
+- Computer Use Calculator reached Codex but is blocked by host approval for Calculator.
+- Evidence: `FIX_EVIDENCE_LINE_CODEX_GATEWAY_CONNECTION.md`.

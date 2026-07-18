@@ -466,12 +466,28 @@ export async function processN8nInBackground(normalized, env) {
       n8n_route_type: n8nTarget.route_type,
       request_id_source: contractResult.request_id_source || undefined,
     });
-    await pushN8nFailureNotice(env, normalized, "n8n_background_contract_failure_notice", contractResult.reason);
-    return {
-      ok: false,
-      reason: contractResult.reason,
-      status: 502,
-    };
+    if (contractResult.reason === "unsupported_intent" && isCodexDelegateText(normalized.message_text)) {
+      await persistEvidenceStage(env, normalized, "codex_delegate_fallback_from_unsupported_intent", {
+        intent: "codex_delegate",
+        action: CODEX_TASK_ACTION,
+        status: "accepted",
+        reason: "n8n_unsupported_but_codex_text_detected",
+      });
+      logStage("codex_delegate_fallback_from_unsupported_intent", {
+        request_id: normalized.request_id,
+        intent: "codex_delegate",
+        action: CODEX_TASK_ACTION,
+      });
+      contractResult.ok = true;
+      contractResult.body = createFallbackCodexDelegateBody(normalized);
+    } else {
+      await pushN8nFailureNotice(env, normalized, "n8n_background_contract_failure_notice", contractResult.reason);
+      return {
+        ok: false,
+        reason: contractResult.reason,
+        status: 502,
+      };
+    }
   }
 
   if (contractResult.body.intent === "idea_create") {
@@ -962,6 +978,26 @@ export function codexTaskCapabilityCheck(messageText = "") {
     intent: "codex_delegate",
     reason: "",
     original_user_text_present: String(messageText || "").trim().length > 0,
+  };
+}
+
+function isCodexDelegateText(messageText = "") {
+  const text = String(messageText || "").trim();
+  if (!text) return false;
+  return /(?:\bcodex\b|請\s*Codex|請\s*codex|使用\s*Codex|使用\s*codex)/i.test(text);
+}
+
+function createFallbackCodexDelegateBody(normalized = {}) {
+  const sourceId = sanitizeEvidenceId(normalized.line_event_id || normalized.request_id || crypto.randomUUID());
+  return {
+    request_id: normalized.request_id,
+    intent: "codex_delegate",
+    reply_text: CODEX_PROCESSING_REPLY_TEXT,
+    tool_called: "worker_codex_delegate_fallback",
+    task_id: `codex-delegate-${sourceId}`.slice(0, 120),
+    codex_task: 1,
+    action: CODEX_TASK_ACTION,
+    status: "accepted",
   };
 }
 

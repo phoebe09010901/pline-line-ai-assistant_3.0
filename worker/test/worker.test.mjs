@@ -451,7 +451,7 @@ const contractFailureResult = await processN8nInBackground({
   line_event_id: "CONTRACT-FAIL",
   reply_token: "reply-token",
   user_id: "U_TEST",
-  message_text: "請 Codex 使用 Computer Use 開一個網頁",
+  message_text: "這是一句目前不支援的普通訊息",
   received_at: "2026-07-18T00:00:00.000Z",
 }, {
   N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
@@ -471,6 +471,47 @@ assert.equal(contractFailureStage.stage, "n8n_background_contract_failed");
 assert.equal(contractFailureStage.reason, "unsupported_intent");
 assert.equal(contractFailureNoticeStage.stage, "n8n_background_contract_failure_notice_completed");
 assert.equal(contractFailureNoticeStage.status, "failed_notice_sent");
+globalThis.fetch = originalFetch;
+
+const codexFallbackCalls = [];
+const codexFallbackKv = createMemoryKv();
+globalThis.fetch = async (url) => {
+  codexFallbackCalls.push(url);
+  return new Response(JSON.stringify({
+    request_id: "pline-v3-CONTRACT-CODEX-FALLBACK",
+    intent: "unsupported",
+    reply_text: "unsupported",
+    status: "accepted",
+  }), { status: 200 });
+};
+const codexFallbackResult = await processN8nInBackground({
+  request_id: "pline-v3-CONTRACT-CODEX-FALLBACK",
+  line_event_id: "CONTRACT-CODEX-FALLBACK",
+  reply_token: "reply-token",
+  user_id: "U_TEST",
+  message_text: "請 codex 使用 computer use 開一個網頁",
+  received_at: "2026-07-18T00:00:00.000Z",
+}, {
+  N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  RUNTIME_KV: codexFallbackKv,
+});
+assert.equal(codexFallbackResult.ok, true);
+assert.equal(codexFallbackResult.intent, "codex_delegate");
+assert.deepEqual(codexFallbackCalls, [
+  "https://n8n.example.test/webhook",
+]);
+const fallbackTask = JSON.parse(await codexFallbackKv.get("codex_task:v1:task:codex-delegate-CONTRACT-CODEX-FALLBACK"));
+assert.equal(fallbackTask.status, "queued");
+assert.equal(fallbackTask.action, "codex_delegate");
+assert.equal(fallbackTask.original_user_text, "請 codex 使用 computer use 開一個網頁");
+assert.equal(await codexFallbackKv.get("codex_task:v1:pending:codex-delegate-CONTRACT-CODEX-FALLBACK"), "codex_task:v1:task:codex-delegate-CONTRACT-CODEX-FALLBACK");
+const codexFallbackEvidence = await readEvidenceForRequest({ RUNTIME_KV: codexFallbackKv }, "pline-v3-CONTRACT-CODEX-FALLBACK");
+assert.equal(codexFallbackEvidence.stages.some((stage) => stage.stage === "n8n_background_contract_failed"), true);
+assert.equal(codexFallbackEvidence.stages.some((stage) => stage.stage === "codex_delegate_fallback_from_unsupported_intent"), true);
+assert.equal(codexFallbackEvidence.stages.some((stage) => stage.stage === "codex_task_enqueued"), true);
+assert.equal(codexFallbackEvidence.stages.some((stage) => stage.stage === "n8n_background_contract_failure_notice_completed"), false);
 globalThis.fetch = originalFetch;
 
 const n8nTimeoutCalls = [];

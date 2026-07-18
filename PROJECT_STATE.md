@@ -1001,3 +1001,20 @@ Status: `DEPLOYED`.
 - Deployed Worker version `ae59f6ff-59a4-407e-8b0d-6b0b617ce991`.
 - Follow-up hardening: `callN8nWebhook` now has a bounded timeout, and the fetch exception/timeout catch path also pushes the same natural failure final.
 - Deployed Worker version `610d11c5-a64c-4d6a-a640-f3cb8a5e5836`.
+
+## LINE to Codex Gateway Connection - 2026-07-18
+
+Status: `PARTIAL_BLOCKED_ON_COMPUTER_USE_APPROVAL`.
+
+- Rechecked recent LINE Codex commands at 20:31 and 20:43.
+- Both reached Worker, passed signature/admin/idempotency, returned webhook HTTP 200, and started n8n.
+- Both stopped before task creation with `n8n_background_contract_failed reason=unsupported_intent`; no monitor claim and no Gateway call occurred.
+- Worker now bridges only this narrow case: n8n `unsupported_intent` plus explicit Codex wording creates a durable `codex_delegate` task and records `codex_delegate_fallback_from_unsupported_intent`.
+- Non-Codex unsupported messages still get the existing natural failure notice and are not delegated.
+- Deployed Worker version: `fc7ed508-ab6d-4ca8-8f97-33086fc3c2eb`.
+- Monitor runner was reloaded and heartbeat is `ready`.
+- Real Codex `exec --json` create/read file verification passed with thread ids and result files.
+- Computer Use Calculator task reached Codex, but host approval blocked Calculator use: `Computer Use was not approved to use Calculator`.
+- Evidence: `FIX_EVIDENCE_LINE_CODEX_GATEWAY_CONNECTION.md`.
+
+Next: TEST can rerun a fresh LINE `codex_delegate` file task. Computer Use Calculator requires the user/host to approve Calculator for Codex Computer Use before that part can pass.

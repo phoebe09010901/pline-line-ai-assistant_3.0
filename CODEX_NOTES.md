@@ -797,6 +797,17 @@ Date: 2026-07-18
 - Conclusion: default Codex delegation is blocked until a formal Gateway/host contract is selected.
 - Evidence: `FIX_EVIDENCE_CODEX_DEFAULT_DELEGATION_INVESTIGATION.md`.
 
+## LINE to Codex Gateway Connection
+
+- Current selected interface remains official `codex exec --json`.
+- The latest two live Codex LINE failures did not reach monitor/Gateway; both stopped at n8n contract `unsupported_intent`.
+- Worker now handles explicit Codex text plus n8n `unsupported_intent` as a narrow fallback into `codex_delegate`.
+- Fallback evidence stage: `codex_delegate_fallback_from_unsupported_intent`.
+- Fallback task ids are derived from the LINE event id, preserving exactly-once behavior for the same event.
+- Real Gateway create/read tasks passed through Codex thread/turn execution and wrote/read `_03` runtime files.
+- Computer Use Calculator reached Codex but requires host approval for Calculator.
+- Evidence: `FIX_EVIDENCE_LINE_CODEX_GATEWAY_CONNECTION.md`.
+
 ## Codex Default Delegation Implementation
 
 - Implemented `monitor/src/codex_gateway.js`.
