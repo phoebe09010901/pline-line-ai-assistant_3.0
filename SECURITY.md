@@ -89,6 +89,38 @@ The normal `idea_create` path must not send a user-visible processing ACK before
 - Duplicate/repeated finalizer callbacks must not send another final.
 - Secret values, raw LINE User ID, encrypted line user reference, finalize token, signatures, and full webhook payload must never be written to repo, durable evidence, or final reports.
 
+## Codex Task Minimal Closed Loop Guard
+
+The `codex_task` path remains restricted to a single fixed action:
+
+```text
+create_smoke_file
+```
+
+Allowed output path:
+
+```text
+/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt
+```
+
+Allowed output content:
+
+```text
+Codex 任務測試成功
+```
+
+Security requirements:
+
+- No arbitrary shell command, arbitrary path, arbitrary filename, deletion, or project source modification is allowed.
+- Worker stores live LINE push target only as encrypted `line_user_ref`; raw LINE User ID is not stored.
+- Worker stores task-scoped `finalize_token`; token values must not be written to repo, durable evidence, or final reports.
+- Monitor writes a result record only after file write/readback succeeds.
+- Monitor must preserve the original task `created_at` when rewriting queued, claimed, completed, and failed records.
+- Codex result records must include `created_at` for traceability without storing raw LINE User ID or secrets.
+- Worker sends completed final only after monitor callback and task status `completed`.
+- Failed execution must not send completed final.
+- Repeated callback must not send another final.
+
 ## CODEX_BIN Requirement
 
 Future monitor implementation must:
@@ -106,3 +138,9 @@ Do not add Google Calendar, accounting, email, attachments, multiple agents, FOR
 ## TEST Result: Natural Final Without Visible ACK
 
 Live `_03` evidence confirmed normal `idea_create` skips visible fixed ACK, retains webhook HTTP 200, saves Dropbox JSON, and sends one natural final after save. Failure and AI fallback behavior passed safe local mocks. Repeated finalizer callback produced no duplicate final. Two-stage secret scan effective hit_count was `0`. LINE desktop read-receipt display remains a separate UI/OA setting observation. Result: `IDEA NATURAL FINAL REPLY WITHOUT ACK PASS`. Evidence: `TEST_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.
+
+## TEST Result: Codex Task Minimal Closed Loop
+
+Live `_03` Codex Task Gate kept execution inside `/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke`, wrote only the fixed smoke file content, and did not expose secrets, raw User ID, task ids, stack traces, or local paths in LINE-visible content. Effective secret scan hit_count was `0`. Gate failed because completed task records must retain `created_at`. Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+After Worker version `ca9001fa-cf03-43f7-9911-33f6301dd668`, TEST rerun confirmed the same safe execution boundary and LINE-visible content guard while completed task/result records retained `created_at`. Effective secret scan hit_count remained `0`. Gate result: PASS. Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.

@@ -11,13 +11,16 @@ export const MONITOR_NAME = "pline-v3-test-codex-monitor";
 export const PROJECT_ROOT = "/Users/phoebe/Documents/菲比 LINE 智能助理_03";
 export const WORKER_ROOT = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/worker";
 export const RUNTIME_KV_NAMESPACE_ID = "10cdfe018b3942b483faeaca6e517ae5";
-export const SMOKE_FILE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/codex-smoke.txt";
-export const SMOKE_FILE_CONTENT = "Codex 已打通";
+export const CODEX_TASK_PROJECT = "PLine03 safe smoke";
+export const CODEX_TASK_PROJECT_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke";
+export const SMOKE_FILE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt";
+export const SMOKE_FILE_CONTENT = "Codex 任務測試成功";
 export const FIXED_ACTION = "create_smoke_file";
 export const SAVE_IDEA_ACTION = "save_idea_json";
 export const DROPBOX_IDEA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03";
 export const WORKER_BASE_URL = "https://pline-v3-test-line-gateway.phy4175.workers.dev";
 export const IDEA_FINALIZE_PATH = "/test/idea-finalize";
+export const CODEX_FINALIZE_PATH = "/test/codex-finalize";
 export const TASK_PREFIX = "codex_task:v1";
 export const IDEA_TASK_PREFIX = "idea_json:v1";
 export const EVIDENCE_PREFIX = "evidence:v1";
@@ -59,6 +62,8 @@ export async function health(env = process.env) {
     monitor: MONITOR_NAME,
     project_root: PROJECT_ROOT,
     fixed_action: FIXED_ACTION,
+    codex_task_project: CODEX_TASK_PROJECT,
+    codex_task_project_path: CODEX_TASK_PROJECT_PATH,
     smoke_file_path: SMOKE_FILE_PATH,
     smoke_file_content: SMOKE_FILE_CONTENT,
     supported_actions: [FIXED_ACTION, SAVE_IDEA_ACTION],
@@ -92,8 +97,19 @@ export async function runTask(task, env = process.env) {
   if (normalized.content !== SMOKE_FILE_CONTENT) {
     return { ok: false, reason: "unsupported_content" };
   }
+  if (normalized.task_type !== "codex_task") {
+    return { ok: false, reason: "unsupported_task_type" };
+  }
+  if (normalized.project_path !== CODEX_TASK_PROJECT_PATH) {
+    return { ok: false, reason: "unsupported_project_path" };
+  }
 
+  await mkdir(CODEX_TASK_PROJECT_PATH, { recursive: true });
   await writeFile(SMOKE_FILE_PATH, SMOKE_FILE_CONTENT, "utf8");
+  const readback = await readFile(SMOKE_FILE_PATH, "utf8");
+  if (readback !== SMOKE_FILE_CONTENT) {
+    return { ok: false, reason: "smoke_file_readback_mismatch" };
+  }
   const fileStat = await stat(SMOKE_FILE_PATH);
   return {
     ok: true,
@@ -102,17 +118,26 @@ export async function runTask(task, env = process.env) {
     target_path: SMOKE_FILE_PATH,
     codex_execution: true,
     file_written: true,
+    tests: "PASS",
+    changed_files: ["runtime/codex-task-smoke/codex_task_smoke_test.txt"],
+    summary: "Fixed smoke file was created and verified.",
     mtime_ms: fileStat.mtimeMs,
     mtime_iso: fileStat.mtime.toISOString(),
   };
 }
 
 export function normalizeTask(task = {}) {
+  const action = task.action || FIXED_ACTION;
   return {
     task_id: sanitizeId(task.task_id || "pline-v3-test-smoke"),
+    task_type: action === FIXED_ACTION ? "codex_task" : "",
+    project: action === FIXED_ACTION ? sanitizeLabel(task.project || CODEX_TASK_PROJECT) : sanitizeLabel(task.project || ""),
+    project_path: action === FIXED_ACTION ? String(task.project_path || CODEX_TASK_PROJECT_PATH) : String(task.project_path || ""),
+    instruction: action === FIXED_ACTION ? String(task.instruction || "Create or overwrite the fixed smoke file with the fixed smoke content.") : String(task.instruction || ""),
     request_id: sanitizeId(task.request_id || ""),
     marker: sanitizeId(task.marker || ""),
-    action: task.action || FIXED_ACTION,
+    action,
+    created_at: String(task.created_at || ""),
     target_path: task.target_path || SMOKE_FILE_PATH,
     target_dir: task.target_dir || DROPBOX_IDEA_DIR,
     content: task.content || SMOKE_FILE_CONTENT,
@@ -143,7 +168,7 @@ export async function claimOnce(options = {}) {
       continue;
     }
     const status = JSON.parse(raw).status || "";
-    if (status !== "pending") {
+    if (status !== "pending" && status !== "queued") {
       continue;
     }
 
@@ -163,12 +188,26 @@ export async function claimOnce(options = {}) {
 
     const execution = await runTask(task, env);
     if (!execution.ok) {
+      const failedResultRecord = codexResultRecord(task, {
+        ok: false,
+        reason: execution.reason,
+      });
       await kv.put(taskKey(task.task_id, task.action), JSON.stringify({
         ...claimRecord,
         status: "failed",
         failed_at: new Date().toISOString(),
         reason: execution.reason,
       }));
+      if (task.action === FIXED_ACTION) {
+        await kv.put(codexResultKey(task.task_id), JSON.stringify(failedResultRecord));
+        const callbackResult = await notifyCodexFinalizer(task, "failed", env, execution.reason);
+        await writeEvidenceStage(kv, task, callbackResult.ok ? "codex_task_final_callback_completed" : "codex_task_final_callback_failed", {
+          monitor: MONITOR_NAME,
+          action: task.action,
+          status: "failed",
+          reason: callbackResult.ok ? "" : callbackResult.reason,
+        });
+      }
       if (task.action === SAVE_IDEA_ACTION) {
         const callbackResult = await notifyIdeaFinalizer(task, "failed", env);
         await writeEvidenceStage(kv, task, callbackResult.ok ? "idea_json_final_callback_completed" : "idea_json_final_callback_failed", {
@@ -201,7 +240,7 @@ export async function claimOnce(options = {}) {
       status: completedStatus,
       file_name: execution.file_name,
     });
-    await kv.put(taskKey(task.task_id, task.action), JSON.stringify({
+    const completedTaskRecord = {
       ...claimRecord,
       status: completedStatus,
       completed_at: completedAt,
@@ -210,7 +249,24 @@ export async function claimOnce(options = {}) {
       mtime_ms: execution.mtime_ms,
       mtime_iso: execution.mtime_iso,
       file_name: execution.file_name,
-    }));
+    };
+    await kv.put(taskKey(task.task_id, task.action), JSON.stringify(completedTaskRecord));
+    if (task.action === FIXED_ACTION) {
+      const resultRecord = codexResultRecord(task, execution);
+      await kv.put(codexResultKey(task.task_id), JSON.stringify(resultRecord));
+      await writeEvidenceStage(kv, task, "codex_task_result_recorded", {
+        monitor: MONITOR_NAME,
+        action: task.action,
+        status: resultRecord.status,
+      });
+      const callbackResult = await notifyCodexFinalizer(task, completedStatus, env);
+      await writeEvidenceStage(kv, task, callbackResult.ok ? "codex_task_final_callback_completed" : "codex_task_final_callback_failed", {
+        monitor: MONITOR_NAME,
+        action: task.action,
+        status: completedStatus,
+        reason: callbackResult.ok ? "" : callbackResult.reason,
+      });
+    }
     if (task.action === SAVE_IDEA_ACTION) {
       const callbackResult = await notifyIdeaFinalizer(task, completedStatus, env);
       await writeEvidenceStage(kv, task, callbackResult.ok ? "idea_json_final_callback_completed" : "idea_json_final_callback_failed", {
@@ -261,15 +317,22 @@ export async function createSyntheticTask(task = {}, options = {}) {
     request_id: task.request_id || `pline-v3-fix17-${Date.now()}`,
     marker: task.marker || "",
     action: FIXED_ACTION,
+    created_at: task.created_at || new Date().toISOString(),
+    task_type: "codex_task",
+    project: CODEX_TASK_PROJECT,
+    project_path: CODEX_TASK_PROJECT_PATH,
+    instruction: "Create or overwrite the fixed smoke file with the fixed smoke content.",
     target_path: SMOKE_FILE_PATH,
     content: SMOKE_FILE_CONTENT,
+    finalize_token: task.finalize_token || "",
+    line_user_ref: task.line_user_ref || "",
   });
   await kv.put(taskKey(normalized.task_id, normalized.action), JSON.stringify({
     ...normalized,
     schema: "pline-v3-test-codex-task/v1",
-    status: "pending",
+    status: "queued",
     monitor: MONITOR_NAME,
-    created_at: new Date().toISOString(),
+    created_at: normalized.created_at || new Date().toISOString(),
   }));
   return { ok: true, ...normalized };
 }
@@ -429,6 +492,76 @@ export async function notifyIdeaFinalizer(task = {}, status = "completed", env =
   };
 }
 
+export async function notifyCodexFinalizer(task = {}, status = "completed", env = process.env, reason = "") {
+  if (task.action !== FIXED_ACTION) {
+    return { ok: true, status: "skipped_non_codex_task" };
+  }
+  if (env.CODEX_FINALIZE_DISABLED === "1") {
+    return { ok: true, status: "disabled" };
+  }
+  if (!task.finalize_token) {
+    return { ok: false, reason: "missing_finalize_token" };
+  }
+  const baseUrl = String(env.WORKER_BASE_URL || WORKER_BASE_URL).replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}${CODEX_FINALIZE_PATH}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      task_id: task.task_id,
+      request_id: task.request_id,
+      action: FIXED_ACTION,
+      status,
+      reason,
+      finalize_token: task.finalize_token,
+    }),
+  });
+  let body = {};
+  try {
+    body = await response.json();
+  } catch {
+    body = {};
+  }
+  if (!response.ok || body.status === "rejected") {
+    return {
+      ok: false,
+      reason: body.reason || `finalize_http_${response.status}`,
+      status: body.status || "failed",
+    };
+  }
+  return {
+    ok: true,
+    status: body.status || "ok",
+    pushed: Boolean(body.pushed),
+  };
+}
+
+export function codexResultRecord(task = {}, execution = {}) {
+  if (!execution.ok) {
+    return {
+      task_id: task.task_id,
+      status: "failed",
+      created_at: task.created_at || "",
+      summary: "The safe smoke task did not complete.",
+      tests: "FAIL",
+      changed_files: [],
+      commit: null,
+      error: execution.reason || "unknown_error",
+    };
+  }
+  return {
+    task_id: task.task_id,
+    status: "completed",
+    created_at: task.created_at || "",
+    summary: execution.summary || "Safe smoke file was created and verified.",
+    tests: execution.tests || "PASS",
+    changed_files: execution.changed_files || ["runtime/codex-task-smoke/codex_task_smoke_test.txt"],
+    commit: null,
+    error: null,
+  };
+}
+
 export function normalizeIdeaJson(idea = {}) {
   return {
     schema_version: idea.schema_version,
@@ -536,6 +669,10 @@ function taskKey(taskId, action = FIXED_ACTION) {
   return `${prefix}:task:${sanitizeId(taskId)}`;
 }
 
+function codexResultKey(taskId) {
+  return `${TASK_PREFIX}:result:${sanitizeId(taskId)}`;
+}
+
 function sanitizeEvidenceRecord(record) {
   const allowed = new Set([
     "worker",
@@ -566,6 +703,10 @@ function sanitizeEvidenceRecord(record) {
 
 function sanitizeId(value) {
   return String(value || "").replace(/[^A-Za-z0-9:_\-.]/g, "").slice(0, 160);
+}
+
+function sanitizeLabel(value) {
+  return String(value || "").replace(/[^\p{L}\p{N} _:\-.]/gu, "").slice(0, 120);
 }
 
 function ideaFileName(idea) {

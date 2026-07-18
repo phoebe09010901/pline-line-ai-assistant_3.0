@@ -184,6 +184,28 @@
 - Deployed Worker version `dbda345b-a3b4-41ca-bc8b-a12c8547179c`.
 - Added no-secret evidence file `FIX_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.
 
+## 2026-07-18 - FIX Codex Task Minimal Closed Loop
+
+- Added structured codex_task record fields for the minimal Gate: task type, project, project path, instruction, queued status, and created time.
+- Moved the codex smoke output to the safe runtime path `runtime/codex-task-smoke/codex_task_smoke_test.txt`.
+- Changed required smoke content to `Codex 任務測試成功`.
+- Worker now sends only a natural processing notice after codex_task enqueue and waits for monitor callback before sending the completion final.
+- Monitor now claims queued codex tasks, writes and verifies the smoke file, writes a result record, and calls Worker `/test/codex-finalize`.
+- Worker codex finalizer is task-token guarded and exactly-once.
+- Added Worker/monitor tests for task structure, completed/failed results, callback final, repeated callback suppression, and idea_create regression.
+- Deployed Worker version `3f0f167c-71b1-4e89-aa1c-6f559507ed46`.
+- Added no-secret evidence file `FIX_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+## 2026-07-18 - FIX Codex Task created_at Schema Preservation
+
+- Preserved codex_task `created_at` in monitor `normalizeTask()`.
+- Preserved `created_at` through queued, claimed, completed, and failed task records.
+- Added `created_at` to completed and failed codex result records.
+- Added tests covering queued/completed/failed lifecycle schema preservation.
+- Verified remote no-secret selftest with completed task/result records retaining `created_at`.
+- Worker redeployed for handoff; current version `ca9001fa-cf03-43f7-9911-33f6301dd668`; dry-run/readiness rechecked.
+- Added no-secret evidence file `FIX_EVIDENCE_CODEX_TASK_CREATED_AT_SCHEMA.md`.
+
 ## 2026-07-18 - TEST IDEA NATURAL FINAL REPLY WITHOUT ACK Gate PASS
 
 - Reran live `_03` natural final Gate after Worker version `dbda345b-a3b4-41ca-bc8b-a12c8547179c`.
@@ -194,3 +216,28 @@
 - Recorded LINE desktop read-receipt display as UI/OA setting observation only.
 - Marked `IDEA NATURAL FINAL REPLY WITHOUT ACK PASS`.
 - Added no-secret evidence file `TEST_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.
+
+## 2026-07-18 - TEST Codex Task Minimal Closed Loop Gate FAILED
+
+- Ran live `_03` Codex Task minimal closed-loop Gate with marker `T2401-20260718113100`.
+- Verified codex_task classification, monitor claim, runtime smoke file creation, fixed file content, result record `completed` / `PASS`, natural LINE processing/final messages, repeated callback exactly-once behavior, and effective secret scan hit_count `0`.
+- Did not mark PASS because the completed task record did not retain required field `created_at`.
+- Added no-secret evidence file `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+## 2026-07-18 - TEST Codex Task Minimal Closed Loop Gate PASS
+
+- Reran live `_03` Codex Task minimal closed-loop Gate after Worker version `ca9001fa-cf03-43f7-9911-33f6301dd668`.
+- Verified codex_task classification, monitor claim, runtime smoke file creation, fixed file content, result record `completed` / `PASS`, natural LINE processing/final messages, repeated callback exactly-once behavior, and effective secret scan hit_count `0`.
+- Verified completed task record and result record both retain `created_at`.
+- Marked Gate `PASS`.
+- Updated no-secret evidence file `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+## 2026-07-18 - FIX Codex Task created_at Schema Completed
+
+- Completed the minimal schema repair after TEST Codex Task Gate failure.
+- Monitor now preserves `created_at` in queued, claimed, completed, and failed task records.
+- Codex result records include `created_at`.
+- Remote no-secret selftest confirmed completed task/result records include `created_at`.
+- Worker redeployed for handoff; current version `ca9001fa-cf03-43f7-9911-33f6301dd668`.
+- Evidence: `FIX_EVIDENCE_CODEX_TASK_CREATED_AT_SCHEMA.md`.
+- Next: TEST reruns the live Codex Task Gate.

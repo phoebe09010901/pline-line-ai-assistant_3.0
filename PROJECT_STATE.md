@@ -455,6 +455,36 @@ Hand off to `PLine03｜RELEASE｜部署與收尾` for git status, secret scan, c
 
 Hand off to `PLine03｜TEST｜測試與驗收` to rerun `IDEA NATURAL FINAL REPLY WITHOUT ACK` Gate: idea_create should show no first ACK and exactly one natural final after Dropbox JSON save.
 
+## Codex Task Minimal Closed Loop FIX
+
+- FIX implemented the minimal codex_task closed loop without changing the accepted idea_create / Dropbox path.
+- Worker now creates a structured `codex_task` record with `status=queued`, project metadata, fixed safe runtime path, task-scoped finalize token, and encrypted LINE user reference.
+- Worker sends only a natural processing notice after enqueue succeeds; completion final is deferred until monitor execution completes.
+- Monitor now claims queued codex tasks, writes `/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt`, verifies exact content `Codex 任務測試成功`, writes a completed result record, and calls Worker `/test/codex-finalize`.
+- Worker codex finalizer validates task id/request id/finalize token and sends completed or failed LINE final exactly once.
+- Worker deployed version: `3f0f167c-71b1-4e89-aa1c-6f559507ed46`.
+- No-secret selftest marker `T2300-20260718093000` completed with remote result `status=completed`, `tests=PASS`, `commit=null`, `error=null`.
+- No-secret evidence file: `FIX_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+## Next Stage
+
+Hand off to `PLine03｜TEST｜測試與驗收` to run the live `Codex Task 最小工作閉環 Gate`, including final LINE push evidence and duplicate/replay checks.
+
+## Codex Task created_at Schema FIX
+
+- TEST proved the Codex task closed-loop function worked, but failed the Gate because completed task record did not retain hard schema field `created_at`.
+- Root cause: monitor `normalizeTask()` dropped `created_at` before rewriting claimed/completed/failed task records.
+- FIX preserves `created_at` through queued, claimed, completed, and failed task lifecycle.
+- Codex result records now include `created_at` for completed and failed results.
+- Smoke file behavior, LINE visible messages, finalizer exactly-once, idea_create, and Dropbox paths were not changed.
+- Worker was redeployed after the monitor fix; current version `ca9001fa-cf03-43f7-9911-33f6301dd668`.
+- No-secret selftest `T2400-20260718113900` confirmed remote completed task record and result record both include `created_at`.
+- No-secret evidence file: `FIX_EVIDENCE_CODEX_TASK_CREATED_AT_SCHEMA.md`.
+
+## Next Stage
+
+Hand off to `PLine03｜TEST｜測試與驗收` to rerun the live Codex Task Gate and confirm `created_at` is present in completed task/result records.
+
 ## IDEA NATURAL FINAL REPLY WITHOUT ACK Gate
 
 - TEST reran the Gate after Worker version `dbda345b-a3b4-41ca-bc8b-a12c8547179c`.
@@ -478,3 +508,53 @@ Hand off to `PLine03｜TEST｜測試與驗收` to rerun `IDEA NATURAL FINAL REPL
 ## Next Stage
 
 Hand off to `PLine03｜RELEASE｜部署與收尾` for git status, secret scan, commit, and push to `v1/minimal-dual-path`. Optional separate follow-up can inspect `_03` LINE Developers / LINE OA Manager read-receipt settings with Computer Use.
+
+## Codex Task Minimal Closed Loop Gate
+
+- TEST ran live Codex Task Gate after Worker version `3f0f167c-71b1-4e89-aa1c-6f559507ed46`.
+- LINE marker: `T2401-20260718113100`.
+- Task ID: `pline-v3-codex-1784345467797`.
+- Monitor created runtime smoke file at `/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt`.
+- Smoke file content verified: `Codex 任務測試成功`.
+- Result record had `status=completed`, `tests=PASS`, `commit=null`, `error=null`.
+- LINE natural processing and final messages were observed without forbidden internal terms.
+- Repeated finalizer callback returned `already_completed`, `pushed=false`, and did not rerun execution or push a duplicate final.
+- Worker/monitor tests passed; idea_create and Dropbox regressions passed; effective secret scan hit_count was `0`.
+- Gate failed because the completed task record did not retain required field `created_at`.
+- Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+## Next Stage
+
+Hand off to `PLine03｜FIX｜Worker 與程式` to preserve `created_at` in completed Codex task records, then rerun TEST.
+
+## Codex Task Minimal Closed Loop Gate Rerun After created_at Fix
+
+- TEST reran live Codex Task Gate after Worker version `ca9001fa-cf03-43f7-9911-33f6301dd668`.
+- LINE marker: `T2501-20260718114510`.
+- Task ID: `pline-v3-codex-1784346318391`.
+- Monitor created runtime smoke file at `/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt`.
+- Smoke file content verified: `Codex 任務測試成功`.
+- Completed task record includes `task_id`, `task_type`, `project`, `project_path`, `instruction`, `status`, and `created_at`.
+- Result record used the same task ID and includes `created_at`, `status=completed`, `tests=PASS`, `commit=null`, and `error=null`.
+- LINE natural processing and final messages were observed without forbidden internal terms.
+- Repeated finalizer callback returned `already_completed`, `pushed=false`, and did not rerun execution or push a duplicate final.
+- Worker/monitor tests passed; idea_create and Dropbox regressions passed; effective secret scan hit_count was `0`.
+- Gate result: `PASS`.
+- Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+## Next Stage
+
+Hand off to `PLine03｜RELEASE｜部署與收尾` for git status, secret scan, commit, and push to `v1/minimal-dual-path`.
+
+## Codex Task created_at Schema FIX Completed
+
+- FIX completed the only TEST blocker from `T2401-20260718113100`.
+- Monitor now preserves `created_at` across queued, claimed, completed, and failed codex_task records.
+- Completed and failed result records also include `created_at`.
+- Remote no-secret selftest `T2400-20260718113900` confirmed completed task and result records include `created_at`.
+- Worker redeployed for handoff; current version `ca9001fa-cf03-43f7-9911-33f6301dd668`; dry-run and readiness rechecked.
+- Evidence: `FIX_EVIDENCE_CODEX_TASK_CREATED_AT_SCHEMA.md`.
+
+## Next Stage
+
+Hand off to `PLine03｜TEST｜測試與驗收` to rerun Codex Task Gate and confirm `created_at` present.

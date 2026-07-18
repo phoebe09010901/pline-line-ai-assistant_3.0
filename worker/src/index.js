@@ -15,18 +15,25 @@ const SAFE_REPLY_TEXT = {
   unsupported: "目前我只能先幫妳記想法，或處理指定的小任務。",
 };
 const LINE_REPLY_MODE = "no_visible_ack_background_n8n";
-const CODEX_TASK_FINAL_MODE = "background_push_final";
+const CODEX_TASK_FINAL_MODE = "monitor_callback_exactly_once";
 const CODEX_TASK_PREFIX = "codex_task:v1";
 const IDEA_TASK_PREFIX = "idea_json:v1";
 const CODEX_MONITOR_NAME = "pline-v3-test-codex-monitor";
 const CODEX_TASK_ACTION = "create_smoke_file";
 const IDEA_TASK_ACTION = "save_idea_json";
-const CODEX_SMOKE_FILE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/codex-smoke.txt";
-const CODEX_SMOKE_FILE_CONTENT = "Codex 已打通";
+const CODEX_TASK_PROJECT = "PLine03 safe smoke";
+const CODEX_TASK_PROJECT_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke";
+const CODEX_TASK_SMOKE_FILE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt";
+const CODEX_TASK_SMOKE_FILE_CONTENT = "Codex 任務測試成功";
+const CODEX_TASK_INSTRUCTION = "Create or overwrite the fixed smoke file with the fixed smoke content.";
 const DROPBOX_IDEA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03";
+const CODEX_PROCESSING_REPLY_TEXT = "收到～這件事需要一點時間，我處理完成後再告訴妳 🛠️";
+const CODEX_COMPLETED_REPLY_TEXT = "已經處理完成了 ✨\n指定的小任務已成功執行。";
+const CODEX_FAILED_REPLY_TEXT = "這次沒有順利完成，我先停在安全狀態，沒有假裝處理成功 🙏";
 const IDEA_SAVED_FALLBACK_REPLY_TEXT = "已經幫妳記下來了 💡";
 const IDEA_SAVE_FAILED_REPLY_TEXT = "這次沒有成功保存，我先不假裝記好了，請稍後再試一次 🙏";
 const IDEA_FINALIZE_PATH = "/test/idea-finalize";
+const CODEX_FINALIZE_PATH = "/test/codex-finalize";
 const EVIDENCE_PREFIX = "evidence:v1";
 const EVIDENCE_TTL_SECONDS = 172800;
 const WEBHOOK_ACCEPT_EVIDENCE_CHECKPOINT_TIMEOUT_MS = 1500;
@@ -51,6 +58,10 @@ export default {
 
     if (request.method === "POST" && url.pathname === IDEA_FINALIZE_PATH) {
       return handleIdeaFinalize(request, env);
+    }
+
+    if (request.method === "POST" && url.pathname === CODEX_FINALIZE_PATH) {
+      return handleCodexFinalize(request, env);
     }
 
     if (request.method === "POST" && url.pathname === "/line/webhook") {
@@ -234,11 +245,16 @@ export function workerHealth(env = {}) {
       path: IDEA_FINALIZE_PATH,
       mode: "task_token_exactly_once",
     },
+    codex_finalizer: {
+      path: CODEX_FINALIZE_PATH,
+      mode: "task_token_exactly_once",
+    },
     codex_monitor: {
       name: CODEX_MONITOR_NAME,
       task_prefixes: [CODEX_TASK_PREFIX, IDEA_TASK_PREFIX],
       actions: [CODEX_TASK_ACTION, IDEA_TASK_ACTION],
-      target_path: CODEX_SMOKE_FILE_PATH,
+      target_path: CODEX_TASK_SMOKE_FILE_PATH,
+      target_content: CODEX_TASK_SMOKE_FILE_CONTENT,
       dropbox_idea_dir: DROPBOX_IDEA_DIR,
     },
     admin_bootstrap: {
@@ -449,7 +465,7 @@ export async function processN8nInBackground(normalized, env) {
       intent: contractResult.body.intent,
       action: contractResult.body.action,
       task_id_present: Boolean(contractResult.body.task_id),
-      status: enqueueResult.ok ? "pending" : "failed",
+      status: enqueueResult.duplicate ? "duplicate" : enqueueResult.ok ? "queued" : "failed",
       reason: enqueueResult.ok ? "" : enqueueResult.reason,
     });
     logStage(enqueueResult.ok ? "codex_task_enqueued" : "codex_task_enqueue_failed", {
@@ -459,13 +475,50 @@ export async function processN8nInBackground(normalized, env) {
       reason: enqueueResult.ok ? undefined : enqueueResult.reason,
     });
 
-    const pushResult = await pushToLine(normalized.user_id, contractResult.body.reply_text, env);
+    if (!enqueueResult.ok) {
+      const failureNotice = await pushToLine(normalized.user_id, CODEX_FAILED_REPLY_TEXT, env);
+      await persistEvidenceStage(env, normalized, failureNotice.ok ? "codex_task_delivery_failed_notice_completed" : "codex_task_delivery_failed_notice_failed", {
+        intent: contractResult.body.intent,
+        action: CODEX_TASK_ACTION,
+        status: "failed",
+        reason: failureNotice.ok ? enqueueResult.reason : failureNotice.reason,
+      });
+      return {
+        ok: false,
+        request_id: normalized.request_id,
+        intent: contractResult.body.intent,
+        status: "failed",
+        reason: enqueueResult.reason,
+      };
+    }
+
+    if (enqueueResult.duplicate) {
+      await persistEvidenceStage(env, normalized, "codex_task_delivery_suppressed", {
+        intent: contractResult.body.intent,
+        action: CODEX_TASK_ACTION,
+        status: "duplicate",
+        reason: "duplicate_codex_task",
+      });
+      logStage("codex_task_delivery_suppressed", {
+        request_id: normalized.request_id,
+        action: CODEX_TASK_ACTION,
+        status: "duplicate",
+      });
+      return {
+        ok: true,
+        request_id: normalized.request_id,
+        intent: contractResult.body.intent,
+        status: "duplicate",
+      };
+    }
+
+    const pushResult = await pushToLine(normalized.user_id, CODEX_PROCESSING_REPLY_TEXT, env);
     if (!pushResult.ok) {
-      await persistEvidenceStage(env, normalized, "line_push_final_failed", {
+      await persistEvidenceStage(env, normalized, "codex_task_processing_notice_failed", {
         reason: pushResult.reason,
         status: pushResult.status,
       });
-      logStage("line_push_final_failed", {
+      logStage("codex_task_processing_notice_failed", {
         request_id: normalized.request_id,
         reason: pushResult.reason,
         status: pushResult.status,
@@ -476,14 +529,16 @@ export async function processN8nInBackground(normalized, env) {
         status: pushResult.status,
       };
     }
-    await persistEvidenceStage(env, normalized, "line_push_final_completed", {
+    await persistEvidenceStage(env, normalized, "codex_task_processing_notice_completed", {
       intent: contractResult.body.intent,
-      final_mode: CODEX_TASK_FINAL_MODE,
+      action: CODEX_TASK_ACTION,
+      status: "delivered",
     });
-    logStage("line_push_final_completed", {
+    logStage("codex_task_processing_notice_completed", {
       request_id: normalized.request_id,
       intent: contractResult.body.intent,
-      final_mode: CODEX_TASK_FINAL_MODE,
+      action: CODEX_TASK_ACTION,
+      status: "delivered",
     });
   }
 
@@ -513,22 +568,44 @@ export async function enqueueCodexTask(env = {}, normalized = {}, body = {}) {
   if (!normalized?.request_id || !body.task_id) {
     return { ok: false, reason: "missing_codex_task_identity" };
   }
+  const lineUserRef = await sealLineUserRef(normalized.user_id, env);
+  if (!lineUserRef.ok) {
+    return lineUserRef;
+  }
+
+  const key = codexTaskKey(body.task_id);
+  const existingRaw = await env.RUNTIME_KV.get(key);
+  if (existingRaw) {
+    const existing = parseJsonSafely(existingRaw);
+    return {
+      ok: true,
+      duplicate: true,
+      key,
+      task_id: existing?.task_id || body.task_id,
+      status: existing?.status || "queued",
+    };
+  }
 
   const task = sanitizeCodexTaskRecord({
     schema: "pline-v3-test-codex-task/v1",
-    status: "pending",
+    status: "queued",
     monitor: CODEX_MONITOR_NAME,
     task_id: body.task_id,
+    task_type: "codex_task",
+    project: CODEX_TASK_PROJECT,
+    project_path: CODEX_TASK_PROJECT_PATH,
+    instruction: CODEX_TASK_INSTRUCTION,
     request_id: normalized.request_id,
     marker: normalized.gate_marker,
     action: CODEX_TASK_ACTION,
-    target_path: CODEX_SMOKE_FILE_PATH,
-    content: CODEX_SMOKE_FILE_CONTENT,
+    target_path: CODEX_TASK_SMOKE_FILE_PATH,
+    content: CODEX_TASK_SMOKE_FILE_CONTENT,
+    line_user_ref: lineUserRef.value,
+    finalize_token: createFinalizeToken(),
     created_at: new Date().toISOString(),
   });
-  const key = codexTaskKey(body.task_id);
   await env.RUNTIME_KV.put(key, JSON.stringify(task), { expirationTtl: EVIDENCE_TTL_SECONDS });
-  return { ok: true, key };
+  return { ok: true, key, task_id: body.task_id, status: "queued" };
 }
 
 export async function enqueueIdeaTask(env = {}, normalized = {}, body = {}) {
@@ -931,6 +1008,59 @@ export async function handleIdeaFinalize(request, env = {}) {
   return jsonResponse(result, result.ok ? 200 : 500);
 }
 
+export async function handleCodexFinalize(request, env = {}) {
+  if (!env.RUNTIME_KV) {
+    return jsonResponse({ status: "rejected", reason: "missing_RUNTIME_KV" }, 503);
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ status: "rejected", reason: "invalid_json" }, 400);
+  }
+
+  const taskId = sanitizeEvidenceId(body.task_id || "");
+  const requestId = sanitizeEvidenceId(body.request_id || "");
+  const providedToken = sanitizeEvidenceId(body.finalize_token || "");
+  const callbackStatus = sanitizeEvidenceId(body.status || "");
+  if (!taskId || !requestId || !providedToken) {
+    return jsonResponse({ status: "rejected", reason: "missing_finalize_identity" }, 400);
+  }
+
+  const taskRaw = await env.RUNTIME_KV.get(codexTaskKey(taskId));
+  if (!taskRaw) {
+    return jsonResponse({ status: "rejected", reason: "missing_codex_task" }, 404);
+  }
+
+  const task = parseJsonSafely(taskRaw);
+  if (!task) {
+    return jsonResponse({ status: "rejected", reason: "unreadable_codex_task" }, 409);
+  }
+
+  if (task.action !== CODEX_TASK_ACTION || task.request_id !== requestId) {
+    return jsonResponse({ status: "rejected", reason: "finalize_task_mismatch" }, 409);
+  }
+  if (!task.finalize_token || !constantTimeEqual(task.finalize_token, providedToken)) {
+    return jsonResponse({ status: "rejected", reason: "invalid_finalize_token" }, 401);
+  }
+
+  if (callbackStatus === "failed" || task.status === "failed") {
+    const failedResult = await pushCodexFailureOnce(env, task, body.reason || "monitor_task_failed");
+    return jsonResponse(failedResult, failedResult.ok ? 200 : 500);
+  }
+
+  if (callbackStatus !== "completed") {
+    return jsonResponse({ status: "rejected", reason: "unsupported_finalize_status" }, 400);
+  }
+  if (task.status !== "completed") {
+    return jsonResponse({ status: "rejected", reason: "codex_task_not_completed" }, 409);
+  }
+
+  const result = await pushCodexFinalOnce(env, task);
+  return jsonResponse(result, result.ok ? 200 : 500);
+}
+
 export async function persistWebhookAcceptedEvidenceCheckpoint(env = {}, normalized = {}, details = {}) {
   return persistEvidenceStages(env, normalized, [
     ["line_event_received", { marker: normalized.gate_marker }],
@@ -1136,7 +1266,165 @@ async function pushIdeaFailureOnce(env = {}, task = {}, reason = "monitor_task_f
   return { ok: true, status: "failure_notice_completed", pushed: true, request_id: task.request_id };
 }
 
+async function pushCodexFinalOnce(env = {}, task = {}) {
+  const finalKey = codexFinalKey(task.task_id);
+  const existingRaw = await env.RUNTIME_KV.get(finalKey);
+  if (existingRaw) {
+    const existing = parseJsonSafely(existingRaw);
+    if (existing?.status === "completed" || existing?.status === "sending") {
+      return {
+        ok: true,
+        status: existing.status === "completed" ? "already_completed" : "already_sending",
+        pushed: false,
+        request_id: task.request_id,
+      };
+    }
+  }
+
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-codex-final/v1",
+    status: "sending",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+
+  const userId = await openLineUserRef(task.line_user_ref, env);
+  if (!userId.ok) {
+    await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+      schema: "pline-v3-test-codex-final/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: userId.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_final_push_failed", {
+      action: CODEX_TASK_ACTION,
+      status: "failed",
+      reason: userId.reason,
+    });
+    return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
+  }
+
+  const pushResult = await pushToLine(userId.value, CODEX_COMPLETED_REPLY_TEXT, env);
+  if (!pushResult.ok) {
+    await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+      schema: "pline-v3-test-codex-final/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: pushResult.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_final_push_failed", {
+      action: CODEX_TASK_ACTION,
+      status: "failed",
+      reason: pushResult.reason,
+    });
+    return { ok: false, status: "failed", reason: pushResult.reason, request_id: task.request_id };
+  }
+
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-codex-final/v1",
+    status: "completed",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_final_push_completed", {
+    action: CODEX_TASK_ACTION,
+    status: "completed",
+    final_mode: "monitor_callback_exactly_once",
+  });
+  logStage("codex_task_final_push_completed", {
+    request_id: task.request_id,
+    action: CODEX_TASK_ACTION,
+    status: "completed",
+    final_mode: "monitor_callback_exactly_once",
+  });
+  return { ok: true, status: "completed", pushed: true, request_id: task.request_id };
+}
+
+async function pushCodexFailureOnce(env = {}, task = {}, reason = "monitor_task_failed") {
+  const finalKey = codexFinalKey(task.task_id);
+  const existingRaw = await env.RUNTIME_KV.get(finalKey);
+  if (existingRaw) {
+    const existing = parseJsonSafely(existingRaw);
+    if (existing?.status === "completed" || existing?.status === "sending" || existing?.status === "failure_notice_completed") {
+      return {
+        ok: true,
+        status: existing.status,
+        pushed: false,
+        request_id: task.request_id,
+      };
+    }
+  }
+
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-codex-final/v1",
+    status: "sending",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    reason,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+
+  const userId = await openLineUserRef(task.line_user_ref, env);
+  if (!userId.ok) {
+    await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+      schema: "pline-v3-test-codex-final/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: userId.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
+  }
+
+  const pushResult = await pushToLine(userId.value, CODEX_FAILED_REPLY_TEXT, env);
+  if (!pushResult.ok) {
+    await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+      schema: "pline-v3-test-codex-final/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: pushResult.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_final_push_failed", {
+      action: CODEX_TASK_ACTION,
+      status: "failed",
+      reason: pushResult.reason,
+    });
+    return { ok: false, status: "failed", reason: pushResult.reason, request_id: task.request_id };
+  }
+
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-codex-final/v1",
+    status: "failure_notice_completed",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    reason,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_final_failure_notice_completed", {
+    action: CODEX_TASK_ACTION,
+    status: "failed",
+    reason,
+  });
+  return { ok: true, status: "failure_notice_completed", pushed: true, request_id: task.request_id };
+}
+
 function ideaTaskEvidenceTarget(task = {}) {
+  return {
+    request_id: task.request_id,
+    gate_marker: task.marker || task.gate_marker || "",
+  };
+}
+
+function codexTaskEvidenceTarget(task = {}) {
   return {
     request_id: task.request_id,
     gate_marker: task.marker || task.gate_marker || "",
@@ -1353,7 +1641,11 @@ export function summarizeEvidenceStages(stages = []) {
     if (stage.stage === "n8n_background_started") summary.n8n_started = true;
     if (stage.stage === "n8n_background_completed") summary.n8n_completed = true;
     if (stage.stage === "n8n_background_failed" || stage.stage === "n8n_background_contract_failed") summary.n8n_failed = true;
-    if (stage.stage === "line_push_final_completed" || stage.stage === "idea_json_final_push_completed") summary.final_push = true;
+    if (
+      stage.stage === "line_push_final_completed"
+      || stage.stage === "idea_json_final_push_completed"
+      || stage.stage === "codex_task_final_push_completed"
+    ) summary.final_push = true;
     if (stage.intent) summary.intent = stage.intent;
     if (stage.tool_called) summary.tool_called = stage.tool_called;
     if (stage.saved_record) summary.saved_record = stage.saved_record;
@@ -1379,6 +1671,10 @@ function codexTaskKey(taskId) {
   return `${CODEX_TASK_PREFIX}:task:${sanitizeEvidenceId(taskId)}`;
 }
 
+function codexFinalKey(taskId) {
+  return `${CODEX_TASK_PREFIX}:final:${sanitizeEvidenceId(taskId)}`;
+}
+
 function ideaTaskKey(taskId) {
   return `${IDEA_TASK_PREFIX}:task:${sanitizeEvidenceId(taskId)}`;
 }
@@ -1397,11 +1693,17 @@ function sanitizeCodexTaskRecord(record) {
     status: record.status,
     monitor: CODEX_MONITOR_NAME,
     task_id: sanitizeEvidenceId(record.task_id),
+    task_type: "codex_task",
+    project: CODEX_TASK_PROJECT,
+    project_path: CODEX_TASK_PROJECT_PATH,
+    instruction: CODEX_TASK_INSTRUCTION,
     request_id: sanitizeEvidenceId(record.request_id),
     marker: sanitizeEvidenceId(record.marker || ""),
     action: CODEX_TASK_ACTION,
-    target_path: CODEX_SMOKE_FILE_PATH,
-    content: CODEX_SMOKE_FILE_CONTENT,
+    target_path: CODEX_TASK_SMOKE_FILE_PATH,
+    content: CODEX_TASK_SMOKE_FILE_CONTENT,
+    line_user_ref: String(record.line_user_ref || ""),
+    finalize_token: sanitizeEvidenceId(record.finalize_token || ""),
     created_at: record.created_at,
   };
 }

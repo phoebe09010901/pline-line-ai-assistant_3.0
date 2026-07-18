@@ -368,6 +368,33 @@ Date: 2026-07-18
 - Evidence: `FIX_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.
 - Next: TEST reruns `IDEA NATURAL FINAL REPLY WITHOUT ACK`.
 
+## Codex Task Minimal Closed Loop
+
+Date: 2026-07-18
+
+- Worker now enqueues codex_task as a structured queued task instead of treating n8n codex_task response as completion.
+- The only allowed live smoke output is `/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt`.
+- The only allowed smoke content is `Codex 任務測試成功`.
+- Worker sends a natural processing notice after task enqueue succeeds.
+- Monitor claims the task, writes/verifies the smoke file, writes `codex_task:v1:result:<task_id>`, and calls `/test/codex-finalize`.
+- Worker finalizer sends completed or failed LINE final exactly once after monitor callback.
+- No-secret selftest marker `T2300-20260718093000` completed with result `status=completed`, `tests=PASS`, `commit=null`, `error=null`.
+- Worker version: `3f0f167c-71b1-4e89-aa1c-6f559507ed46`.
+- Evidence: `FIX_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+- Next: TEST runs live `Codex Task 最小工作閉環 Gate`.
+
+## Codex Task created_at Schema Preservation
+
+Date: 2026-07-18
+
+- TEST found the minimal closed loop worked, but completed task record lost required `created_at`.
+- Monitor now preserves `created_at` in normalized task records and result records.
+- Unit tests cover queued, completed, and failed task lifecycle.
+- Remote no-secret selftest `T2400-20260718113900` confirmed completed task record and result record both include `created_at`.
+- Worker redeployed for handoff; current version `ca9001fa-cf03-43f7-9911-33f6301dd668`.
+- Evidence: `FIX_EVIDENCE_CODEX_TASK_CREATED_AT_SCHEMA.md`.
+- Next: TEST reruns live Codex Task Gate and checks `created_at`.
+
 ## IDEA NATURAL FINAL REPLY WITHOUT ACK Gate PASS
 
 Date: 2026-07-18
@@ -383,3 +410,39 @@ Date: 2026-07-18
 - LINE desktop read-receipt display remains a separate UI/OA setting observation.
 - Result: `IDEA NATURAL FINAL REPLY WITHOUT ACK PASS`.
 - Evidence: `TEST_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.
+
+## Codex Task Minimal Closed Loop Gate FAILED
+
+Date: 2026-07-18
+
+- Live marker: `T2401-20260718113100`.
+- Task ID: `pline-v3-codex-1784345467797`.
+- Codex/monitor received and executed the task, wrote the fixed runtime smoke file, and produced result `status=completed`, `tests=PASS`, `commit=null`, `error=null`.
+- LINE received natural processing and final messages without forbidden internal terms.
+- Repeated finalizer callback returned `already_completed`, `pushed=false`.
+- Gate failed because the completed task record lost required field `created_at`.
+- Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+## Codex Task Minimal Closed Loop Gate PASS After created_at Fix
+
+Date: 2026-07-18
+
+- Live marker: `T2501-20260718114510`.
+- Task ID: `pline-v3-codex-1784346318391`.
+- Codex/monitor received and executed the task, wrote the fixed runtime smoke file, and produced result `status=completed`, `tests=PASS`, `commit=null`, `error=null`.
+- Completed task record retained required `created_at`; result record also contained `created_at`.
+- LINE received natural processing and final messages without forbidden internal terms.
+- Repeated finalizer callback returned `already_completed`, `pushed=false`.
+- Gate result: PASS.
+- Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+## Codex Task created_at Schema FIX Completed
+
+Date: 2026-07-18
+
+- Monitor `normalizeTask()` now preserves `created_at`.
+- Queued, claimed, completed, and failed codex_task lifecycle records retain `created_at`.
+- Completed and failed result records include `created_at`.
+- Remote no-secret selftest `T2400-20260718113900` confirmed task/result records retain `created_at`.
+- Evidence: `FIX_EVIDENCE_CODEX_TASK_CREATED_AT_SCHEMA.md`.
+- Next: TEST reruns live Codex Task Gate.

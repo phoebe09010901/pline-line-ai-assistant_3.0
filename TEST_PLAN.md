@@ -1561,6 +1561,97 @@ Failure expectation:
 - If save fails, Worker must not send saved-success text.
 - Failure final should truthfully say the save did not complete.
 
+## Codex Task Minimal Closed Loop Gate
+
+Date: 2026-07-18
+
+Preconditions:
+
+- Worker version is at least `3f0f167c-71b1-4e89-aa1c-6f559507ed46`.
+- `/health` reports `codex_task_final_mode=monitor_callback_exactly_once`.
+- `/health` reports `codex_finalizer.path=/test/codex-finalize`.
+- Monitor health reports `ready`.
+- Monitor smoke path is `/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt`.
+- Monitor smoke content is `Codex 任務測試成功`.
+
+Expected live behavior:
+
+- A natural-language LINE command is classified by n8n as `codex_task`.
+- Worker creates one structured queued task with the same `task_id` throughout lifecycle.
+- Worker sends one processing notice only after enqueue succeeds.
+- Monitor claims the queued task.
+- Monitor writes and reads back the fixed smoke file.
+- Monitor writes `codex_task:v1:result:<task_id>`.
+- Worker receives `/test/codex-finalize` callback and sends one natural completed final.
+
+Required result record:
+
+```json
+{
+  "task_id": "<same task id>",
+  "status": "completed",
+  "summary": "<completed summary>",
+  "tests": "PASS",
+  "changed_files": ["runtime/codex-task-smoke/codex_task_smoke_test.txt"],
+  "commit": null,
+  "error": null
+}
+```
+
+Required evidence stages:
+
+- `codex_task_enqueued`
+- `codex_task_processing_notice_completed`
+- `monitor_claimed`
+- `codex_execution_completed`
+- `smoke_file_written`
+- `codex_task_result_recorded`
+- `codex_task_final_callback_completed`
+- `codex_task_final_push_completed`
+
+Failure expectations:
+
+- Failed task must write failed result and must not report completed.
+- Failed final text must be truthful and must not claim success.
+
+Duplicate/replay expectations:
+
+- Same task must not be re-executed.
+- Same task must not create a second final push.
+- Evidence should show suppression or already-completed behavior.
+
+Regression expectations:
+
+- idea_create natural final without visible ACK remains PASS.
+- Dropbox idea JSON schema/save/duplicate remains PASS.
+
+## Codex Task created_at Schema Recheck
+
+Date: 2026-07-18
+
+Gate rerun must confirm:
+
+- `codex_task:v1:task:<task_id>` has `created_at` when queued.
+- The same task record keeps `created_at` after claimed/running.
+- The same task record keeps `created_at` after completed.
+- Failed codex_task records keep `created_at`.
+- `codex_task:v1:result:<task_id>` includes `created_at`.
+- Completed result still has:
+  - `status=completed`
+  - `tests=PASS`
+  - `commit=null`
+  - `error=null`
+- Failed result must not claim completed.
+
+No behavior should change for:
+
+- Smoke file path/content.
+- LINE processing notice/final text.
+- Finalizer exactly-once.
+- Duplicate/replay suppression.
+- idea_create natural final.
+- Dropbox idea JSON schema/save/duplicate.
+
 ### TEST Result 2026-07-18
 
 Live markers:
@@ -1587,3 +1678,60 @@ IDEA NATURAL FINAL REPLY WITHOUT ACK PASS
 ```
 
 Evidence: `TEST_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.
+
+## Codex Task Minimal Closed Loop Gate Result
+
+Date: 2026-07-18
+
+- Live marker: `T2401-20260718113100`.
+- Task ID: `pline-v3-codex-1784345467797`.
+- Classification: `codex_task`.
+- Monitor claim / execution / smoke file write: PASS.
+- Runtime smoke content: `Codex 任務測試成功`.
+- Result record: `status=completed`, `tests=PASS`, `commit=null`, `error=null`.
+- LINE natural processing and final: PASS.
+- Repeated callback: PASS, no duplicate final.
+- Failure, idea_create, Dropbox, and natural reply regressions: PASS.
+- Secret scan effective hit_count: `0`.
+- Blocking failure: completed task record missing required `created_at`.
+
+```text
+Gate result: FAILED
+```
+
+Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+## Codex Task Minimal Closed Loop Gate Rerun Result
+
+Date: 2026-07-18
+
+- Live marker: `T2501-20260718114510`.
+- Task ID: `pline-v3-codex-1784346318391`.
+- Classification: `codex_task`.
+- Monitor claim / execution / smoke file write: PASS.
+- Runtime smoke content: `Codex 任務測試成功`.
+- Completed task record includes `created_at`: PASS.
+- Result record includes `created_at`, `status=completed`, `tests=PASS`, `commit=null`, `error=null`: PASS.
+- LINE natural processing and final: PASS.
+- Repeated callback: PASS, no duplicate final.
+- Failure, idea_create, Dropbox, and natural reply regressions: PASS.
+- Secret scan effective hit_count: `0`.
+
+```text
+Gate result: PASS
+```
+
+Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+## Codex Task created_at Schema FIX Handoff
+
+Date: 2026-07-18
+
+- FIX repaired monitor lifecycle schema preservation.
+- Rerun live Codex Task Gate and confirm:
+  - completed `codex_task:v1:task:<task_id>` includes `created_at`
+  - `codex_task:v1:result:<task_id>` includes matching `created_at`
+  - same `task_id` is preserved through lifecycle
+  - smoke file, natural LINE processing/final, repeated callback, failed path, idea_create, and Dropbox regressions remain PASS
+
+Evidence for FIX readiness: `FIX_EVIDENCE_CODEX_TASK_CREATED_AT_SCHEMA.md`.

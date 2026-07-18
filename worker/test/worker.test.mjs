@@ -3,6 +3,7 @@ import {
   extractGateMarker,
   enqueueCodexTask,
   enqueueIdeaTask,
+  handleCodexFinalize,
   handleEvidenceRead,
   handleEvidenceSelfcheck,
   handleIdeaFinalize,
@@ -27,7 +28,7 @@ assert.equal(health.resources.idempotency_kv, "pline-v3-test-idempotency");
 assert.equal(health.n8n.webhook_url, "https://n8nphy.app.n8n.cloud/webhook/pline-v3-test-ai-agent");
 assert.equal(health.n8n.shared_secret_header, "x-pline-v3-shared-secret");
 assert.equal(health.line_reply_mode, "no_visible_ack_background_n8n");
-assert.equal(health.codex_task_final_mode, "background_push_final");
+assert.equal(health.codex_task_final_mode, "monitor_callback_exactly_once");
 assert.equal(health.evidence.persistence, "RUNTIME_KV");
 assert.equal(health.evidence.read_path, "/test/evidence");
 assert.equal(health.evidence.selfcheck_path, "/test/evidence/selfcheck");
@@ -38,6 +39,8 @@ assert.equal(health.evidence.selfcheck_secret_configured, false);
 assert.equal(health.codex_monitor.name, "pline-v3-test-codex-monitor");
 assert.deepEqual(health.codex_monitor.task_prefixes, ["codex_task:v1", "idea_json:v1"]);
 assert.deepEqual(health.codex_monitor.actions, ["create_smoke_file", "save_idea_json"]);
+assert.equal(health.codex_monitor.target_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt");
+assert.equal(health.codex_monitor.target_content, "Codex 任務測試成功");
 assert.equal(health.codex_monitor.dropbox_idea_dir, "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03");
 assert.deepEqual(health.supported_intents, ["idea_create", "codex_task", "clarify", "unsupported"]);
 assert.deepEqual(health.gate_test_intents, ["idea_create", "codex_task"]);
@@ -190,7 +193,7 @@ assert.equal(ideaResult.ok, true);
 const codexResult = validateN8nContract({
   request_id: "pline-v3-E2",
   intent: "codex_task",
-  reply_text: "Codex 已打通",
+  reply_text: "收到，我開始處理囉。",
   tool_called: "codex_task",
   task_id: "T1",
   action: "create_smoke_file",
@@ -244,7 +247,7 @@ assert.equal(normalizeReplyText("idea_create", ""), "");
 assert.equal(validateN8nContract({
   request_id: "pline-v3-E2",
   intent: "codex_task",
-  reply_text: "Codex 已打通",
+  reply_text: "收到，我開始處理囉。",
   tool_called: "codex_task",
   action: "create_smoke_file",
   status: "completed",
@@ -340,27 +343,37 @@ assert.deepEqual(codexBackgroundCalls, [
 const codexTaskKeys = await codexTaskKv.list({ prefix: "codex_task:v1:task:" });
 assert.equal(codexTaskKeys.keys.length, 1);
 const codexTaskRecord = JSON.parse(await codexTaskKv.get(codexTaskKeys.keys[0].name));
-assert.equal(codexTaskRecord.status, "pending");
+assert.equal(codexTaskRecord.status, "queued");
 assert.equal(codexTaskRecord.task_id, "T1");
+assert.equal(codexTaskRecord.task_type, "codex_task");
+assert.equal(codexTaskRecord.project, "PLine03 safe smoke");
+assert.equal(codexTaskRecord.project_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke");
+assert.equal(codexTaskRecord.instruction, "Create or overwrite the fixed smoke file with the fixed smoke content.");
 assert.equal(codexTaskRecord.request_id, "pline-v3-BG2");
 assert.equal(codexTaskRecord.action, "create_smoke_file");
-assert.equal(codexTaskRecord.target_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/codex-smoke.txt");
+assert.equal(codexTaskRecord.target_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt");
+assert.equal(codexTaskRecord.content, "Codex 任務測試成功");
+assert.equal(typeof codexTaskRecord.finalize_token, "string");
+assert.equal(codexTaskRecord.line_user_ref.includes("U_TEST"), false);
 globalThis.fetch = originalFetch;
 
 const enqueueKv = createMemoryKv();
 const enqueueResult = await enqueueCodexTask({
   RUNTIME_KV: enqueueKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
 }, {
   request_id: "pline-v3-ENQUEUE",
   gate_marker: "T1701-20260718010102",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
 }, {
   task_id: "task-enqueue-unit",
   action: "create_smoke_file",
 });
 assert.equal(enqueueResult.ok, true);
 const enqueueRecord = JSON.parse(await enqueueKv.get("codex_task:v1:task:task-enqueue-unit"));
-assert.equal(enqueueRecord.status, "pending");
-assert.equal(enqueueRecord.content, "Codex 已打通");
+assert.equal(enqueueRecord.status, "queued");
+assert.equal(enqueueRecord.content, "Codex 任務測試成功");
+assert.equal(enqueueRecord.project_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke");
 
 const ideaKv = createMemoryKv();
 const ideaEnqueueResult = await enqueueIdeaTask({
@@ -559,6 +572,118 @@ const fallbackFinalizerResponse = await handleIdeaFinalize(new Request("https://
 });
 assert.equal(fallbackFinalizerResponse.status, 200);
 assert.equal(JSON.parse(fallbackFinalizerCalls[0].options.body).messages[0].text, "已經幫妳記下來了 💡");
+globalThis.fetch = originalFetch;
+
+const codexFinalizerCalls = [];
+const codexFinalizerKv = createMemoryKv();
+await enqueueCodexTask({
+  RUNTIME_KV: codexFinalizerKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-CODEX-FINALIZE",
+  gate_marker: "T2301-20260718090101",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
+}, {
+  task_id: "codex-finalizer-unit",
+  action: "create_smoke_file",
+});
+const codexFinalizerTask = JSON.parse(await codexFinalizerKv.get("codex_task:v1:task:codex-finalizer-unit"));
+await codexFinalizerKv.put("codex_task:v1:task:codex-finalizer-unit", JSON.stringify({
+  ...codexFinalizerTask,
+  status: "completed",
+  codex_execution: true,
+  file_written: true,
+}));
+globalThis.fetch = async (url, options) => {
+  codexFinalizerCalls.push({ url, options });
+  if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  return new Response("{}", { status: 404 });
+};
+const codexFinalizerBody = {
+  task_id: codexFinalizerTask.task_id,
+  request_id: codexFinalizerTask.request_id,
+  action: "create_smoke_file",
+  status: "completed",
+  finalize_token: codexFinalizerTask.finalize_token,
+};
+const codexFinalizerResponse = await handleCodexFinalize(new Request("https://worker.example.test/test/codex-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(codexFinalizerBody),
+}), {
+  RUNTIME_KV: codexFinalizerKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(codexFinalizerResponse.status, 200);
+assert.equal((await codexFinalizerResponse.json()).status, "completed");
+assert.equal(codexFinalizerCalls.length, 1);
+assert.equal(JSON.parse(codexFinalizerCalls[0].options.body).messages[0].text, "已經處理完成了 ✨\n指定的小任務已成功執行。");
+const repeatedCodexFinalizerResponse = await handleCodexFinalize(new Request("https://worker.example.test/test/codex-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(codexFinalizerBody),
+}), {
+  RUNTIME_KV: codexFinalizerKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(repeatedCodexFinalizerResponse.status, 200);
+assert.equal((await repeatedCodexFinalizerResponse.json()).pushed, false);
+assert.equal(codexFinalizerCalls.length, 1);
+const codexFinalizerEvidence = await readEvidenceForRequest({ RUNTIME_KV: codexFinalizerKv }, "pline-v3-CODEX-FINALIZE");
+assert.equal(codexFinalizerEvidence.stages.some((stage) => stage.stage === "codex_task_final_push_completed"), true);
+assert.equal(summarizeEvidenceStages(codexFinalizerEvidence.stages).final_push, true);
+assert.equal(JSON.stringify(codexFinalizerEvidence).includes("U_RAW_SHOULD_NOT_STORE"), false);
+globalThis.fetch = originalFetch;
+
+const codexFailureCalls = [];
+const codexFailureKv = createMemoryKv();
+await enqueueCodexTask({
+  RUNTIME_KV: codexFailureKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-CODEX-FAILED-FINALIZE",
+  gate_marker: "T2302-20260718090102",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
+}, {
+  task_id: "codex-failed-finalizer-unit",
+  action: "create_smoke_file",
+});
+const codexFailureTask = JSON.parse(await codexFailureKv.get("codex_task:v1:task:codex-failed-finalizer-unit"));
+await codexFailureKv.put("codex_task:v1:task:codex-failed-finalizer-unit", JSON.stringify({
+  ...codexFailureTask,
+  status: "failed",
+  reason: "unit_failure",
+}));
+globalThis.fetch = async (url, options) => {
+  codexFailureCalls.push({ url, options });
+  if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  return new Response("{}", { status: 404 });
+};
+const codexFailureResponse = await handleCodexFinalize(new Request("https://worker.example.test/test/codex-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    task_id: codexFailureTask.task_id,
+    request_id: codexFailureTask.request_id,
+    action: "create_smoke_file",
+    status: "failed",
+    reason: "unit_failure",
+    finalize_token: codexFailureTask.finalize_token,
+  }),
+}), {
+  RUNTIME_KV: codexFailureKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(codexFailureResponse.status, 200);
+assert.equal((await codexFailureResponse.json()).status, "failure_notice_completed");
+assert.equal(JSON.parse(codexFailureCalls[0].options.body).messages[0].text, "這次沒有順利完成，我先停在安全狀態，沒有假裝處理成功 🙏");
 globalThis.fetch = originalFetch;
 
 const duplicateCallbackCalls = [];

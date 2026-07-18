@@ -124,6 +124,10 @@ Latest accepted TEST status after Worker version `cbadc5a1-4e07-44b2-853d-335c54
 
 Latest FIX status after Worker version `dbda345b-a3b4-41ca-bc8b-a12c8547179c`: the normal `idea_create` path no longer emits a LINE-visible fixed processing ACK. The webhook still returns HTTP `200`, records `line_visible_ack_skipped` and `webhook_http_200_returned`, continues n8n/monitor background processing, and emits exactly one natural final after Dropbox JSON save via the existing durable finalizer. Worker uses n8n `reply_text` when safe, otherwise the saved-success fallback only after save success. TEST must rerun `IDEA NATURAL FINAL REPLY WITHOUT ACK`.
 
+Latest FIX status after Worker version `3f0f167c-71b1-4e89-aa1c-6f559507ed46`: the `codex_task` path is a minimal closed loop. Worker creates a structured queued task and only sends a processing notice after enqueue. Monitor claims the task, writes the fixed smoke file under `runtime/codex-task-smoke`, records `codex_task:v1:result:<task_id>`, and calls Worker `/test/codex-finalize`. Worker verifies task id/request id/finalize token and sends the final LINE result exactly once. TEST must run the live Codex Task Minimal Closed Loop Gate.
+
+Latest schema FIX status: monitor lifecycle now preserves codex_task `created_at` across queued, claimed, completed, and failed states. Codex result records also include `created_at`, so TEST can trace completed/failed results back to the original task creation time.
+
 ### idea_create JSON
 
 Allowed fields only:
@@ -147,3 +151,9 @@ No Google Calendar, accounting, email, attachments, multiple agents, FORMAL mode
 ## TEST Status: Natural Final Without Visible ACK
 
 Live `_03` Gate proved no visible fixed ACK for normal `idea_create`, retained webhook HTTP `200`, saved Dropbox JSON, and emitted one natural final after save. Repeated finalizer callback remained exactly-once. LINE desktop read-receipt display is tracked separately as UI/OA setting observation. Current result: `IDEA NATURAL FINAL REPLY WITHOUT ACK PASS`. Evidence: `TEST_EVIDENCE_IDEA_NATURAL_FINAL_NO_ACK.md`.
+
+## TEST Status: Codex Task Minimal Closed Loop
+
+Live `_03` Codex Task Gate proved monitor claim, safe runtime smoke-file execution, result record creation, natural LINE final, and repeated callback exactly-once behavior. Gate result: FAILED because the completed task record did not retain required field `created_at`. Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.
+
+After Worker version `ca9001fa-cf03-43f7-9911-33f6301dd668`, TEST rerun proved completed task and result records retain `created_at` while preserving monitor claim, safe runtime smoke-file execution, natural LINE final, and repeated callback exactly-once behavior. Gate result: PASS. Evidence: `TEST_EVIDENCE_CODEX_TASK_MINIMAL_CLOSED_LOOP.md`.

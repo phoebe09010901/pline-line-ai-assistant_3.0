@@ -11,11 +11,13 @@ import {
   SMOKE_FILE_CONTENT,
   SMOKE_FILE_PATH,
   TASK_PREFIX,
+  codexResultRecord,
   claimOnce,
   createSyntheticIdeaTask,
   createSyntheticTask,
   health,
   normalizeTask,
+  notifyCodexFinalizer,
   notifyIdeaFinalizer,
   runTask,
   saveIdeaJson,
@@ -24,8 +26,8 @@ import {
 
 assert.equal(FIXED_ACTION, "create_smoke_file");
 assert.equal(SAVE_IDEA_ACTION, "save_idea_json");
-assert.equal(SMOKE_FILE_PATH, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/codex-smoke.txt");
-assert.equal(SMOKE_FILE_CONTENT, "Codex 已打通");
+assert.equal(SMOKE_FILE_PATH, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt");
+assert.equal(SMOKE_FILE_CONTENT, "Codex 任務測試成功");
 assert.equal(DROPBOX_IDEA_DIR, "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03");
 
 const blocked = await health({ CODEX_BIN: "/definitely/missing/codex", PATH: "" });
@@ -45,12 +47,17 @@ assert.deepEqual(ready.supported_actions, ["create_smoke_file", "save_idea_json"
 
 assert.deepEqual(normalizeTask({}), {
   task_id: "pline-v3-test-smoke",
+  task_type: "codex_task",
+  project: "PLine03 safe smoke",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke",
+  instruction: "Create or overwrite the fixed smoke file with the fixed smoke content.",
   request_id: "",
   marker: "",
   action: "create_smoke_file",
-  target_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03/codex-smoke.txt",
+  created_at: "",
+  target_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt",
   target_dir: "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03",
-  content: "Codex 已打通",
+  content: "Codex 任務測試成功",
   idea: null,
   finalize_token: "",
   line_user_ref: "",
@@ -61,41 +68,108 @@ assert.equal((await runTask({
   action: "create_smoke_file",
   target_path: "/tmp/not-allowed",
 }, { CODEX_BIN: fakeCodex, PATH: "" })).reason, "unsupported_target_path");
+assert.deepEqual(codexResultRecord({ task_id: "failed-unit" }, { ok: false, reason: "unsupported_target_path" }), {
+  task_id: "failed-unit",
+  status: "failed",
+  created_at: "",
+  summary: "The safe smoke task did not complete.",
+  tests: "FAIL",
+  changed_files: [],
+  commit: null,
+  error: "unsupported_target_path",
+});
 
 await mkdir(dirname(SMOKE_FILE_PATH), { recursive: true });
 const result = await runTask({ action: "create_smoke_file" }, { CODEX_BIN: fakeCodex, PATH: "" });
 assert.equal(result.ok, true);
-assert.equal(await readFile(SMOKE_FILE_PATH, "utf8"), "Codex 已打通");
+assert.equal(await readFile(SMOKE_FILE_PATH, "utf8"), "Codex 任務測試成功");
 await access(SMOKE_FILE_PATH, constants.F_OK);
 
 const taskKv = createMemoryKv();
+const codexCreatedAt = "2026-07-18T11:31:00.000Z";
 const synthetic = await createSyntheticTask({
   task_id: "pline-v3-monitor-unit-task",
   request_id: "pline-v3-monitor-unit-request",
   marker: "T1701-20260718010101",
+  created_at: codexCreatedAt,
 }, { kv: taskKv });
 assert.equal(synthetic.ok, true);
 assert.equal((await taskKv.list(`${TASK_PREFIX}:task:`)).length, 1);
+const queuedTask = JSON.parse(await taskKv.get(`${TASK_PREFIX}:task:pline-v3-monitor-unit-task`));
+assert.equal(queuedTask.status, "queued");
+assert.equal(queuedTask.created_at, codexCreatedAt);
 
-const claimed = await claimOnce({ kv: taskKv, env: { CODEX_BIN: fakeCodex, PATH: "" } });
+const claimed = await claimOnce({ kv: taskKv, env: { CODEX_BIN: fakeCodex, PATH: "", CODEX_FINALIZE_DISABLED: "1" } });
 assert.equal(claimed.ok, true);
 assert.equal(claimed.claimed, true);
 assert.equal(claimed.task_id, "pline-v3-monitor-unit-task");
 assert.equal(claimed.request_id, "pline-v3-monitor-unit-request");
 assert.equal(claimed.codex_execution, true);
 assert.equal(claimed.file_written, true);
-assert.equal(await readFile(SMOKE_FILE_PATH, "utf8"), "Codex 已打通");
+assert.equal(await readFile(SMOKE_FILE_PATH, "utf8"), "Codex 任務測試成功");
 const completedTask = JSON.parse(await taskKv.get(`${TASK_PREFIX}:task:pline-v3-monitor-unit-task`));
 assert.equal(completedTask.status, "completed");
+assert.equal(completedTask.created_at, codexCreatedAt);
 assert.equal(completedTask.codex_execution, true);
 assert.equal(completedTask.file_written, true);
+const completedResult = JSON.parse(await taskKv.get(`${TASK_PREFIX}:result:pline-v3-monitor-unit-task`));
+assert.deepEqual(completedResult, {
+  task_id: "pline-v3-monitor-unit-task",
+  status: "completed",
+  created_at: codexCreatedAt,
+  summary: "Fixed smoke file was created and verified.",
+  tests: "PASS",
+  changed_files: ["runtime/codex-task-smoke/codex_task_smoke_test.txt"],
+  commit: null,
+  error: null,
+});
 assert.equal(await taskKv.get("evidence:v1:marker:T1701-20260718010101"), "pline-v3-monitor-unit-request");
 const evidenceKeys = await taskKv.list("evidence:v1:request:pline-v3-monitor-unit-request:stage:");
 assert.deepEqual(evidenceKeys.map((key) => key.name).sort(), [
   "evidence:v1:request:pline-v3-monitor-unit-request:stage:codex_execution_completed",
+  "evidence:v1:request:pline-v3-monitor-unit-request:stage:codex_task_final_callback_completed",
+  "evidence:v1:request:pline-v3-monitor-unit-request:stage:codex_task_result_recorded",
   "evidence:v1:request:pline-v3-monitor-unit-request:stage:monitor_claimed",
   "evidence:v1:request:pline-v3-monitor-unit-request:stage:smoke_file_written",
 ]);
+
+const failedTaskKv = createMemoryKv();
+const failedCreatedAt = "2026-07-18T11:32:00.000Z";
+await failedTaskKv.put(`${TASK_PREFIX}:task:pline-v3-monitor-failed-task`, JSON.stringify({
+  schema: "pline-v3-test-codex-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: "pline-v3-monitor-failed-task",
+  task_type: "codex_task",
+  project: "PLine03 safe smoke",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke",
+  instruction: "Create or overwrite the fixed smoke file with the fixed smoke content.",
+  request_id: "pline-v3-monitor-failed-request",
+  marker: "T1701F-20260718010101",
+  action: FIXED_ACTION,
+  target_path: "/tmp/not-allowed",
+  content: "Codex 任務測試成功",
+  finalize_token: "test-finalize-token",
+  line_user_ref: "v1.encrypted.ref",
+  created_at: failedCreatedAt,
+}));
+const failedClaim = await claimOnce({ kv: failedTaskKv, env: { CODEX_BIN: fakeCodex, PATH: "", CODEX_FINALIZE_DISABLED: "1" } });
+assert.equal(failedClaim.ok, false);
+assert.equal(failedClaim.reason, "unsupported_target_path");
+const failedTask = JSON.parse(await failedTaskKv.get(`${TASK_PREFIX}:task:pline-v3-monitor-failed-task`));
+assert.equal(failedTask.status, "failed");
+assert.equal(failedTask.created_at, failedCreatedAt);
+const failedResult = JSON.parse(await failedTaskKv.get(`${TASK_PREFIX}:result:pline-v3-monitor-failed-task`));
+assert.deepEqual(failedResult, {
+  task_id: "pline-v3-monitor-failed-task",
+  status: "failed",
+  created_at: failedCreatedAt,
+  summary: "The safe smoke task did not complete.",
+  tests: "FAIL",
+  changed_files: [],
+  commit: null,
+  error: "unsupported_target_path",
+});
 
 const uniqueSuffix = String(Date.now()).slice(-10);
 const idea = {
@@ -210,6 +284,33 @@ assert.deepEqual(JSON.parse(finalizeCalls[0].options.body), {
   action: SAVE_IDEA_ACTION,
   status: "completed",
   finalize_token: "fin-unit-token",
+});
+globalThis.fetch = originalFetch;
+
+const codexFinalizeCalls = [];
+globalThis.fetch = async (url, options) => {
+  codexFinalizeCalls.push({ url, options });
+  return new Response(JSON.stringify({ status: "completed", pushed: true }), { status: 200 });
+};
+const codexNotifyResult = await notifyCodexFinalizer({
+  task_id: "codex-finalizer-unit",
+  request_id: "pline-v3-codex-finalizer-unit",
+  action: FIXED_ACTION,
+  finalize_token: "fin-codex-unit-token",
+}, "completed", {
+  WORKER_BASE_URL: "https://worker.example.test",
+});
+assert.equal(codexNotifyResult.ok, true);
+assert.equal(codexNotifyResult.pushed, true);
+assert.equal(codexFinalizeCalls.length, 1);
+assert.equal(codexFinalizeCalls[0].url, "https://worker.example.test/test/codex-finalize");
+assert.deepEqual(JSON.parse(codexFinalizeCalls[0].options.body), {
+  task_id: "codex-finalizer-unit",
+  request_id: "pline-v3-codex-finalizer-unit",
+  action: FIXED_ACTION,
+  status: "completed",
+  reason: "",
+  finalize_token: "fin-codex-unit-token",
 });
 globalThis.fetch = originalFetch;
 
