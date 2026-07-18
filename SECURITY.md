@@ -231,3 +231,12 @@ LINE_MARK_AS_READ_ENABLED=false
 ```
 
 With OA Chat off, LINE handles read state automatically. Worker records `line_mark_as_read_skipped_disabled` and does not call the mark-as-read API. The API path is retained only for a future Chat-on mode explicitly enabled by environment flag.
+## Codex Default Delegation Security Notes
+
+- `codex_delegate` tasks preserve full natural language in task records, but evidence records still omit raw LINE User ID, full webhook payload, transient read tokens, and secrets.
+- Worker stores encrypted `line_user_ref` instead of raw LINE User ID for delegated task callbacks.
+- The monitor-side Gateway passes only the approved `_03` project path to Codex.
+- High-risk delegated text is paused as `awaiting_approval`; the monitor does not execute it before LINE confirmation.
+- Approval codes are non-secret operational tokens and are mapped to task IDs in runtime KV with the same test evidence TTL.
+- Browser and Computer Use host surfaces are reported unavailable from the launchd adapter; unavailable host tools do not unlock broader permissions.
+- Runtime result files, Gateway live outputs, Wrangler local state, logs, and Dropbox idea JSON remain ignored by Git.

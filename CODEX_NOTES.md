@@ -796,3 +796,13 @@ Date: 2026-07-18
 - Codex CLI `0.142.5` shows `exec --json` and experimental app-server/remote-control surfaces, but no `_03` Gateway client, auth boundary, streamed event parser, or approval bridge exists.
 - Conclusion: default Codex delegation is blocked until a formal Gateway/host contract is selected.
 - Evidence: `FIX_EVIDENCE_CODEX_DEFAULT_DELEGATION_INVESTIGATION.md`.
+
+## Codex Default Delegation Implementation
+
+- Implemented `monitor/src/codex_gateway.js`.
+- Selected official non-interactive `codex exec --json` for the launchd monitor adapter after checking local `codex-cli 0.142.5` and official Codex CLI/App Server/SDK/MCP docs.
+- The adapter uses `spawn`, closes stdin, and parses JSONL events such as `thread.started`, `turn.started`, `item.completed`, and `turn.completed`.
+- Worker queues `codex_delegate` with `original_user_text` intact; old n8n `codex_task` remains an accepted alias but no longer turns general tasks into fixed smoke.
+- Approval bridge is implemented as task state plus LINE confirmation code; confirmed tasks are requeued as `approved`.
+- Gateway live evidence wrote ignored runtime output and result files; no secret/raw User ID/full payload is stored.
+- Evidence: `TEST_EVIDENCE_CODEX_DEFAULT_DELEGATION_GATE.md`.

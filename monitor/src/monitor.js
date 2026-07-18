@@ -4,6 +4,15 @@ import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
+import {
+  APPROVAL_STATUS,
+  CODEX_DELEGATE_ACTION,
+  CodexExecHostAdapter,
+  CodexGateway,
+  approvalCodeForTask,
+  discoverHostCapabilities,
+  writeGatewayResultFile,
+} from "./codex_gateway.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -17,6 +26,7 @@ export const SMOKE_FILE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理
 export const SMOKE_FILE_CONTENT = "Codex 任務測試成功";
 export const FIXED_ACTION = "create_smoke_file";
 export const SAVE_IDEA_ACTION = "save_idea_json";
+export { CODEX_DELEGATE_ACTION };
 export const DROPBOX_IDEA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03";
 export const WORKER_BASE_URL = "https://pline-v3-test-line-gateway.phy4175.workers.dev";
 export const IDEA_FINALIZE_PATH = "/test/idea-finalize";
@@ -73,7 +83,7 @@ export async function health(env = process.env) {
     codex_task_project_path: CODEX_TASK_PROJECT_PATH,
     smoke_file_path: SMOKE_FILE_PATH,
     smoke_file_content: SMOKE_FILE_CONTENT,
-    supported_actions: [FIXED_ACTION, SAVE_IDEA_ACTION],
+    supported_actions: [CODEX_DELEGATE_ACTION, FIXED_ACTION, SAVE_IDEA_ACTION],
     task_prefixes: [TASK_PREFIX, IDEA_TASK_PREFIX],
     task_prefix: TASK_PREFIX,
     idea_task_prefix: IDEA_TASK_PREFIX,
@@ -89,10 +99,17 @@ export async function health(env = process.env) {
       stale_claim_ms: RUNNER_STALE_CLAIM_MS,
     },
     codex_bin: codex,
+    codex_gateway: {
+      selected_interface: "codex_exec_json",
+      action: CODEX_DELEGATE_ACTION,
+      legacy_smoke_action: FIXED_ACTION,
+      result_dir: "runtime/codex-gateway",
+      approval_bridge: "line_confirmation_code",
+    },
   };
 }
 
-export async function runTask(task, env = process.env) {
+export async function runTask(task, env = process.env, options = {}) {
   const codex = await resolveCodexBin(env);
   if (!codex.ok) {
     return { ok: false, reason: codex.reason, codex_bin: codex };
@@ -101,6 +118,60 @@ export async function runTask(task, env = process.env) {
   const normalized = normalizeTask(task);
   if (normalized.action === SAVE_IDEA_ACTION) {
     return saveIdeaJson(normalized);
+  }
+
+  if (normalized.action === CODEX_DELEGATE_ACTION) {
+    const gateway = options.gateway || new CodexGateway({
+      adapter: options.adapter || new CodexExecHostAdapter({ codexBin: codex.path }),
+    });
+    const gatewayResult = await gateway.submit_task({
+      ...normalized,
+      project_name: normalized.project,
+      original_user_text: normalized.original_user_text,
+    }, {
+      env,
+      timeoutMs: env.CODEX_GATEWAY_TIMEOUT_MS,
+    });
+    if (gatewayResult.status === APPROVAL_STATUS) {
+      return {
+        ok: true,
+        status: APPROVAL_STATUS,
+        action: CODEX_DELEGATE_ACTION,
+        codex_execution: false,
+        approval_required: true,
+        approval_code: gatewayResult.approval_code,
+        approval_reason: gatewayResult.approval_reason,
+        summary: "Codex task is waiting for LINE approval.",
+        gateway: gatewayResult,
+      };
+    }
+    if (!gatewayResult.ok) {
+      return {
+        ok: false,
+        reason: gatewayResult.reason || "codex_gateway_failed",
+        action: CODEX_DELEGATE_ACTION,
+        gateway: gatewayResult,
+      };
+    }
+    const resultFile = await writeGatewayResultFile(normalized, gatewayResult, PROJECT_ROOT);
+    return {
+      ok: true,
+      status: "completed",
+      action: CODEX_DELEGATE_ACTION,
+      target_path: resultFile.relative_path,
+      codex_execution: true,
+      file_written: false,
+      tests: gatewayResult.tests || "PASS",
+      changed_files: gatewayResult.changed_files || [],
+      summary: gatewayResult.summary,
+      thread_id: gatewayResult.thread_id,
+      turn_id: gatewayResult.turn_id,
+      run_id: gatewayResult.run_id,
+      codex_received: gatewayResult.codex_received,
+      tool_event_count: gatewayResult.tool_events?.length || 0,
+      result_file: resultFile.relative_path,
+      gateway: gatewayResult,
+    };
   }
 
   if (normalized.action !== FIXED_ACTION) {
@@ -143,12 +214,14 @@ export async function runTask(task, env = process.env) {
 
 export function normalizeTask(task = {}) {
   const action = task.action || FIXED_ACTION;
+  const isCodexLikeAction = action === FIXED_ACTION || action === CODEX_DELEGATE_ACTION;
   return {
     task_id: sanitizeId(task.task_id || "pline-v3-test-smoke"),
-    task_type: action === FIXED_ACTION ? "codex_task" : "",
-    project: action === FIXED_ACTION ? sanitizeLabel(task.project || CODEX_TASK_PROJECT) : sanitizeLabel(task.project || ""),
-    project_path: action === FIXED_ACTION ? String(task.project_path || CODEX_TASK_PROJECT_PATH) : String(task.project_path || ""),
-    instruction: action === FIXED_ACTION ? String(task.instruction || "Create or overwrite the fixed smoke file with the fixed smoke content.") : String(task.instruction || ""),
+    task_type: isCodexLikeAction ? "codex_task" : "",
+    project: action === FIXED_ACTION ? sanitizeLabel(task.project || CODEX_TASK_PROJECT) : isCodexLikeAction ? sanitizeLabel(task.project || "菲比 LINE 智能助理_03") : sanitizeLabel(task.project || ""),
+    project_path: action === FIXED_ACTION ? String(task.project_path || CODEX_TASK_PROJECT_PATH) : isCodexLikeAction ? String(task.project_path || PROJECT_ROOT) : String(task.project_path || ""),
+    instruction: action === FIXED_ACTION ? String(task.instruction || "Create or overwrite the fixed smoke file with the fixed smoke content.") : String(task.instruction || task.original_user_text || ""),
+    original_user_text: String(task.original_user_text || task.instruction || ""),
     request_id: sanitizeId(task.request_id || ""),
     marker: sanitizeId(task.marker || ""),
     action,
@@ -160,6 +233,7 @@ export function normalizeTask(task = {}) {
     finalize_token: sanitizeId(task.finalize_token || ""),
     final_reply_text: String(task.final_reply_text || ""),
     line_user_ref: String(task.line_user_ref || ""),
+    approval: task.approval || null,
   };
 }
 
@@ -211,7 +285,7 @@ export async function claimOnce(options = {}) {
     }
     const status = original.status || "";
     const staleClaim = isStaleClaim(original, options);
-    if (status !== "pending" && status !== "queued" && !staleClaim) {
+    if (status !== "pending" && status !== "queued" && status !== "approved" && !staleClaim) {
       if (isTerminalStatus(status)) {
         warnings.push(await bestEffortDeletePendingIndex(kv, task, key.pending_key, "terminal_pending_index_cleanup"));
       }
@@ -239,7 +313,47 @@ export async function claimOnce(options = {}) {
       action: task.action,
     });
 
-    const execution = await runTask(task, env);
+    const execution = await runTask(task, env, options);
+    if (execution.ok && execution.status === APPROVAL_STATUS) {
+      const approvalRecord = {
+        ...claimRecord,
+        status: APPROVAL_STATUS,
+        approval: {
+          status: APPROVAL_STATUS,
+          code: execution.approval_code,
+          reason: execution.approval_reason,
+          requested_at: new Date().toISOString(),
+        },
+      };
+      await kv.put(taskKey(task.task_id, task.action), JSON.stringify(approvalRecord));
+      await kv.put(approvalKey(execution.approval_code), taskKey(task.task_id, task.action));
+      await writeEvidenceStage(kv, task, "codex_task_approval_required", {
+        monitor: MONITOR_NAME,
+        action: task.action,
+        status: APPROVAL_STATUS,
+        reason: execution.approval_reason,
+      });
+      const callbackResult = await notifyCodexFinalizer({
+        ...task,
+        approval_code: execution.approval_code,
+      }, APPROVAL_STATUS, env, execution.approval_reason);
+      await writeEvidenceStage(kv, task, callbackResult.ok ? "codex_task_approval_notice_completed" : "codex_task_approval_notice_failed", {
+        monitor: MONITOR_NAME,
+        action: task.action,
+        status: APPROVAL_STATUS,
+        reason: callbackResult.ok ? "" : callbackResult.reason,
+      });
+      return {
+        ok: true,
+        claimed: true,
+        task_id: task.task_id,
+        request_id: task.request_id,
+        marker: task.marker,
+        action: task.action,
+        status: APPROVAL_STATUS,
+        approval_required: true,
+      };
+    }
     if (!execution.ok) {
       const failedResultRecord = codexResultRecord(task, {
         ok: false,
@@ -252,7 +366,7 @@ export async function claimOnce(options = {}) {
         reason: execution.reason,
       }));
       warnings.push(await bestEffortDeletePendingIndex(kv, task, pendingKey(task.task_id, task.action), "failed_task_pending_index_cleanup"));
-      if (task.action === FIXED_ACTION) {
+      if (task.action === FIXED_ACTION || task.action === CODEX_DELEGATE_ACTION) {
         await kv.put(codexResultKey(task.task_id), JSON.stringify(failedResultRecord));
         const callbackResult = await notifyCodexFinalizer(task, "failed", env, execution.reason);
         await writeEvidenceStage(kv, task, callbackResult.ok ? "codex_task_final_callback_completed" : "codex_task_final_callback_failed", {
@@ -283,13 +397,13 @@ export async function claimOnce(options = {}) {
     const completedAt = new Date().toISOString();
     await writeEvidenceStage(kv, task, task.action === SAVE_IDEA_ACTION ? "idea_json_saved" : "codex_execution_completed", {
       monitor: MONITOR_NAME,
-      codex_execution: task.action === FIXED_ACTION || undefined,
+      codex_execution: (task.action === FIXED_ACTION || task.action === CODEX_DELEGATE_ACTION) || undefined,
       saved: task.action === SAVE_IDEA_ACTION ? execution.status || "saved" : undefined,
       action: task.action,
     });
-    await writeEvidenceStage(kv, task, task.action === SAVE_IDEA_ACTION ? "idea_json_file_written" : "smoke_file_written", {
+    await writeEvidenceStage(kv, task, task.action === SAVE_IDEA_ACTION ? "idea_json_file_written" : task.action === CODEX_DELEGATE_ACTION ? "codex_task_result_received" : "smoke_file_written", {
       monitor: MONITOR_NAME,
-      file_written: true,
+      file_written: task.action === SAVE_IDEA_ACTION || task.action === FIXED_ACTION,
       action: task.action,
       status: completedStatus,
       file_name: execution.file_name,
@@ -299,14 +413,20 @@ export async function claimOnce(options = {}) {
       status: completedStatus,
       completed_at: completedAt,
       codex_execution: true,
-      file_written: true,
+      file_written: task.action === SAVE_IDEA_ACTION || task.action === FIXED_ACTION,
       mtime_ms: execution.mtime_ms,
       mtime_iso: execution.mtime_iso,
       file_name: execution.file_name,
+      thread_id: execution.thread_id,
+      turn_id: execution.turn_id,
+      run_id: execution.run_id,
+      codex_received: execution.codex_received,
+      tool_event_count: execution.tool_event_count,
+      result_file: execution.result_file,
     };
     await kv.put(taskKey(task.task_id, task.action), JSON.stringify(completedTaskRecord));
     warnings.push(await bestEffortDeletePendingIndex(kv, task, pendingKey(task.task_id, task.action), "completed_task_pending_index_cleanup"));
-    if (task.action === FIXED_ACTION) {
+    if (task.action === FIXED_ACTION || task.action === CODEX_DELEGATE_ACTION) {
       const resultRecord = codexResultRecord(task, execution);
       await kv.put(codexResultKey(task.task_id), JSON.stringify(resultRecord));
       await writeEvidenceStage(kv, task, "codex_task_result_recorded", {
@@ -751,7 +871,7 @@ export async function notifyIdeaFinalizer(task = {}, status = "completed", env =
 }
 
 export async function notifyCodexFinalizer(task = {}, status = "completed", env = process.env, reason = "") {
-  if (task.action !== FIXED_ACTION) {
+  if (task.action !== FIXED_ACTION && task.action !== CODEX_DELEGATE_ACTION) {
     return { ok: true, status: "skipped_non_codex_task" };
   }
   if (env.CODEX_FINALIZE_DISABLED === "1") {
@@ -766,14 +886,15 @@ export async function notifyCodexFinalizer(task = {}, status = "completed", env 
     headers: {
       "content-type": "application/json",
     },
-    body: JSON.stringify({
+    body: JSON.stringify(removeEmptyFields({
       task_id: task.task_id,
       request_id: task.request_id,
-      action: FIXED_ACTION,
+      action: task.action || CODEX_DELEGATE_ACTION,
       status,
       reason,
+      approval_code: task.approval_code || "",
       finalize_token: task.finalize_token,
-    }),
+    })),
   });
   let body = {};
   try {
@@ -801,23 +922,30 @@ export function codexResultRecord(task = {}, execution = {}) {
       task_id: task.task_id,
       status: "failed",
       created_at: task.created_at || "",
-      summary: "The safe smoke task did not complete.",
+      summary: task.action === CODEX_DELEGATE_ACTION ? "The Codex delegated task did not complete." : "The safe smoke task did not complete.",
       tests: "FAIL",
       changed_files: [],
       commit: null,
       error: execution.reason || "unknown_error",
     };
   }
-  return {
+  const record = {
     task_id: task.task_id,
     status: "completed",
     created_at: task.created_at || "",
-    summary: execution.summary || "Safe smoke file was created and verified.",
+    summary: execution.summary || (task.action === CODEX_DELEGATE_ACTION ? "Codex delegated task completed." : "Safe smoke file was created and verified."),
     tests: execution.tests || "PASS",
-    changed_files: execution.changed_files || ["runtime/codex-task-smoke/codex_task_smoke_test.txt"],
+    changed_files: execution.changed_files || (task.action === CODEX_DELEGATE_ACTION ? [] : ["runtime/codex-task-smoke/codex_task_smoke_test.txt"]),
     commit: null,
     error: null,
   };
+  if (task.action === CODEX_DELEGATE_ACTION) {
+    record.thread_id = execution.thread_id || "";
+    record.turn_id = execution.turn_id || "";
+    record.run_id = execution.run_id || "";
+    record.result_file = execution.result_file || "";
+  }
+  return record;
 }
 
 export function normalizeIdeaJson(idea = {}) {
@@ -998,6 +1126,10 @@ function codexResultKey(taskId) {
   return `${TASK_PREFIX}:result:${sanitizeId(taskId)}`;
 }
 
+function approvalKey(code = "") {
+  return `${TASK_PREFIX}:approval:${sanitizeId(code)}`;
+}
+
 function sanitizeEvidenceRecord(record) {
   const allowed = new Set([
     "worker",
@@ -1015,6 +1147,13 @@ function sanitizeEvidenceRecord(record) {
     "saved",
     "file_name",
     "action",
+    "thread_id",
+    "turn_id",
+    "run_id",
+    "codex_received",
+    "tool_event_count",
+    "approval_required",
+    "approval_code",
   ]);
   const safe = {};
   for (const [key, value] of Object.entries(record)) {
@@ -1091,6 +1230,10 @@ function dirnameForFile(path) {
   const normalized = String(path || "");
   const index = normalized.lastIndexOf("/");
   return index > 0 ? normalized.slice(0, index) : ".";
+}
+
+function removeEmptyFields(record = {}) {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== ""));
 }
 
 function printJson(value) {

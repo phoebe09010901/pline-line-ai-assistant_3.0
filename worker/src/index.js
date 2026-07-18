@@ -5,8 +5,8 @@ const D1_NAME = "pline-v3-test-db";
 const N8N_WEBHOOK_URL = "https://n8nphy.app.n8n.cloud/webhook/pline-v3-test-ai-agent";
 const N8N_SHARED_SECRET_HEADER = "x-pline-v3-shared-secret";
 const EVIDENCE_SELFTEST_SECRET_HEADER = "x-pline-v3-selftest-secret";
-const ACCEPTED_N8N_INTENTS = ["idea_create", "codex_task", "clarify", "unsupported"];
-const GATE_TEST_INTENTS = ["idea_create", "codex_task"];
+const ACCEPTED_N8N_INTENTS = ["idea_create", "google_calendar_direct", "codex_delegate", "codex_task", "clarify", "unsupported"];
+const GATE_TEST_INTENTS = ["idea_create", "codex_delegate"];
 const ADMIN_BOOTSTRAP_SENTINEL = "CAPTURE_CURRENT_03_EVENT";
 const ADMIN_BOOTSTRAP_PHRASE = "PLine03 admin bootstrap";
 const ADMIN_BOOTSTRAP_KV_KEY = "admin:line_test_admin_user_id";
@@ -19,18 +19,21 @@ const CODEX_TASK_FINAL_MODE = "monitor_callback_exactly_once";
 const CODEX_TASK_PREFIX = "codex_task:v1";
 const IDEA_TASK_PREFIX = "idea_json:v1";
 const CODEX_MONITOR_NAME = "pline-v3-test-codex-monitor";
-const CODEX_TASK_ACTION = "create_smoke_file";
+const CODEX_TASK_ACTION = "codex_delegate";
+const CODEX_LEGACY_SMOKE_ACTION = "create_smoke_file";
 const IDEA_TASK_ACTION = "save_idea_json";
-const CODEX_TASK_PROJECT = "PLine03 safe smoke";
-const CODEX_TASK_PROJECT_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke";
+const CODEX_TASK_PROJECT = "菲比 LINE 智能助理_03";
+const CODEX_TASK_PROJECT_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03";
 const CODEX_TASK_SMOKE_FILE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt";
 const CODEX_TASK_SMOKE_FILE_CONTENT = "Codex 任務測試成功";
-const CODEX_TASK_INSTRUCTION = "Create or overwrite the fixed smoke file with the fixed smoke content.";
+const CODEX_TASK_INSTRUCTION = "請完整處理 LINE 原始自然語，並在完成後回傳簡短繁中結果。";
 const DROPBOX_IDEA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03";
 const CODEX_PROCESSING_REPLY_TEXT = "收到～這件事需要一點時間，我處理完成後再告訴妳 🛠️";
-const CODEX_COMPLETED_REPLY_TEXT = "已經處理完成了 ✨\n指定的小任務已成功執行。";
+const CODEX_COMPLETED_REPLY_TEXT = "已經處理完成了 ✨";
 const CODEX_FAILED_REPLY_TEXT = "這次沒有順利完成，我先停在安全狀態，沒有假裝處理成功 🙏";
 const CODEX_CAPABILITY_NOT_ENABLED_REPLY_TEXT = "這類操作目前還沒開放，我先不假裝已經執行。等下一階段授權後再處理。";
+const CODEX_APPROVAL_REPLY_PREFIX = "這件事需要妳確認後我才會繼續。請回覆：確認";
+const CODEX_APPROVAL_ACCEPTED_REPLY_TEXT = "收到確認，我會繼續處理。";
 const IDEA_SAVED_FALLBACK_REPLY_TEXT = "已經幫妳記下來了 💡";
 const IDEA_SAVE_FAILED_REPLY_TEXT = "這次沒有成功保存，我先不假裝記好了，請稍後再試一次 🙏";
 const IDEA_FINALIZE_PATH = "/test/idea-finalize";
@@ -160,6 +163,23 @@ export async function handleLineWebhook(request, env, ctx = {}) {
     request_id: normalized.request_id,
   });
 
+  const approvalReply = await handleCodexApprovalReply(normalized, env);
+  if (approvalReply.handled) {
+    if (env.IDEMPOTENCY_KV) {
+      await env.IDEMPOTENCY_KV.put(normalized.line_event_id, normalized.request_id, { expirationTtl: 3600 });
+    }
+    queueEvidenceStage(ctx, env, normalized, approvalReply.ok ? "codex_task_approval_reply_completed" : "codex_task_approval_reply_failed", {
+      status: approvalReply.ok ? "approved" : "failed",
+      reason: approvalReply.reason || "",
+    });
+    return jsonResponse({
+      status: approvalReply.ok ? "accepted" : "rejected",
+      request_id: normalized.request_id,
+      approval: approvalReply.ok ? "approved" : "failed",
+      reason: approvalReply.reason || "",
+    }, approvalReply.ok ? 200 : 409);
+  }
+
   const markAsReadTask = markLineMessageAsReadForEvent(event, normalized, env);
   if (ctx.waitUntil) {
     ctx.waitUntil(markAsReadTask);
@@ -273,9 +293,13 @@ export function workerHealth(env = {}) {
     codex_monitor: {
       name: CODEX_MONITOR_NAME,
       task_prefixes: [CODEX_TASK_PREFIX, IDEA_TASK_PREFIX],
-      actions: [CODEX_TASK_ACTION, IDEA_TASK_ACTION],
-      target_path: CODEX_TASK_SMOKE_FILE_PATH,
-      target_content: CODEX_TASK_SMOKE_FILE_CONTENT,
+      actions: [CODEX_TASK_ACTION, CODEX_LEGACY_SMOKE_ACTION, IDEA_TASK_ACTION],
+      project_path: CODEX_TASK_PROJECT_PATH,
+      selected_interface: "codex_exec_json",
+      original_user_text_delivery: true,
+      approval_bridge: "line_confirmation_code",
+      legacy_smoke_target_path: CODEX_TASK_SMOKE_FILE_PATH,
+      legacy_smoke_target_content: CODEX_TASK_SMOKE_FILE_CONTENT,
       dropbox_idea_dir: DROPBOX_IDEA_DIR,
     },
     admin_bootstrap: {
@@ -506,54 +530,18 @@ export async function processN8nInBackground(normalized, env) {
         status: "pending",
       });
     }
-  } else if (contractResult.body.intent === "codex_task") {
-    const capabilityResult = codexTaskCapabilityCheck(normalized.message_text);
-    if (!capabilityResult.ok) {
-      await persistEvidenceStage(env, normalized, "codex_task_capability_not_enabled", {
-        intent: contractResult.body.intent,
-        action: CODEX_TASK_ACTION,
-        status: "failed",
-        reason: capabilityResult.reason,
-      });
-      logStage("codex_task_capability_not_enabled", {
-        request_id: normalized.request_id,
-        action: CODEX_TASK_ACTION,
-        status: "failed",
-        reason: capabilityResult.reason,
-      });
-      const noticeResult = await pushToLine(normalized.user_id, CODEX_CAPABILITY_NOT_ENABLED_REPLY_TEXT, env);
-      await persistEvidenceStage(env, normalized, noticeResult.ok ? "codex_task_capability_notice_completed" : "codex_task_capability_notice_failed", {
-        intent: contractResult.body.intent,
-        action: CODEX_TASK_ACTION,
-        status: "failed",
-        reason: noticeResult.ok ? capabilityResult.reason : noticeResult.reason,
-      });
-      logStage(noticeResult.ok ? "codex_task_capability_notice_completed" : "codex_task_capability_notice_failed", {
-        request_id: normalized.request_id,
-        action: CODEX_TASK_ACTION,
-        status: "failed",
-        reason: noticeResult.ok ? capabilityResult.reason : noticeResult.reason,
-      });
-      return {
-        ok: false,
-        request_id: normalized.request_id,
-        intent: contractResult.body.intent,
-        status: "failed",
-        reason: capabilityResult.reason,
-      };
-    }
-
+  } else if (contractResult.body.intent === "codex_delegate") {
     const enqueueResult = await enqueueCodexTask(env, normalized, contractResult.body);
     await persistEvidenceStage(env, normalized, enqueueResult.ok ? "codex_task_enqueued" : "codex_task_enqueue_failed", {
       intent: contractResult.body.intent,
-      action: contractResult.body.action,
+      action: CODEX_TASK_ACTION,
       task_id_present: Boolean(contractResult.body.task_id),
       status: enqueueResult.duplicate ? "duplicate" : enqueueResult.ok ? "queued" : "failed",
       reason: enqueueResult.ok ? "" : enqueueResult.reason,
     });
     logStage(enqueueResult.ok ? "codex_task_enqueued" : "codex_task_enqueue_failed", {
       request_id: normalized.request_id,
-      action: contractResult.body.action,
+      action: CODEX_TASK_ACTION,
       task_id_present: Boolean(contractResult.body.task_id),
       reason: enqueueResult.ok ? undefined : enqueueResult.reason,
     });
@@ -675,14 +663,13 @@ export async function enqueueCodexTask(env = {}, normalized = {}, body = {}) {
     monitor: CODEX_MONITOR_NAME,
     task_id: body.task_id,
     task_type: "codex_task",
-    project: CODEX_TASK_PROJECT,
-    project_path: CODEX_TASK_PROJECT_PATH,
-    instruction: CODEX_TASK_INSTRUCTION,
+    project: body.project || CODEX_TASK_PROJECT,
+    project_path: body.project_path || CODEX_TASK_PROJECT_PATH,
+    instruction: normalized.message_text,
+    original_user_text: normalized.message_text,
     request_id: normalized.request_id,
     marker: normalized.gate_marker,
     action: CODEX_TASK_ACTION,
-    target_path: CODEX_TASK_SMOKE_FILE_PATH,
-    content: CODEX_TASK_SMOKE_FILE_CONTENT,
     line_user_ref: lineUserRef.value,
     finalize_token: createFinalizeToken(),
     created_at: new Date().toISOString(),
@@ -834,7 +821,8 @@ export function validateN8nContract(body, requestId) {
       canonical_request_id_present: Boolean(body?.canonicalRequestId),
     };
   }
-  body = { ...body, request_id: requestIdentity.value };
+  const canonicalIntent = body.intent === "codex_task" ? "codex_delegate" : body.intent;
+  body = { ...body, request_id: requestIdentity.value, intent: canonicalIntent };
   if (!ACCEPTED_N8N_INTENTS.includes(body.intent)) {
     return { ok: false, reason: "unsupported_intent" };
   }
@@ -842,7 +830,7 @@ export function validateN8nContract(body, requestId) {
   if (!replyText && body.intent !== "idea_create") {
     return { ok: false, reason: "missing_reply_text" };
   }
-  if (body.intent === "codex_task" && !body.task_id) {
+  if (body.intent === "codex_delegate" && !body.task_id) {
     return { ok: false, reason: "missing_task_id" };
   }
   if (body.intent === "idea_create") {
@@ -853,12 +841,12 @@ export function validateN8nContract(body, requestId) {
       return { ok: false, reason: "missing_idea_create_record" };
     }
   }
-  if (body.intent === "codex_task") {
-    if (body.tool_called !== "codex_task") {
+  if (body.intent === "codex_delegate") {
+    if (body.tool_called !== "codex_task" && body.tool_called !== "codex_delegate") {
       return { ok: false, reason: "missing_codex_task_tool_called" };
     }
-    if (body.action !== "create_smoke_file") {
-      return { ok: false, reason: "missing_codex_task_action" };
+    if (body.action && body.action !== CODEX_TASK_ACTION && body.action !== CODEX_LEGACY_SMOKE_ACTION) {
+      return { ok: false, reason: "unsupported_codex_task_action" };
     }
   }
   if (body.status !== "completed" && body.status !== "accepted") {
@@ -948,18 +936,12 @@ function stableShortFingerprint(value = "") {
 }
 
 export function codexTaskCapabilityCheck(messageText = "") {
-  const text = String(messageText || "").trim().toLowerCase();
-  const unsupportedPattern = /(?:computer use|browser|chrome|safari|http:\/\/|https:\/\/|網頁|瀏覽器|網站|網址|開啟|打開|瀏覽|搜尋)/i;
-  if (unsupportedPattern.test(text)) {
-    return { ok: false, reason: "capability_not_yet_enabled" };
-  }
-
-  const smokeScopePattern = /(?:最小任務測試|測試檔案|smoke|建立.*檔案|codex.*測試)/i;
-  if (!smokeScopePattern.test(text)) {
-    return { ok: false, reason: "capability_not_yet_enabled" };
-  }
-
-  return { ok: true };
+  return {
+    ok: true,
+    intent: "codex_delegate",
+    reason: "",
+    original_user_text_present: String(messageText || "").trim().length > 0,
+  };
 }
 
 function contractEvidenceForLog(body) {
@@ -969,11 +951,11 @@ function contractEvidenceForLog(body) {
       saved_record: body.saved_record || body.record || 0,
     };
   }
-  if (body.intent === "codex_task") {
+  if (body.intent === "codex_delegate") {
     return {
       tool_called: body.tool_called,
       codex_task: body.codex_task || 0,
-      action: body.action,
+      action: CODEX_TASK_ACTION,
       task_id_present: Boolean(body.task_id),
     };
   }
@@ -1352,11 +1334,16 @@ export async function handleCodexFinalize(request, env = {}) {
     return jsonResponse({ status: "rejected", reason: "unreadable_codex_task" }, 409);
   }
 
-  if (task.action !== CODEX_TASK_ACTION || task.request_id !== requestId) {
+  if ((task.action !== CODEX_TASK_ACTION && task.action !== CODEX_LEGACY_SMOKE_ACTION) || task.request_id !== requestId) {
     return jsonResponse({ status: "rejected", reason: "finalize_task_mismatch" }, 409);
   }
   if (!task.finalize_token || !constantTimeEqual(task.finalize_token, providedToken)) {
     return jsonResponse({ status: "rejected", reason: "invalid_finalize_token" }, 401);
+  }
+
+  if (callbackStatus === "awaiting_approval" || task.status === "awaiting_approval") {
+    const approvalResult = await pushCodexApprovalOnce(env, task, body.approval_code || "", body.reason || "approval_required");
+    return jsonResponse(approvalResult, approvalResult.ok ? 200 : 500);
   }
 
   if (callbackStatus === "failed" || task.status === "failed") {
@@ -1621,7 +1608,9 @@ async function pushCodexFinalOnce(env = {}, task = {}) {
     return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
   }
 
-  const pushResult = await pushToLine(userId.value, CODEX_COMPLETED_REPLY_TEXT, env);
+  const resultRaw = await env.RUNTIME_KV.get(codexResultKey(task.task_id));
+  const result = parseJsonSafely(resultRaw) || {};
+  const pushResult = await pushToLine(userId.value, naturalCodexFinalText(result.summary || CODEX_COMPLETED_REPLY_TEXT), env);
   if (!pushResult.ok) {
     await env.RUNTIME_KV.put(finalKey, JSON.stringify({
       schema: "pline-v3-test-codex-final/v1",
@@ -1658,6 +1647,112 @@ async function pushCodexFinalOnce(env = {}, task = {}) {
     final_mode: "monitor_callback_exactly_once",
   });
   return { ok: true, status: "completed", pushed: true, request_id: task.request_id };
+}
+
+async function pushCodexApprovalOnce(env = {}, task = {}, approvalCode = "", reason = "approval_required") {
+  const finalKey = codexFinalKey(task.task_id);
+  const existingRaw = await env.RUNTIME_KV.get(finalKey);
+  if (existingRaw) {
+    const existing = parseJsonSafely(existingRaw);
+    if (existing?.status === "awaiting_approval" || existing?.status === "approval_notice_sending") {
+      return {
+        ok: true,
+        status: existing.status,
+        pushed: false,
+        request_id: task.request_id,
+      };
+    }
+  }
+
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-codex-final/v1",
+    status: "approval_notice_sending",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+
+  const userId = await openLineUserRef(task.line_user_ref, env);
+  if (!userId.ok) {
+    await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+      schema: "pline-v3-test-codex-final/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: userId.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
+  }
+
+  const code = sanitizeEvidenceId(approvalCode || task.approval?.code || "");
+  const pushResult = await pushToLine(userId.value, `${CODEX_APPROVAL_REPLY_PREFIX} ${code}`, env);
+  if (!pushResult.ok) {
+    await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+      schema: "pline-v3-test-codex-final/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: pushResult.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    return { ok: false, status: "failed", reason: pushResult.reason, request_id: task.request_id };
+  }
+
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-codex-final/v1",
+    status: "awaiting_approval",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    reason,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_approval_notice_sent", {
+    action: task.action || CODEX_TASK_ACTION,
+    status: "awaiting_approval",
+    reason,
+  });
+  return { ok: true, status: "awaiting_approval", pushed: true, request_id: task.request_id };
+}
+
+export async function handleCodexApprovalReply(normalized = {}, env = {}) {
+  const approvalCode = extractApprovalCode(normalized.message_text || "");
+  if (!approvalCode) {
+    return { handled: false };
+  }
+  if (!env.RUNTIME_KV) {
+    return { handled: true, ok: false, reason: "missing_RUNTIME_KV" };
+  }
+  const taskKey = await env.RUNTIME_KV.get(codexApprovalKey(approvalCode));
+  if (!taskKey) {
+    return { handled: true, ok: false, reason: "unknown_approval_code" };
+  }
+  const raw = await env.RUNTIME_KV.get(taskKey);
+  const task = parseJsonSafely(raw);
+  if (!task || task.status !== "awaiting_approval") {
+    return { handled: true, ok: false, reason: "approval_task_not_waiting" };
+  }
+  const updated = {
+    ...task,
+    status: "approved",
+    approval: {
+      ...(task.approval || {}),
+      status: "approved",
+      code: approvalCode,
+      approved_at: new Date().toISOString(),
+    },
+  };
+  await env.RUNTIME_KV.put(taskKey, JSON.stringify(updated), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await env.RUNTIME_KV.put(codexPendingKey(task.task_id), taskKey, { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_approval_accepted", {
+    action: task.action || CODEX_TASK_ACTION,
+    status: "approved",
+  });
+  const userId = await openLineUserRef(task.line_user_ref, env);
+  if (userId.ok) {
+    await pushToLine(userId.value, CODEX_APPROVAL_ACCEPTED_REPLY_TEXT, env);
+  }
+  return { handled: true, ok: true, task_id: task.task_id, request_id: task.request_id };
 }
 
 async function pushCodexFailureOnce(env = {}, task = {}, reason = "monitor_task_failed") {
@@ -1994,6 +2089,14 @@ function codexFinalKey(taskId) {
   return `${CODEX_TASK_PREFIX}:final:${sanitizeEvidenceId(taskId)}`;
 }
 
+function codexResultKey(taskId) {
+  return `${CODEX_TASK_PREFIX}:result:${sanitizeEvidenceId(taskId)}`;
+}
+
+function codexApprovalKey(code) {
+  return `${CODEX_TASK_PREFIX}:approval:${sanitizeEvidenceId(code)}`;
+}
+
 function ideaTaskKey(taskId) {
   return `${IDEA_TASK_PREFIX}:task:${sanitizeEvidenceId(taskId)}`;
 }
@@ -2010,23 +2113,42 @@ function sanitizeEvidenceId(value) {
   return String(value || "").replace(/[^A-Za-z0-9:_\-.]/g, "").slice(0, 160);
 }
 
+function sanitizeLabel(value) {
+  return String(value || "").replace(/[^\p{L}\p{N} _:\-.]/gu, "").slice(0, 120);
+}
+
+function safeProjectPath(value = "") {
+  const path = String(value || CODEX_TASK_PROJECT_PATH).trim();
+  if (path !== CODEX_TASK_PROJECT_PATH) {
+    return CODEX_TASK_PROJECT_PATH;
+  }
+  return path;
+}
+
+function safeInstruction(value = "") {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 4000);
+}
+
 function sanitizeCodexTaskRecord(record) {
+  const action = record.action === CODEX_LEGACY_SMOKE_ACTION ? CODEX_LEGACY_SMOKE_ACTION : CODEX_TASK_ACTION;
   return {
     schema: "pline-v3-test-codex-task/v1",
     status: record.status,
     monitor: CODEX_MONITOR_NAME,
     task_id: sanitizeEvidenceId(record.task_id),
     task_type: "codex_task",
-    project: CODEX_TASK_PROJECT,
-    project_path: CODEX_TASK_PROJECT_PATH,
-    instruction: CODEX_TASK_INSTRUCTION,
+    project: sanitizeLabel(record.project || CODEX_TASK_PROJECT),
+    project_path: safeProjectPath(record.project_path || CODEX_TASK_PROJECT_PATH),
+    instruction: safeInstruction(record.instruction || CODEX_TASK_INSTRUCTION),
+    original_user_text: safeInstruction(record.original_user_text || record.instruction || ""),
     request_id: sanitizeEvidenceId(record.request_id),
     marker: sanitizeEvidenceId(record.marker || ""),
-    action: CODEX_TASK_ACTION,
-    target_path: CODEX_TASK_SMOKE_FILE_PATH,
-    content: CODEX_TASK_SMOKE_FILE_CONTENT,
+    action,
+    target_path: action === CODEX_LEGACY_SMOKE_ACTION ? CODEX_TASK_SMOKE_FILE_PATH : "",
+    content: action === CODEX_LEGACY_SMOKE_ACTION ? CODEX_TASK_SMOKE_FILE_CONTENT : "",
     line_user_ref: String(record.line_user_ref || ""),
     finalize_token: sanitizeEvidenceId(record.finalize_token || ""),
+    approval: record.approval || null,
     created_at: record.created_at,
   };
 }
@@ -2076,6 +2198,19 @@ function naturalIdeaReplyText(replyText = "") {
     return IDEA_SAVED_FALLBACK_REPLY_TEXT;
   }
   return text;
+}
+
+function naturalCodexFinalText(replyText = "") {
+  const text = String(replyText || "").replace(/\s+/g, " ").trim();
+  if (!text || text.length > 300) {
+    return CODEX_COMPLETED_REPLY_TEXT;
+  }
+  return text;
+}
+
+function extractApprovalCode(messageText = "") {
+  const text = String(messageText || "").trim();
+  return text.match(/^確認\s+(OK-[A-Z0-9]{6})$/i)?.[1]?.toUpperCase() || "";
 }
 
 async function fingerprint(value, env = {}) {

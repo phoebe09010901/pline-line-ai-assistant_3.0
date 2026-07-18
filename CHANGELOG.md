@@ -367,3 +367,10 @@
 - Verified four production synthetic idea probes returned distinct content-aware `reply_source=ai_generated` replies with request id preserved and `saved_record=1`.
 - Added evidence file `N8N_EVIDENCE_IDEA_CREATE_NATURAL_REPLY.md`.
 - Next handoff: TEST reruns live LINE idea_create markers T3101/T3102 and confirms natural final text plus Dropbox/final PASS.
+## 2026-07-18 - Codex Default Delegation Gateway
+
+- Added a monitor-side `CodexGateway` and `CodexExecHostAdapter` using official `codex exec --json` JSONL events.
+- Changed Worker codex routing to enqueue `codex_delegate` and preserve `original_user_text`; legacy `codex_task` remains an accepted alias.
+- Added capability manifest and LINE confirmation-code approval bridge.
+- Verified direct Codex CLI execution and Gateway live runtime file creation.
+- Added regression coverage for exactly-once delegation, approval resume, Worker webhook/signature/admin/idempotency paths, and idea/Dropbox behavior.

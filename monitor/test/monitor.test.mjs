@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   DROPBOX_IDEA_DIR,
+  CODEX_DELEGATE_ACTION,
   FIXED_ACTION,
   IDEA_TASK_PREFIX,
   SAVE_IDEA_ACTION,
@@ -48,7 +49,7 @@ const ready = await health({ CODEX_BIN: fakeCodex, PATH: "" });
 assert.equal(ready.status, "ready");
 assert.equal(ready.codex_bin.path, fakeCodex);
 assert.equal(ready.task_prefix, "codex_task:v1");
-assert.deepEqual(ready.supported_actions, ["create_smoke_file", "save_idea_json"]);
+assert.deepEqual(ready.supported_actions, ["codex_delegate", "create_smoke_file", "save_idea_json"]);
 assert.deepEqual(ready.pending_prefixes, ["codex_task:v1:pending:", "idea_json:v1:pending:"]);
 
 assert.deepEqual(normalizeTask({}), {
@@ -57,6 +58,7 @@ assert.deepEqual(normalizeTask({}), {
   project: "PLine03 safe smoke",
   project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke",
   instruction: "Create or overwrite the fixed smoke file with the fixed smoke content.",
+  original_user_text: "",
   request_id: "",
   marker: "",
   action: "create_smoke_file",
@@ -68,6 +70,7 @@ assert.deepEqual(normalizeTask({}), {
   finalize_token: "",
   final_reply_text: "",
   line_user_ref: "",
+  approval: null,
 });
 
 assert.equal((await runTask({ action: "other" }, { CODEX_BIN: fakeCodex, PATH: "" })).reason, "unsupported_action");
@@ -91,6 +94,154 @@ const result = await runTask({ action: "create_smoke_file" }, { CODEX_BIN: fakeC
 assert.equal(result.ok, true);
 assert.equal(await readFile(SMOKE_FILE_PATH, "utf8"), "Codex 任務測試成功");
 await access(SMOKE_FILE_PATH, constants.F_OK);
+
+const delegateGatewayCalls = [];
+const delegateResult = await runTask({
+  action: CODEX_DELEGATE_ACTION,
+  task_id: "delegate-unit",
+  request_id: "pline-v3-delegate-unit",
+  project: "菲比 LINE 智能助理_03",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03",
+  original_user_text: "請讀取 PROJECT_STATE.md 並回報第一行",
+}, { CODEX_BIN: fakeCodex, PATH: "" }, {
+  gateway: {
+    async submit_task(task) {
+      delegateGatewayCalls.push(task);
+      return {
+        ok: true,
+        status: "completed",
+        thread_id: "thread-delegate-unit",
+        turn_id: "turn-delegate-unit",
+        codex_received: true,
+        codex_execution: true,
+        tool_events: [{ type: "command_execution", status: "completed" }],
+        changed_files: [],
+        tests: "PASS",
+        summary: "PROJECT_STATE.md was read.",
+      };
+    },
+  },
+});
+assert.equal(delegateResult.ok, true);
+assert.equal(delegateResult.codex_execution, true);
+assert.equal(delegateResult.thread_id, "thread-delegate-unit");
+assert.equal(delegateResult.result_file, "runtime/codex-gateway/delegate-unit.json");
+assert.equal(delegateGatewayCalls[0].original_user_text, "請讀取 PROJECT_STATE.md 並回報第一行");
+
+const delegateClaimKv = createMemoryKv();
+await delegateClaimKv.put(`${TASK_PREFIX}:task:delegate-claim-unit`, JSON.stringify({
+  schema: "pline-v3-test-codex-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: "delegate-claim-unit",
+  task_type: "codex_task",
+  project: "菲比 LINE 智能助理_03",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03",
+  instruction: "請讀取 PROJECT_STATE.md 並回報第一行",
+  original_user_text: "請讀取 PROJECT_STATE.md 並回報第一行",
+  request_id: "pline-v3-delegate-claim-unit",
+  marker: "T3201-20260718010101",
+  action: CODEX_DELEGATE_ACTION,
+  finalize_token: "test-finalize-token",
+  line_user_ref: "v1.encrypted.ref",
+  created_at: "2026-07-18T16:30:00.000Z",
+}));
+await delegateClaimKv.put(`${TASK_PREFIX}:pending:delegate-claim-unit`, `${TASK_PREFIX}:task:delegate-claim-unit`);
+const delegateClaim = await claimOnce({
+  kv: delegateClaimKv,
+  env: { CODEX_BIN: fakeCodex, PATH: "", CODEX_FINALIZE_DISABLED: "1" },
+  gateway: {
+    async submit_task() {
+      return {
+        ok: true,
+        status: "completed",
+        thread_id: "thread-claim-unit",
+        turn_id: "turn-claim-unit",
+        codex_received: true,
+        codex_execution: true,
+        tool_events: [{ type: "command_execution", status: "completed" }],
+        changed_files: [],
+        tests: "PASS",
+        summary: "PROJECT_STATE.md first line was read.",
+      };
+    },
+  },
+});
+assert.equal(delegateClaim.ok, true);
+assert.equal(delegateClaim.claimed, true);
+assert.equal(delegateClaim.status, "completed");
+const delegateClaimRecord = JSON.parse(await delegateClaimKv.get(`${TASK_PREFIX}:task:delegate-claim-unit`));
+assert.equal(delegateClaimRecord.status, "completed");
+assert.equal(delegateClaimRecord.thread_id, "thread-claim-unit");
+assert.equal(await delegateClaimKv.get(`${TASK_PREFIX}:pending:delegate-claim-unit`), "");
+const duplicateDelegateClaim = await claimOnce({
+  kv: delegateClaimKv,
+  env: { CODEX_BIN: fakeCodex, PATH: "", CODEX_FINALIZE_DISABLED: "1" },
+  gateway: { async submit_task() { throw new Error("should_not_run_twice"); } },
+  legacyScan: false,
+});
+assert.equal(duplicateDelegateClaim.claimed, false);
+
+const approvalResult = await runTask({
+  action: CODEX_DELEGATE_ACTION,
+  task_id: "delegate-approval-unit",
+  request_id: "pline-v3-delegate-approval-unit",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03",
+  original_user_text: "請部署到 production",
+}, { CODEX_BIN: fakeCodex, PATH: "" }, {
+  gateway: {
+    async submit_task() {
+      return {
+        ok: true,
+        status: "awaiting_approval",
+        approval_code: "OK-ABC123",
+        approval_reason: "high_risk_action_requires_line_confirmation",
+      };
+    },
+  },
+});
+assert.equal(approvalResult.ok, true);
+assert.equal(approvalResult.status, "awaiting_approval");
+assert.equal(approvalResult.approval_code, "OK-ABC123");
+
+const approvalKv = createMemoryKv();
+await approvalKv.put(`${TASK_PREFIX}:task:delegate-approval-claim`, JSON.stringify({
+  schema: "pline-v3-test-codex-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: "delegate-approval-claim",
+  task_type: "codex_task",
+  project: "菲比 LINE 智能助理_03",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03",
+  instruction: "請部署到 production",
+  original_user_text: "請部署到 production",
+  request_id: "pline-v3-delegate-approval-claim",
+  marker: "T3202-20260718010102",
+  action: CODEX_DELEGATE_ACTION,
+  finalize_token: "test-finalize-token",
+  line_user_ref: "v1.encrypted.ref",
+  created_at: "2026-07-18T16:31:00.000Z",
+}));
+await approvalKv.put(`${TASK_PREFIX}:pending:delegate-approval-claim`, `${TASK_PREFIX}:task:delegate-approval-claim`);
+const approvalClaim = await claimOnce({
+  kv: approvalKv,
+  env: { CODEX_BIN: fakeCodex, PATH: "", CODEX_FINALIZE_DISABLED: "1" },
+  gateway: {
+    async submit_task() {
+      return {
+        ok: true,
+        status: "awaiting_approval",
+        approval_code: "OK-ABC123",
+        approval_reason: "high_risk_action_requires_line_confirmation",
+      };
+    },
+  },
+});
+assert.equal(approvalClaim.ok, true);
+assert.equal(approvalClaim.status, "awaiting_approval");
+assert.equal(await approvalKv.get(`${TASK_PREFIX}:approval:OK-ABC123`), `${TASK_PREFIX}:task:delegate-approval-claim`);
+const approvalTaskRecord = JSON.parse(await approvalKv.get(`${TASK_PREFIX}:task:delegate-approval-claim`));
+assert.equal(approvalTaskRecord.status, "awaiting_approval");
 
 const taskKv = createMemoryKv();
 const codexCreatedAt = "2026-07-18T11:31:00.000Z";
@@ -531,7 +682,6 @@ assert.deepEqual(JSON.parse(codexFinalizeCalls[0].options.body), {
   request_id: "pline-v3-codex-finalizer-unit",
   action: FIXED_ACTION,
   status: "completed",
-  reason: "",
   finalize_token: "test-finalize-token",
 });
 globalThis.fetch = originalFetch;

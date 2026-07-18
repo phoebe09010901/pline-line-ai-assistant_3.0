@@ -2475,6 +2475,41 @@ Before TEST can validate default delegation, a separate implementation Gate must
 
 Evidence: `FIX_EVIDENCE_CODEX_DEFAULT_DELEGATION_INVESTIGATION.md`.
 
+Implementation result: `PASS`.
+
+Required regression for this Gate:
+
+- `node --check monitor/src/codex_gateway.js`
+- `node --check monitor/src/monitor.js`
+- `node --test monitor/test/monitor.test.mjs`
+- `node --check worker/src/index.js`
+- `node --test worker/test/worker.test.mjs`
+- secret/private scan effective_hit_count=0
+- `.gitignore` sanity for runtime/logs/Dropbox JSON/Wrangler local state/secrets
+
+Codex delegated task acceptance:
+
+- Worker accepts legacy n8n `codex_task` as an alias.
+- Worker stores new task action as `codex_delegate`.
+- Worker stores the full `original_user_text`.
+- Monitor Gateway submits the original text to `codex exec --json`.
+- Monitor parses Codex JSONL events and records result metadata.
+- Completed delegated tasks do not rerun on repeated claim.
+
+Approval bridge acceptance:
+
+- High-risk text becomes `awaiting_approval`.
+- LINE finalizer sends a natural confirmation request with a one-time code.
+- Reply `確認 OK-XXXXXX` marks the same task `approved`.
+- Approved task is requeued through the same pending index.
+
+Capability manifest acceptance:
+
+- Available capabilities and unavailable host surfaces must both be reported.
+- Browser and Computer Use unavailability must not block Shell/file/Git/network/Codex execution.
+
+Evidence: `TEST_EVIDENCE_CODEX_DEFAULT_DELEGATION_GATE.md`.
+
 ## N8N idea_create Natural Reply Regression
 
 Synthetic n8n validation:

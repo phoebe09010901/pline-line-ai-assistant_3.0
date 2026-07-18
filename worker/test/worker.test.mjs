@@ -4,6 +4,7 @@ import {
   extractGateMarker,
   enqueueCodexTask,
   enqueueIdeaTask,
+  handleCodexApprovalReply,
   handleCodexFinalize,
   handleEvidenceRead,
   handleEvidenceSelfcheck,
@@ -63,12 +64,16 @@ assert.equal(health.evidence.runtime_kv_bound, false);
 assert.equal(health.evidence.selfcheck_secret_configured, false);
 assert.equal(health.codex_monitor.name, "pline-v3-test-codex-monitor");
 assert.deepEqual(health.codex_monitor.task_prefixes, ["codex_task:v1", "idea_json:v1"]);
-assert.deepEqual(health.codex_monitor.actions, ["create_smoke_file", "save_idea_json"]);
-assert.equal(health.codex_monitor.target_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt");
-assert.equal(health.codex_monitor.target_content, "Codex 任務測試成功");
+assert.deepEqual(health.codex_monitor.actions, ["codex_delegate", "create_smoke_file", "save_idea_json"]);
+assert.equal(health.codex_monitor.project_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03");
+assert.equal(health.codex_monitor.selected_interface, "codex_exec_json");
+assert.equal(health.codex_monitor.original_user_text_delivery, true);
+assert.equal(health.codex_monitor.approval_bridge, "line_confirmation_code");
+assert.equal(health.codex_monitor.legacy_smoke_target_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt");
+assert.equal(health.codex_monitor.legacy_smoke_target_content, "Codex 任務測試成功");
 assert.equal(health.codex_monitor.dropbox_idea_dir, "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03");
-assert.deepEqual(health.supported_intents, ["idea_create", "codex_task", "clarify", "unsupported"]);
-assert.deepEqual(health.gate_test_intents, ["idea_create", "codex_task"]);
+assert.deepEqual(health.supported_intents, ["idea_create", "google_calendar_direct", "codex_delegate", "codex_task", "clarify", "unsupported"]);
+assert.deepEqual(health.gate_test_intents, ["idea_create", "codex_delegate"]);
 assert.equal(health.required_env.N8N_WEBHOOK_URL, false);
 assert.deepEqual(lineAuthorizationHeader({ LINE_CHANNEL_ACCESS_TOKEN: "test-token" }), {
   ok: true,
@@ -272,6 +277,7 @@ const codexResult = validateN8nContract({
   status: "completed",
 }, "pline-v3-E2");
 assert.equal(codexResult.ok, true);
+assert.equal(codexResult.body.intent, "codex_delegate");
 
 assert.deepEqual(normalizeN8nResponseBody([{ json: {
   request_id: "pline-v3-E2",
@@ -355,15 +361,15 @@ assert.equal(unsupportedResult.ok, true);
 assert.equal(unsupportedResult.body.reply_text, "目前我只能先幫妳記想法，或處理指定的小任務。");
 
 assert.equal(normalizeReplyText("idea_create", ""), "");
-assert.deepEqual(codexTaskCapabilityCheck("請 Codex 執行最小任務測試，建立測試檔案").ok, true);
-assert.equal(codexTaskCapabilityCheck("請 Codex 幫我用computer use開啟一個新的網頁").reason, "capability_not_yet_enabled");
+assert.equal(codexTaskCapabilityCheck("請 Codex 執行最小任務測試，建立測試檔案").ok, true);
+assert.equal(codexTaskCapabilityCheck("請 Codex 幫我用computer use開啟一個新的網頁").ok, true);
 
 assert.equal(validateN8nContract({
   request_id: "pline-v3-E2",
   intent: "codex_task",
   reply_text: "收到，我開始處理囉。",
   tool_called: "codex_task",
-  action: "create_smoke_file",
+  action: "codex_delegate",
   status: "completed",
 }, "pline-v3-E2").reason, "missing_task_id");
 assert.equal(validateN8nContract({
@@ -451,7 +457,7 @@ const codexBackgroundResult = await processN8nInBackground({
   RUNTIME_KV: codexTaskKv,
 });
 assert.equal(codexBackgroundResult.ok, true);
-assert.equal(codexBackgroundResult.intent, "codex_task");
+assert.equal(codexBackgroundResult.intent, "codex_delegate");
 assert.deepEqual(codexBackgroundCalls, [
   "https://n8n.example.test/webhook",
   "https://api.line.me/v2/bot/message/push",
@@ -464,13 +470,14 @@ const codexTaskRecord = JSON.parse(await codexTaskKv.get(codexTaskKeys.keys[0].n
 assert.equal(codexTaskRecord.status, "queued");
 assert.equal(codexTaskRecord.task_id, "T1");
 assert.equal(codexTaskRecord.task_type, "codex_task");
-assert.equal(codexTaskRecord.project, "PLine03 safe smoke");
-assert.equal(codexTaskRecord.project_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke");
-assert.equal(codexTaskRecord.instruction, "Create or overwrite the fixed smoke file with the fixed smoke content.");
+assert.equal(codexTaskRecord.project, "菲比 LINE 智能助理_03");
+assert.equal(codexTaskRecord.project_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03");
+assert.equal(codexTaskRecord.instruction, "請 Codex 在 _03 專案建立測試檔案");
+assert.equal(codexTaskRecord.original_user_text, "請 Codex 在 _03 專案建立測試檔案");
 assert.equal(codexTaskRecord.request_id, "pline-v3-BG2");
-assert.equal(codexTaskRecord.action, "create_smoke_file");
-assert.equal(codexTaskRecord.target_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt");
-assert.equal(codexTaskRecord.content, "Codex 任務測試成功");
+assert.equal(codexTaskRecord.action, "codex_delegate");
+assert.equal(codexTaskRecord.target_path, "");
+assert.equal(codexTaskRecord.content, "");
 assert.equal(typeof codexTaskRecord.finalize_token, "string");
 assert.equal(codexTaskRecord.line_user_ref.includes("U_TEST"), false);
 globalThis.fetch = originalFetch;
@@ -506,17 +513,16 @@ const capabilityNotEnabledCodexResult = await processN8nInBackground({
   LINE_CHANNEL_ACCESS_TOKEN: "test-token",
   RUNTIME_KV: capabilityNotEnabledCodexKv,
 });
-assert.equal(capabilityNotEnabledCodexResult.ok, false);
-assert.equal(capabilityNotEnabledCodexResult.reason, "capability_not_yet_enabled");
+assert.equal(capabilityNotEnabledCodexResult.ok, true);
+assert.equal(capabilityNotEnabledCodexResult.intent, "codex_delegate");
 assert.deepEqual(capabilityNotEnabledCodexCalls, [
   "https://n8n.example.test/webhook",
   "https://api.line.me/v2/bot/message/push",
 ]);
-assert.equal((await capabilityNotEnabledCodexKv.list({ prefix: "codex_task:v1:task:" })).keys.length, 0);
+assert.equal((await capabilityNotEnabledCodexKv.list({ prefix: "codex_task:v1:task:" })).keys.length, 1);
 const capabilityNotEnabledEvidence = await readEvidenceForRequest({ RUNTIME_KV: capabilityNotEnabledCodexKv }, "pline-v3-BG2-UNSUPPORTED");
-assert.equal(capabilityNotEnabledEvidence.stages.some((stage) => stage.stage === "codex_task_capability_not_enabled"), true);
-assert.equal(capabilityNotEnabledEvidence.stages.some((stage) => stage.stage === "codex_task_capability_notice_completed"), true);
-assert.equal(capabilityNotEnabledEvidence.stages.some((stage) => stage.stage === "codex_task_processing_notice_completed"), false);
+assert.equal(capabilityNotEnabledEvidence.stages.some((stage) => stage.stage === "codex_task_capability_not_enabled"), false);
+assert.equal(capabilityNotEnabledEvidence.stages.some((stage) => stage.stage === "codex_task_processing_notice_completed"), true);
 globalThis.fetch = originalFetch;
 
 const enqueueKv = createMemoryKv();
@@ -534,8 +540,10 @@ const enqueueResult = await enqueueCodexTask({
 assert.equal(enqueueResult.ok, true);
 const enqueueRecord = JSON.parse(await enqueueKv.get("codex_task:v1:task:task-enqueue-unit"));
 assert.equal(enqueueRecord.status, "queued");
-assert.equal(enqueueRecord.content, "Codex 任務測試成功");
-assert.equal(enqueueRecord.project_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke");
+assert.equal(enqueueRecord.action, "codex_delegate");
+assert.equal(enqueueRecord.content, "");
+assert.equal(enqueueRecord.project_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03");
+assert.equal(enqueueRecord.original_user_text, "");
 assert.equal(await enqueueKv.get("codex_task:v1:pending:task-enqueue-unit"), "codex_task:v1:task:task-enqueue-unit");
 
 const ideaKv = createMemoryKv();
@@ -786,7 +794,7 @@ const codexFinalizerResponse = await handleCodexFinalize(new Request("https://wo
 assert.equal(codexFinalizerResponse.status, 200);
 assert.equal((await codexFinalizerResponse.json()).status, "completed");
 assert.equal(codexFinalizerCalls.length, 1);
-assert.equal(JSON.parse(codexFinalizerCalls[0].options.body).messages[0].text, "已經處理完成了 ✨\n指定的小任務已成功執行。");
+assert.equal(JSON.parse(codexFinalizerCalls[0].options.body).messages[0].text, "已經處理完成了 ✨");
 const repeatedCodexFinalizerResponse = await handleCodexFinalize(new Request("https://worker.example.test/test/codex-finalize", {
   method: "POST",
   headers: { "content-type": "application/json" },
@@ -803,6 +811,76 @@ const codexFinalizerEvidence = await readEvidenceForRequest({ RUNTIME_KV: codexF
 assert.equal(codexFinalizerEvidence.stages.some((stage) => stage.stage === "codex_task_final_push_completed"), true);
 assert.equal(summarizeEvidenceStages(codexFinalizerEvidence.stages).final_push, true);
 assert.equal(JSON.stringify(codexFinalizerEvidence).includes("U_RAW_SHOULD_NOT_STORE"), false);
+globalThis.fetch = originalFetch;
+
+const approvalBridgeCalls = [];
+const approvalBridgeKv = createMemoryKv();
+await enqueueCodexTask({
+  RUNTIME_KV: approvalBridgeKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-CODEX-APPROVAL",
+  gate_marker: "T3202-20260718090102",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
+  message_text: "請 Codex 執行需要確認的安全 mock 動作",
+}, {
+  task_id: "codex-approval-unit",
+});
+const approvalBridgeTask = JSON.parse(await approvalBridgeKv.get("codex_task:v1:task:codex-approval-unit"));
+await approvalBridgeKv.put("codex_task:v1:task:codex-approval-unit", JSON.stringify({
+  ...approvalBridgeTask,
+  status: "awaiting_approval",
+  approval: {
+    status: "awaiting_approval",
+    code: "OK-ABC123",
+  },
+}));
+await approvalBridgeKv.put("codex_task:v1:approval:OK-ABC123", "codex_task:v1:task:codex-approval-unit");
+globalThis.fetch = async (url, options) => {
+  approvalBridgeCalls.push({ url, options });
+  if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  return new Response("{}", { status: 404 });
+};
+const approvalNoticeResponse = await handleCodexFinalize(new Request("https://worker.example.test/test/codex-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    task_id: "codex-approval-unit",
+    request_id: "pline-v3-CODEX-APPROVAL",
+    action: "codex_delegate",
+    status: "awaiting_approval",
+    reason: "high_risk_action_requires_line_confirmation",
+    approval_code: "OK-ABC123",
+    finalize_token: approvalBridgeTask.finalize_token,
+  }),
+}), {
+  RUNTIME_KV: approvalBridgeKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(approvalNoticeResponse.status, 200);
+assert.equal((await approvalNoticeResponse.json()).status, "awaiting_approval");
+assert.equal(JSON.parse(approvalBridgeCalls[0].options.body).messages[0].text, "這件事需要妳確認後我才會繼續。請回覆：確認 OK-ABC123");
+const approvalReplyResult = await handleCodexApprovalReply({
+  request_id: "pline-v3-CODEX-APPROVAL-REPLY",
+  message_text: "確認 OK-ABC123",
+}, {
+  RUNTIME_KV: approvalBridgeKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(approvalReplyResult.handled, true);
+assert.equal(approvalReplyResult.ok, true);
+const approvedTask = JSON.parse(await approvalBridgeKv.get("codex_task:v1:task:codex-approval-unit"));
+assert.equal(approvedTask.status, "approved");
+assert.equal(approvedTask.approval.status, "approved");
+assert.equal(await approvalBridgeKv.get("codex_task:v1:pending:codex-approval-unit"), "codex_task:v1:task:codex-approval-unit");
+const approvalBridgeEvidence = await readEvidenceForRequest({ RUNTIME_KV: approvalBridgeKv }, "pline-v3-CODEX-APPROVAL");
+assert.equal(approvalBridgeEvidence.stages.some((stage) => stage.stage === "codex_task_approval_notice_sent"), true);
+assert.equal(approvalBridgeEvidence.stages.some((stage) => stage.stage === "codex_task_approval_accepted"), true);
+assert.equal(JSON.stringify(approvalBridgeEvidence).includes("U_RAW_SHOULD_NOT_STORE"), false);
 globalThis.fetch = originalFetch;
 
 const codexFailureCalls = [];

@@ -964,3 +964,19 @@ Status: `BLOCKED_FOR_DEFAULT_DELEGATION`.
 - Evidence: `FIX_EVIDENCE_CODEX_DEFAULT_DELEGATION_INVESTIGATION.md`.
 
 Next: do not implement default delegation until a formal Codex host/API/permission contract is selected and authorized.
+
+## Codex Default Delegation Implementation - 2026-07-18
+
+Status: `PASS`.
+
+- Selected interface: official `codex exec --json` non-interactive JSONL stream.
+- Local Codex version: `codex-cli 0.142.5`.
+- Implemented monitor-side `CodexGateway` with submit/status/events/approve/cancel/result/capability methods.
+- Implemented `CodexExecHostAdapter`; fixed the launchd-safe invocation by using `spawn` and explicitly closing stdin.
+- Worker now queues `codex_delegate` tasks and preserves `original_user_text`; legacy n8n `codex_task` is accepted only as an alias.
+- Worker no longer blocks Browser/Computer Use style natural language before Codex; unavailable host surfaces are reported in capability manifest.
+- Approval bridge implemented with `awaiting_approval`, LINE confirmation code, approval lookup key, and requeue of the same task.
+- Direct CLI live evidence and Gateway live evidence both wrote ignored runtime files with readback `Codex Gateway live PASS`.
+- Evidence: `TEST_EVIDENCE_CODEX_DEFAULT_DELEGATION_GATE.md`.
+
+Unavailable host surfaces: Browser and Computer Use are not exposed through the launchd `codex_exec` adapter; this is recorded as capability manifest output, not a delegation Gateway blocker.

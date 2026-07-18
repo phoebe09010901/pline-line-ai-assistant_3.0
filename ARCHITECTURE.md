@@ -181,3 +181,15 @@ Worker now writes a small pending index whenever it creates a monitor task:
 The local monitor runs as a project-local launchd agent and drains only these pending indexes. It removes the index after terminal completion/failure/duplicate. A manual legacy scan is retained only for old pre-index tasks.
 
 This keeps LINE webhook handling fast while making Dropbox JSON finalization independent of TEST manually starting a monitor poll.
+## Codex Default Delegation Gateway
+
+The `_03` Codex path now separates routing from host execution:
+
+- Worker router keeps the outer decision small: `idea_create`, `google_calendar_direct`, or `codex_delegate`.
+- Worker enqueues `codex_delegate` and preserves `original_user_text`.
+- Monitor owns `CodexGateway` and host adapters.
+- The first production adapter is `CodexExecHostAdapter`, backed by official `codex exec --json` JSONL events.
+- Gateway result metadata is written under ignored runtime state.
+- Approval bridge state stays in task/KV records and uses a LINE confirmation code before requeueing high-risk tasks.
+
+Legacy `create_smoke_file` remains only for local monitor regression compatibility and is no longer the Worker router's general-task replacement.
