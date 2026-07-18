@@ -131,6 +131,7 @@ export async function runTask(task, env = process.env, options = {}) {
     }, {
       env,
       timeoutMs: env.CODEX_GATEWAY_TIMEOUT_MS,
+      onCodexStarted: options.onCodexStarted,
     });
     if (gatewayResult.status === APPROVAL_STATUS) {
       return {
@@ -313,7 +314,25 @@ export async function claimOnce(options = {}) {
       action: task.action,
     });
 
-    const execution = await runTask(task, env, options);
+    let processingNoticeSent = false;
+    const notifyProcessingStarted = async () => {
+      if (processingNoticeSent || task.action !== CODEX_DELEGATE_ACTION) {
+        return;
+      }
+      processingNoticeSent = true;
+      const callbackResult = await notifyCodexFinalizer(task, "processing", env);
+      await writeEvidenceStage(kv, task, callbackResult.ok ? "codex_task_processing_callback_completed" : "codex_task_processing_callback_failed", {
+        monitor: MONITOR_NAME,
+        action: task.action,
+        status: callbackResult.status || "processing",
+        reason: callbackResult.ok ? "" : callbackResult.reason,
+      });
+    };
+
+    const execution = await runTask(task, env, {
+      ...options,
+      onCodexStarted: notifyProcessingStarted,
+    });
     if (execution.ok && execution.status === APPROVAL_STATUS) {
       const approvalRecord = {
         ...claimRecord,
@@ -395,6 +414,9 @@ export async function claimOnce(options = {}) {
 
     const completedStatus = execution.status === "duplicate" ? "duplicate" : "completed";
     const completedAt = new Date().toISOString();
+    if (task.action === CODEX_DELEGATE_ACTION && execution.codex_received && execution.codex_execution) {
+      await notifyProcessingStarted();
+    }
     await writeEvidenceStage(kv, task, task.action === SAVE_IDEA_ACTION ? "idea_json_saved" : "codex_execution_completed", {
       monitor: MONITOR_NAME,
       codex_execution: (task.action === FIXED_ACTION || task.action === CODEX_DELEGATE_ACTION) || undefined,

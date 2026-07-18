@@ -236,6 +236,8 @@ With OA Chat off, LINE handles read state automatically. Worker records `line_ma
 - `codex_delegate` tasks preserve full natural language in task records, but evidence records still omit raw LINE User ID, full webhook payload, transient read tokens, and secrets.
 - Worker stores encrypted `line_user_ref` instead of raw LINE User ID for delegated task callbacks.
 - The monitor-side Gateway passes only the approved `_03` project path to Codex.
+- Codex processing notices are sent from monitor callback after `turn.started`, not from Worker enqueue, so a queued but unclaimed task cannot falsely look active to the LINE user.
+- `google_calendar_direct` is reserved as a direct path and does not route through Codex until the Calendar feature is explicitly implemented.
 - High-risk delegated text is paused as `awaiting_approval`; the monitor does not execute it before LINE confirmation.
 - Approval codes are non-secret operational tokens and are mapped to task IDs in runtime KV with the same test evidence TTL.
 - Browser and Computer Use host surfaces are reported unavailable from the launchd adapter; unavailable host tools do not unlock broader permissions.

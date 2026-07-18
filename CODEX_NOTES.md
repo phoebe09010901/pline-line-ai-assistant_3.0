@@ -802,7 +802,12 @@ Date: 2026-07-18
 - Implemented `monitor/src/codex_gateway.js`.
 - Selected official non-interactive `codex exec --json` for the launchd monitor adapter after checking local `codex-cli 0.142.5` and official Codex CLI/App Server/SDK/MCP docs.
 - The adapter uses `spawn`, closes stdin, and parses JSONL events such as `thread.started`, `turn.started`, `item.completed`, and `turn.completed`.
-- Worker queues `codex_delegate` with `original_user_text` intact; old n8n `codex_task` remains an accepted alias but no longer turns general tasks into fixed smoke.
+- Worker queues `codex_delegate` with `original_user_text` intact; old n8n `codex_task` is normalized as an alias but no longer turns general tasks into fixed smoke.
+- Worker no longer sends codex processing text at enqueue time. Monitor triggers the processing callback only after `codex exec --json` emits `turn.started`.
+- Local `codex-cli 0.142.5` JSONL exposes `thread.started.thread_id` and `turn.started`, but the observed `turn.started` event does not include a separate `turn_id`.
 - Approval bridge is implemented as task state plus LINE confirmation code; confirmed tasks are requeued as `approved`.
 - Gateway live evidence wrote ignored runtime output and result files; no secret/raw User ID/full payload is stored.
+- Live n8n workflow `kcMcBQos5cxsnWU1` was published with `codex_delegate` as the visible tool node and no visible `codex_task` tool node.
+- Gateway prompt now includes both `<task_instruction>` and `<original_user_text>`; this fixed the case where a delegated smoke ignored the exact requested filename/content.
+- Delegated probes show ordinary Codex file/shell/test/git work is available through `codex exec --json`; Browser/Computer Use remains a second-phase host-surface integration.
 - Evidence: `TEST_EVIDENCE_CODEX_DEFAULT_DELEGATION_GATE.md`.

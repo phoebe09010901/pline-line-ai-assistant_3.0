@@ -5,14 +5,13 @@ const D1_NAME = "pline-v3-test-db";
 const N8N_WEBHOOK_URL = "https://n8nphy.app.n8n.cloud/webhook/pline-v3-test-ai-agent";
 const N8N_SHARED_SECRET_HEADER = "x-pline-v3-shared-secret";
 const EVIDENCE_SELFTEST_SECRET_HEADER = "x-pline-v3-selftest-secret";
-const ACCEPTED_N8N_INTENTS = ["idea_create", "google_calendar_direct", "codex_delegate", "codex_task", "clarify", "unsupported"];
+const ACCEPTED_N8N_INTENTS = ["idea_create", "google_calendar_direct", "codex_delegate"];
 const GATE_TEST_INTENTS = ["idea_create", "codex_delegate"];
 const ADMIN_BOOTSTRAP_SENTINEL = "CAPTURE_CURRENT_03_EVENT";
 const ADMIN_BOOTSTRAP_PHRASE = "PLine03 admin bootstrap";
 const ADMIN_BOOTSTRAP_KV_KEY = "admin:line_test_admin_user_id";
 const SAFE_REPLY_TEXT = {
-  clarify: "請再補充一句你想記錄或請 Codex 執行的內容。",
-  unsupported: "目前我只能先幫妳記想法，或處理指定的小任務。",
+  google_calendar_direct: "行事曆功能還沒開通，我先不假裝已經幫妳處理好。",
 };
 const LINE_REPLY_MODE = "no_visible_ack_background_n8n";
 const CODEX_TASK_FINAL_MODE = "monitor_callback_exactly_once";
@@ -530,6 +529,21 @@ export async function processN8nInBackground(normalized, env) {
         status: "pending",
       });
     }
+  } else if (contractResult.body.intent === "google_calendar_direct") {
+    const replyText = normalizeReplyText(contractResult.body.intent, contractResult.body.reply_text);
+    const pushResult = await pushToLine(normalized.user_id, replyText, env);
+    await persistEvidenceStage(env, normalized, pushResult.ok ? "google_calendar_direct_not_enabled_notice_completed" : "google_calendar_direct_not_enabled_notice_failed", {
+      intent: contractResult.body.intent,
+      action: "google_calendar_direct",
+      status: pushResult.ok ? "not_enabled" : "failed",
+      reason: pushResult.ok ? "" : pushResult.reason,
+    });
+    logStage(pushResult.ok ? "google_calendar_direct_not_enabled_notice_completed" : "google_calendar_direct_not_enabled_notice_failed", {
+      request_id: normalized.request_id,
+      intent: contractResult.body.intent,
+      status: pushResult.ok ? "not_enabled" : "failed",
+      reason: pushResult.ok ? undefined : pushResult.reason,
+    });
   } else if (contractResult.body.intent === "codex_delegate") {
     const enqueueResult = await enqueueCodexTask(env, normalized, contractResult.body);
     await persistEvidenceStage(env, normalized, enqueueResult.ok ? "codex_task_enqueued" : "codex_task_enqueue_failed", {
@@ -583,33 +597,17 @@ export async function processN8nInBackground(normalized, env) {
       };
     }
 
-    const pushResult = await pushToLine(normalized.user_id, CODEX_PROCESSING_REPLY_TEXT, env);
-    if (!pushResult.ok) {
-      await persistEvidenceStage(env, normalized, "codex_task_processing_notice_failed", {
-        reason: pushResult.reason,
-        status: pushResult.status,
-      });
-      logStage("codex_task_processing_notice_failed", {
-        request_id: normalized.request_id,
-        reason: pushResult.reason,
-        status: pushResult.status,
-      });
-      return {
-        ok: false,
-        reason: pushResult.reason,
-        status: pushResult.status,
-      };
-    }
-    await persistEvidenceStage(env, normalized, "codex_task_processing_notice_completed", {
+    await persistEvidenceStage(env, normalized, "codex_task_waiting_for_monitor", {
       intent: contractResult.body.intent,
       action: CODEX_TASK_ACTION,
-      status: "delivered",
+      status: "queued",
+      processing_reply: "deferred_until_codex_turn_started",
     });
-    logStage("codex_task_processing_notice_completed", {
+    logStage("codex_task_waiting_for_monitor", {
       request_id: normalized.request_id,
       intent: contractResult.body.intent,
       action: CODEX_TASK_ACTION,
-      status: "delivered",
+      status: "queued",
     });
   }
 
@@ -1341,6 +1339,11 @@ export async function handleCodexFinalize(request, env = {}) {
     return jsonResponse({ status: "rejected", reason: "invalid_finalize_token" }, 401);
   }
 
+  if (callbackStatus === "processing") {
+    const processingResult = await pushCodexProcessingOnce(env, task);
+    return jsonResponse(processingResult, processingResult.ok ? 200 : 500);
+  }
+
   if (callbackStatus === "awaiting_approval" || task.status === "awaiting_approval") {
     const approvalResult = await pushCodexApprovalOnce(env, task, body.approval_code || "", body.reason || "approval_required");
     return jsonResponse(approvalResult, approvalResult.ok ? 200 : 500);
@@ -1644,6 +1647,97 @@ async function pushCodexFinalOnce(env = {}, task = {}) {
     request_id: task.request_id,
     action: CODEX_TASK_ACTION,
     status: "completed",
+    final_mode: "monitor_callback_exactly_once",
+  });
+  return { ok: true, status: "completed", pushed: true, request_id: task.request_id };
+}
+
+async function pushCodexProcessingOnce(env = {}, task = {}) {
+  const processingKey = codexProcessingKey(task.task_id);
+  const finalRaw = await env.RUNTIME_KV.get(codexFinalKey(task.task_id));
+  const finalState = parseJsonSafely(finalRaw);
+  if (finalState?.status === "completed" || finalState?.status === "failure_notice_completed") {
+    return {
+      ok: true,
+      status: "suppressed_after_final",
+      pushed: false,
+      request_id: task.request_id,
+    };
+  }
+
+  const existingRaw = await env.RUNTIME_KV.get(processingKey);
+  if (existingRaw) {
+    const existing = parseJsonSafely(existingRaw);
+    if (existing?.status === "completed" || existing?.status === "sending") {
+      return {
+        ok: true,
+        status: existing.status === "completed" ? "already_completed" : "already_sending",
+        pushed: false,
+        request_id: task.request_id,
+      };
+    }
+  }
+
+  await env.RUNTIME_KV.put(processingKey, JSON.stringify({
+    schema: "pline-v3-test-codex-processing/v1",
+    status: "sending",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+
+  const userId = await openLineUserRef(task.line_user_ref, env);
+  if (!userId.ok) {
+    await env.RUNTIME_KV.put(processingKey, JSON.stringify({
+      schema: "pline-v3-test-codex-processing/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: userId.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_processing_notice_failed", {
+      action: CODEX_TASK_ACTION,
+      status: "failed",
+      reason: userId.reason,
+    });
+    return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
+  }
+
+  const pushResult = await pushToLine(userId.value, CODEX_PROCESSING_REPLY_TEXT, env);
+  if (!pushResult.ok) {
+    await env.RUNTIME_KV.put(processingKey, JSON.stringify({
+      schema: "pline-v3-test-codex-processing/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: pushResult.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_processing_notice_failed", {
+      action: CODEX_TASK_ACTION,
+      status: "failed",
+      reason: pushResult.reason,
+    });
+    return { ok: false, status: "failed", reason: pushResult.reason, request_id: task.request_id };
+  }
+
+  await env.RUNTIME_KV.put(processingKey, JSON.stringify({
+    schema: "pline-v3-test-codex-processing/v1",
+    status: "completed",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_processing_notice_completed", {
+    action: CODEX_TASK_ACTION,
+    status: "delivered_after_codex_turn_started",
+    final_mode: "monitor_callback_exactly_once",
+  });
+  logStage("codex_task_processing_notice_completed", {
+    request_id: task.request_id,
+    action: CODEX_TASK_ACTION,
+    status: "delivered_after_codex_turn_started",
     final_mode: "monitor_callback_exactly_once",
   });
   return { ok: true, status: "completed", pushed: true, request_id: task.request_id };
@@ -2087,6 +2181,10 @@ function codexPendingKey(taskId) {
 
 function codexFinalKey(taskId) {
   return `${CODEX_TASK_PREFIX}:final:${sanitizeEvidenceId(taskId)}`;
+}
+
+function codexProcessingKey(taskId) {
+  return `${CODEX_TASK_PREFIX}:processing:${sanitizeEvidenceId(taskId)}`;
 }
 
 function codexResultKey(taskId) {

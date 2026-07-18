@@ -52,6 +52,7 @@ export class CodexGateway {
     const submitted = await this.adapter.submit_task(normalized, {
       timeoutMs: Number(options.timeoutMs || DEFAULT_GATEWAY_TIMEOUT_MS),
       env: options.env || process.env,
+      onCodexStarted: options.onCodexStarted,
     });
     if (!submitted.ok) {
       return {
@@ -169,11 +170,34 @@ export class CodexExecHostAdapter {
 
     let stdout = "";
     let stderr = "";
+    let startedNotified = false;
+    let observedThreadId = "";
+    const onJsonEvent = options.onCodexStarted
+      ? async (event) => {
+        const type = String(event.type || event.event || "");
+        if (type === "thread.started" || event.thread_id || event.threadId) {
+          observedThreadId ||= safeId(event.thread_id || event.threadId || event.thread?.id || "");
+        }
+        if (startedNotified) {
+          return;
+        }
+        if (type === "turn.started" || event.turn_id || event.turnId) {
+          startedNotified = true;
+          await options.onCodexStarted({
+            task_id: task.task_id,
+            request_id: task.request_id,
+            thread_id: safeId(event.thread_id || event.threadId || event.thread?.id || observedThreadId),
+            turn_id: safeId(event.turn_id || event.turnId || event.turn?.id || ""),
+          });
+        }
+      }
+      : null;
     try {
       const result = await runProcess(codexBin, args, {
         cwd: task.project_path,
         env,
         timeoutMs,
+        onJsonEvent,
       });
       stdout = result.stdout || "";
       stderr = result.stderr || "";
@@ -233,12 +257,30 @@ function runProcess(command, args = [], options = {}) {
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let pendingStdoutLine = "";
+    const eventTasks = [];
+    const observeStdout = (chunkText = "") => {
+      pendingStdoutLine += chunkText;
+      const lines = pendingStdoutLine.split(/\r?\n/);
+      pendingStdoutLine = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.trim() || !options.onJsonEvent) continue;
+        try {
+          const event = JSON.parse(line);
+          eventTasks.push(Promise.resolve(options.onJsonEvent(event)).catch(() => {}));
+        } catch {
+          // Non-JSON output is still preserved in stdout for final parsing.
+        }
+      }
+    };
     const timeout = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
     }, Number(options.timeoutMs || DEFAULT_GATEWAY_TIMEOUT_MS));
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
+      const chunkText = chunk.toString("utf8");
+      stdout += chunkText;
+      observeStdout(chunkText);
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString("utf8");
@@ -247,8 +289,12 @@ function runProcess(command, args = [], options = {}) {
       clearTimeout(timeout);
       resolve({ exitCode: 1, stdout, stderr: `${stderr}\n${error?.message || "spawn_error"}`, timedOut });
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       clearTimeout(timeout);
+      observeStdout("\n");
+      if (eventTasks.length > 0) {
+        await Promise.allSettled(eventTasks);
+      }
       resolve({ exitCode: code ?? 0, stdout, stderr, timedOut });
     });
     child.stdin.end();
@@ -316,7 +362,12 @@ export function createCodexPrompt(task = {}) {
     `project_path: ${normalized.project_path}`,
     `task_id: ${normalized.task_id}`,
     `request_id: ${normalized.request_id}`,
-    "請完整理解並執行以下原始使用者自然語。完成後用繁中簡短回報實際做了什麼、測試或讀取結果，以及是否有修改檔案。",
+    "執行契約：優先執行 task_instruction；original_user_text 只作為使用者語意來源。若兩者不同，不得忽略 task_instruction 的具體檔名、內容、測試或安全邊界。",
+    "不得把 delegated task 改寫成舊的 create_smoke_file 或 monitor smoke；除非 task_instruction 明確要求，不得自行新增 TEST_EVIDENCE 類文件。",
+    "完成後用繁中簡短回報實際做了什麼、測試或讀取結果，以及是否有修改檔案。",
+    "<task_instruction>",
+    normalized.instruction,
+    "</task_instruction>",
     "<original_user_text>",
     normalized.original_user_text,
     "</original_user_text>",

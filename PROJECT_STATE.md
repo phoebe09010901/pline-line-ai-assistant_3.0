@@ -973,10 +973,17 @@ Status: `PASS`.
 - Local Codex version: `codex-cli 0.142.5`.
 - Implemented monitor-side `CodexGateway` with submit/status/events/approve/cancel/result/capability methods.
 - Implemented `CodexExecHostAdapter`; fixed the launchd-safe invocation by using `spawn` and explicitly closing stdin.
-- Worker now queues `codex_delegate` tasks and preserves `original_user_text`; legacy n8n `codex_task` is accepted only as an alias.
+- Worker now queues `codex_delegate` tasks and preserves `original_user_text`; legacy n8n `codex_task` is normalized only as an alias.
+- Worker contract now keeps the top-level routes to `idea_create`, `google_calendar_direct`, and `codex_delegate`.
+- Local n8n workflow artifact now uses the same three-route contract and its Codex tool returns `action=codex_delegate`.
+- Codex processing LINE notice is no longer sent on enqueue; monitor sends it only after the Codex Gateway observes `turn.started`.
 - Worker no longer blocks Browser/Computer Use style natural language before Codex; unavailable host surfaces are reported in capability manifest.
 - Approval bridge implemented with `awaiting_approval`, LINE confirmation code, approval lookup key, and requeue of the same task.
 - Direct CLI live evidence and Gateway live evidence both wrote ignored runtime files with readback `Codex Gateway live PASS`.
+- Live n8n workflow `kcMcBQos5cxsnWU1` was published with visible tool node `codex_delegate`; visible legacy tool node `codex_task` is absent after publish.
+- Gateway prompt now sends `<task_instruction>` separately from `<original_user_text>`, so structured delegated task instructions cannot be dropped when the user-facing text is shorter.
+- Delegated Codex probes verified `thread.started`, `turn.started`, processing callback thread id propagation, runtime file creation, syntax check execution, and `git status --short`.
+- Remaining gap: no fresh LINE-origin `codex_delegate` visible final was sent after this latest n8n publish window.
 - Evidence: `TEST_EVIDENCE_CODEX_DEFAULT_DELEGATION_GATE.md`.
 
 Unavailable host surfaces: Browser and Computer Use are not exposed through the launchd `codex_exec` adapter; this is recorded as capability manifest output, not a delegation Gateway blocker.

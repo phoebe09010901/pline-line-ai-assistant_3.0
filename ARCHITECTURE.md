@@ -186,9 +186,11 @@ This keeps LINE webhook handling fast while making Dropbox JSON finalization ind
 The `_03` Codex path now separates routing from host execution:
 
 - Worker router keeps the outer decision small: `idea_create`, `google_calendar_direct`, or `codex_delegate`.
-- Worker enqueues `codex_delegate` and preserves `original_user_text`.
+- `google_calendar_direct` is reserved for the future direct Calendar path and returns a truthful not-enabled final in this Gate.
+- Worker enqueues `codex_delegate`, preserves `original_user_text`, and does not send a processing LINE message at enqueue time.
 - Monitor owns `CodexGateway` and host adapters.
 - The first production adapter is `CodexExecHostAdapter`, backed by official `codex exec --json` JSONL events.
+- Monitor sends the processing LINE callback only after the Gateway observes a Codex `turn.started` event; completed/failed final callbacks remain exactly-once.
 - Gateway result metadata is written under ignored runtime state.
 - Approval bridge state stays in task/KV records and uses a LINE confirmation code before requeueing high-risk tasks.
 

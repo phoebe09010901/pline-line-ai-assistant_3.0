@@ -2492,7 +2492,10 @@ Codex delegated task acceptance:
 - Worker accepts legacy n8n `codex_task` as an alias.
 - Worker stores new task action as `codex_delegate`.
 - Worker stores the full `original_user_text`.
+- Worker does not send a processing LINE notice at enqueue time.
+- Worker returns truthful not-enabled final for `google_calendar_direct` while that direct flow is unimplemented.
 - Monitor Gateway submits the original text to `codex exec --json`.
+- Monitor sends processing callback only after observing Codex `turn.started`.
 - Monitor parses Codex JSONL events and records result metadata.
 - Completed delegated tasks do not rerun on repeated claim.
 

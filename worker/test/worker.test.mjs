@@ -72,7 +72,7 @@ assert.equal(health.codex_monitor.approval_bridge, "line_confirmation_code");
 assert.equal(health.codex_monitor.legacy_smoke_target_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt");
 assert.equal(health.codex_monitor.legacy_smoke_target_content, "Codex 任務測試成功");
 assert.equal(health.codex_monitor.dropbox_idea_dir, "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03");
-assert.deepEqual(health.supported_intents, ["idea_create", "google_calendar_direct", "codex_delegate", "codex_task", "clarify", "unsupported"]);
+assert.deepEqual(health.supported_intents, ["idea_create", "google_calendar_direct", "codex_delegate"]);
 assert.deepEqual(health.gate_test_intents, ["idea_create", "codex_delegate"]);
 assert.equal(health.required_env.N8N_WEBHOOK_URL, false);
 assert.deepEqual(lineAuthorizationHeader({ LINE_CHANNEL_ACCESS_TOKEN: "test-token" }), {
@@ -349,16 +349,25 @@ const clarifyResult = validateN8nContract({
   reply_text: "",
   status: "accepted",
 }, "pline-v3-E3");
-assert.equal(clarifyResult.ok, true);
-assert.equal(clarifyResult.body.reply_text, "請再補充一句你想記錄或請 Codex 執行的內容。");
+assert.equal(clarifyResult.ok, false);
+assert.equal(clarifyResult.reason, "unsupported_intent");
 
 const unsupportedResult = validateN8nContract({
   request_id: "pline-v3-E4",
   intent: "unsupported",
   status: "completed",
 }, "pline-v3-E4");
-assert.equal(unsupportedResult.ok, true);
-assert.equal(unsupportedResult.body.reply_text, "目前我只能先幫妳記想法，或處理指定的小任務。");
+assert.equal(unsupportedResult.ok, false);
+assert.equal(unsupportedResult.reason, "unsupported_intent");
+
+const calendarDirectResult = validateN8nContract({
+  request_id: "pline-v3-CALENDAR",
+  intent: "google_calendar_direct",
+  reply_text: "",
+  status: "accepted",
+}, "pline-v3-CALENDAR");
+assert.equal(calendarDirectResult.ok, true);
+assert.equal(calendarDirectResult.body.reply_text, "行事曆功能還沒開通，我先不假裝已經幫妳處理好。");
 
 assert.equal(normalizeReplyText("idea_create", ""), "");
 assert.equal(codexTaskCapabilityCheck("請 Codex 執行最小任務測試，建立測試檔案").ok, true);
@@ -460,7 +469,6 @@ assert.equal(codexBackgroundResult.ok, true);
 assert.equal(codexBackgroundResult.intent, "codex_delegate");
 assert.deepEqual(codexBackgroundCalls, [
   "https://n8n.example.test/webhook",
-  "https://api.line.me/v2/bot/message/push",
 ]);
 const codexTaskKeys = await codexTaskKv.list({ prefix: "codex_task:v1:task:" });
 assert.equal(codexTaskKeys.keys.length, 1);
@@ -480,6 +488,40 @@ assert.equal(codexTaskRecord.target_path, "");
 assert.equal(codexTaskRecord.content, "");
 assert.equal(typeof codexTaskRecord.finalize_token, "string");
 assert.equal(codexTaskRecord.line_user_ref.includes("U_TEST"), false);
+globalThis.fetch = originalFetch;
+
+const calendarDirectCalls = [];
+globalThis.fetch = async (url) => {
+  calendarDirectCalls.push(url);
+  if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  return new Response(JSON.stringify({
+    request_id: "pline-v3-CALENDAR-BG",
+    intent: "google_calendar_direct",
+    reply_text: "",
+    status: "accepted",
+  }), { status: 200 });
+};
+const calendarDirectResultBackground = await processN8nInBackground({
+  request_id: "pline-v3-CALENDAR-BG",
+  line_event_id: "CALENDAR-BG",
+  reply_token: "reply-token",
+  user_id: "U_TEST",
+  message_text: "幫我新增明天下午三點的行程",
+  received_at: "2026-07-18T00:00:00.000Z",
+}, {
+  N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  RUNTIME_KV: createMemoryKv(),
+});
+assert.equal(calendarDirectResultBackground.ok, true);
+assert.equal(calendarDirectResultBackground.intent, "google_calendar_direct");
+assert.deepEqual(calendarDirectCalls, [
+  "https://n8n.example.test/webhook",
+  "https://api.line.me/v2/bot/message/push",
+]);
 globalThis.fetch = originalFetch;
 
 const capabilityNotEnabledCodexCalls = [];
@@ -517,12 +559,12 @@ assert.equal(capabilityNotEnabledCodexResult.ok, true);
 assert.equal(capabilityNotEnabledCodexResult.intent, "codex_delegate");
 assert.deepEqual(capabilityNotEnabledCodexCalls, [
   "https://n8n.example.test/webhook",
-  "https://api.line.me/v2/bot/message/push",
 ]);
 assert.equal((await capabilityNotEnabledCodexKv.list({ prefix: "codex_task:v1:task:" })).keys.length, 1);
 const capabilityNotEnabledEvidence = await readEvidenceForRequest({ RUNTIME_KV: capabilityNotEnabledCodexKv }, "pline-v3-BG2-UNSUPPORTED");
 assert.equal(capabilityNotEnabledEvidence.stages.some((stage) => stage.stage === "codex_task_capability_not_enabled"), false);
-assert.equal(capabilityNotEnabledEvidence.stages.some((stage) => stage.stage === "codex_task_processing_notice_completed"), true);
+assert.equal(capabilityNotEnabledEvidence.stages.some((stage) => stage.stage === "codex_task_processing_notice_completed"), false);
+assert.equal(capabilityNotEnabledEvidence.stages.some((stage) => stage.stage === "codex_task_waiting_for_monitor"), true);
 globalThis.fetch = originalFetch;
 
 const enqueueKv = createMemoryKv();
@@ -762,6 +804,51 @@ await enqueueCodexTask({
   action: "create_smoke_file",
 });
 const codexFinalizerTask = JSON.parse(await codexFinalizerKv.get("codex_task:v1:task:codex-finalizer-unit"));
+const codexProcessingCalls = [];
+globalThis.fetch = async (url, options) => {
+  codexProcessingCalls.push({ url, options });
+  if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  return new Response("{}", { status: 404 });
+};
+const codexProcessingResponse = await handleCodexFinalize(new Request("https://worker.example.test/test/codex-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    task_id: codexFinalizerTask.task_id,
+    request_id: codexFinalizerTask.request_id,
+    action: "codex_delegate",
+    status: "processing",
+    finalize_token: codexFinalizerTask.finalize_token,
+  }),
+}), {
+  RUNTIME_KV: codexFinalizerKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(codexProcessingResponse.status, 200);
+assert.equal((await codexProcessingResponse.json()).status, "completed");
+assert.equal(codexProcessingCalls.length, 1);
+assert.equal(JSON.parse(codexProcessingCalls[0].options.body).messages[0].text, "收到～這件事需要一點時間，我處理完成後再告訴妳 🛠️");
+const repeatedCodexProcessingResponse = await handleCodexFinalize(new Request("https://worker.example.test/test/codex-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    task_id: codexFinalizerTask.task_id,
+    request_id: codexFinalizerTask.request_id,
+    action: "codex_delegate",
+    status: "processing",
+    finalize_token: codexFinalizerTask.finalize_token,
+  }),
+}), {
+  RUNTIME_KV: codexFinalizerKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(repeatedCodexProcessingResponse.status, 200);
+assert.equal((await repeatedCodexProcessingResponse.json()).pushed, false);
+assert.equal(codexProcessingCalls.length, 1);
 await codexFinalizerKv.put("codex_task:v1:task:codex-finalizer-unit", JSON.stringify({
   ...codexFinalizerTask,
   status: "completed",

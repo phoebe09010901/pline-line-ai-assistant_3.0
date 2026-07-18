@@ -370,7 +370,14 @@
 ## 2026-07-18 - Codex Default Delegation Gateway
 
 - Added a monitor-side `CodexGateway` and `CodexExecHostAdapter` using official `codex exec --json` JSONL events.
-- Changed Worker codex routing to enqueue `codex_delegate` and preserve `original_user_text`; legacy `codex_task` remains an accepted alias.
+- Changed Worker codex routing to enqueue `codex_delegate` and preserve `original_user_text`; legacy `codex_task` from n8n is normalized as an alias.
+- Restricted top-level Worker contract to `idea_create`, `google_calendar_direct`, and `codex_delegate`; Calendar remains a truthful not-enabled direct path.
+- Updated the local n8n workflow artifact to emit `codex_delegate` instead of the old fixed smoke `codex_task` tool.
+- Deferred codex processing LINE messages until monitor/Gateway observes Codex `turn.started`; enqueue alone no longer sends a processing notice.
 - Added capability manifest and LINE confirmation-code approval bridge.
 - Verified direct Codex CLI execution and Gateway live runtime file creation.
+- Published live n8n workflow `kcMcBQos5cxsnWU1` with visible tool node `codex_delegate`; visible legacy tool node `codex_task` is absent after publish.
+- Fixed Gateway prompt construction so structured `<task_instruction>` is delivered to Codex separately from `<original_user_text>`.
+- Verified delegated Codex execution can create a project-runtime file, run a syntax check, and run `git status --short`.
+- Fresh LINE-origin `codex_delegate` visible final delivery remains pending after the latest n8n publish.
 - Added regression coverage for exactly-once delegation, approval resume, Worker webhook/signature/admin/idempotency paths, and idea/Dropbox behavior.

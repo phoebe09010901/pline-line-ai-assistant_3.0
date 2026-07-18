@@ -28,6 +28,7 @@ import {
   validateIdeaJson,
   writeRunnerHeartbeat,
 } from "../src/monitor.js";
+import { CodexExecHostAdapter, createCodexPrompt } from "../src/codex_gateway.js";
 
 assert.equal(FIXED_ACTION, "create_smoke_file");
 assert.equal(SAVE_IDEA_ACTION, "save_idea_json");
@@ -105,8 +106,14 @@ const delegateResult = await runTask({
   original_user_text: "請讀取 PROJECT_STATE.md 並回報第一行",
 }, { CODEX_BIN: fakeCodex, PATH: "" }, {
   gateway: {
-    async submit_task(task) {
+    async submit_task(task, options = {}) {
       delegateGatewayCalls.push(task);
+      await options.onCodexStarted?.({
+        task_id: task.task_id,
+        request_id: task.request_id,
+        thread_id: "thread-delegate-unit",
+        turn_id: "turn-delegate-unit",
+      });
       return {
         ok: true,
         status: "completed",
@@ -127,6 +134,42 @@ assert.equal(delegateResult.codex_execution, true);
 assert.equal(delegateResult.thread_id, "thread-delegate-unit");
 assert.equal(delegateResult.result_file, "runtime/codex-gateway/delegate-unit.json");
 assert.equal(delegateGatewayCalls[0].original_user_text, "請讀取 PROJECT_STATE.md 並回報第一行");
+
+const delegatePrompt = createCodexPrompt({
+  task_id: "prompt-unit",
+  request_id: "prompt-unit",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03",
+  instruction: "建立 runtime/codex-gateway/prompt-unit.txt，內容為 PROMPT_UNIT_OK",
+  original_user_text: "請 Codex 做測試",
+});
+assert.equal(delegatePrompt.includes("<task_instruction>\n建立 runtime/codex-gateway/prompt-unit.txt，內容為 PROMPT_UNIT_OK\n</task_instruction>"), true);
+assert.equal(delegatePrompt.includes("不得把 delegated task 改寫成舊的 create_smoke_file"), true);
+assert.equal(delegatePrompt.includes("<original_user_text>\n請 Codex 做測試\n</original_user_text>"), true);
+
+const fakeCodexJsonl = join(fakeCodexDir, "codex-jsonl");
+await import("node:fs/promises").then(({ writeFile, chmod }) => writeFile(fakeCodexJsonl, [
+  "#!/bin/sh",
+  "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"thread-jsonl-unit\"}'",
+  "printf '%s\\n' '{\"type\":\"turn.started\"}'",
+  "printf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"CODEX JSONL PASS\"}}'",
+  "printf '%s\\n' '{\"type\":\"turn.completed\"}'",
+].join("\n")).then(() => chmod(fakeCodexJsonl, 0o755)));
+const jsonlStartedEvents = [];
+const jsonlAdapter = new CodexExecHostAdapter({ codexBin: fakeCodexJsonl });
+const jsonlAdapterResult = await jsonlAdapter.submit_task({
+  task_id: "jsonl-adapter-unit",
+  request_id: "jsonl-adapter-unit",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03",
+  original_user_text: "請驗證 JSONL adapter",
+}, {
+  env: { PATH: "" },
+  onCodexStarted: async (event) => jsonlStartedEvents.push(event),
+});
+assert.equal(jsonlAdapterResult.ok, true);
+assert.equal(jsonlAdapterResult.thread_id, "thread-jsonl-unit");
+assert.equal(jsonlAdapterResult.codex_execution, true);
+assert.equal(jsonlStartedEvents.length, 1);
+assert.equal(jsonlStartedEvents[0].thread_id, "thread-jsonl-unit");
 
 const delegateClaimKv = createMemoryKv();
 await delegateClaimKv.put(`${TASK_PREFIX}:task:delegate-claim-unit`, JSON.stringify({
@@ -181,6 +224,55 @@ const duplicateDelegateClaim = await claimOnce({
   legacyScan: false,
 });
 assert.equal(duplicateDelegateClaim.claimed, false);
+
+const delegateProcessingKv = createMemoryKv();
+await delegateProcessingKv.put(`${TASK_PREFIX}:task:delegate-processing-unit`, JSON.stringify({
+  schema: "pline-v3-test-codex-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: "delegate-processing-unit",
+  task_type: "codex_task",
+  project: "菲比 LINE 智能助理_03",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03",
+  instruction: "請讀取 PROJECT_STATE.md 並回報第一行",
+  original_user_text: "請讀取 PROJECT_STATE.md 並回報第一行",
+  request_id: "pline-v3-delegate-processing-unit",
+  marker: "T3203-20260718010103",
+  action: CODEX_DELEGATE_ACTION,
+  finalize_token: "test-finalize-token",
+  line_user_ref: "v1.encrypted.ref",
+  created_at: "2026-07-18T16:32:00.000Z",
+}));
+await delegateProcessingKv.put(`${TASK_PREFIX}:pending:delegate-processing-unit`, `${TASK_PREFIX}:task:delegate-processing-unit`);
+const delegateProcessingFinalizeCalls = [];
+globalThis.fetch = async (url, options) => {
+  delegateProcessingFinalizeCalls.push({ url, options });
+  return new Response(JSON.stringify({ status: "completed", pushed: true }), { status: 200 });
+};
+const delegateProcessingClaim = await claimOnce({
+  kv: delegateProcessingKv,
+  env: { CODEX_BIN: fakeCodex, PATH: "", WORKER_BASE_URL: "https://worker.example.test" },
+  gateway: {
+    async submit_task(task, options = {}) {
+      await options.onCodexStarted?.({ task_id: task.task_id, request_id: task.request_id });
+      return {
+        ok: true,
+        status: "completed",
+        thread_id: "thread-processing-unit",
+        codex_received: true,
+        codex_execution: true,
+        changed_files: [],
+        tests: "PASS",
+        summary: "PROJECT_STATE.md first line was read.",
+      };
+    },
+  },
+});
+assert.equal(delegateProcessingClaim.ok, true);
+assert.deepEqual(delegateProcessingFinalizeCalls.map((call) => JSON.parse(call.options.body).status), ["processing", "completed"]);
+const delegateProcessingEvidenceKeys = await delegateProcessingKv.list("evidence:v1:request:pline-v3-delegate-processing-unit:stage:");
+assert.equal(delegateProcessingEvidenceKeys.some((key) => key.name.endsWith(":codex_task_processing_callback_completed")), true);
+globalThis.fetch = originalFetch;
 
 const approvalResult = await runTask({
   action: CODEX_DELEGATE_ACTION,
