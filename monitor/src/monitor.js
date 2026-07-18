@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile as execFileCallback } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import {
   APPROVAL_STATUS,
@@ -35,6 +36,7 @@ export const TASK_PREFIX = "codex_task:v1";
 export const IDEA_TASK_PREFIX = "idea_json:v1";
 export const TASK_PENDING_PREFIX = `${TASK_PREFIX}:pending:`;
 export const IDEA_TASK_PENDING_PREFIX = `${IDEA_TASK_PREFIX}:pending:`;
+export const CODEX_LAST_CREATED_FILE_KEY = `${TASK_PREFIX}:context:last_created_file`;
 export const EVIDENCE_PREFIX = "evidence:v1";
 export const EVIDENCE_TTL_SECONDS = 172800;
 export const RUNNER_HEARTBEAT_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/monitor-runner/heartbeat.json";
@@ -121,6 +123,15 @@ export async function runTask(task, env = process.env, options = {}) {
   }
 
   if (normalized.action === CODEX_DELEGATE_ACTION) {
+    const recentContext = await resolveRecentCreatedFileContextForTask(normalized, options.kv);
+    if (!recentContext.ok) {
+      return {
+        ok: false,
+        reason: recentContext.reason,
+        action: CODEX_DELEGATE_ACTION,
+        context_required: true,
+      };
+    }
     const gateway = options.gateway || new CodexGateway({
       adapter: options.adapter || new CodexExecHostAdapter({ codexBin: codex.path }),
     });
@@ -128,6 +139,7 @@ export async function runTask(task, env = process.env, options = {}) {
       ...normalized,
       project_name: normalized.project,
       original_user_text: normalized.original_user_text,
+      recent_created_file: recentContext.context || null,
     }, {
       env,
       timeoutMs: env.CODEX_GATEWAY_TIMEOUT_MS,
@@ -155,6 +167,7 @@ export async function runTask(task, env = process.env, options = {}) {
       };
     }
     const resultFile = await writeGatewayResultFile(normalized, gatewayResult, PROJECT_ROOT);
+    const createdFileContext = await createdFileContextFromExecution(normalized, gatewayResult);
     return {
       ok: true,
       status: "completed",
@@ -171,6 +184,7 @@ export async function runTask(task, env = process.env, options = {}) {
       codex_received: gatewayResult.codex_received,
       tool_event_count: gatewayResult.tool_events?.length || 0,
       result_file: resultFile.relative_path,
+      created_file_context: createdFileContext.ok ? createdFileContext.context : null,
       gateway: gatewayResult,
     };
   }
@@ -451,6 +465,14 @@ export async function claimOnce(options = {}) {
     if (task.action === FIXED_ACTION || task.action === CODEX_DELEGATE_ACTION) {
       const resultRecord = codexResultRecord(task, execution);
       await kv.put(codexResultKey(task.task_id), JSON.stringify(resultRecord));
+      if (task.action === CODEX_DELEGATE_ACTION && execution.created_file_context?.path) {
+        await kv.put(CODEX_LAST_CREATED_FILE_KEY, JSON.stringify(execution.created_file_context));
+        await writeEvidenceStage(kv, task, "codex_task_last_created_file_context_updated", {
+          monitor: MONITOR_NAME,
+          action: task.action,
+          status: "completed",
+        });
+      }
       await writeEvidenceStage(kv, task, "codex_task_result_recorded", {
         monitor: MONITOR_NAME,
         action: task.action,
@@ -966,6 +988,12 @@ export function codexResultRecord(task = {}, execution = {}) {
     record.turn_id = execution.turn_id || "";
     record.run_id = execution.run_id || "";
     record.result_file = execution.result_file || "";
+    if (execution.created_file_context?.path) {
+      record.created_file_path = execution.created_file_context.path;
+      record.created_file_relative_path = execution.created_file_context.relative_path;
+      record.created_file_content_sha256 = execution.created_file_context.content_sha256;
+      record.created_file_created_at = execution.created_file_context.created_at;
+    }
   }
   return record;
 }
@@ -1148,6 +1176,168 @@ function codexResultKey(taskId) {
   return `${TASK_PREFIX}:result:${sanitizeId(taskId)}`;
 }
 
+async function resolveRecentCreatedFileContextForTask(task = {}, kv = null) {
+  if (!requiresRecentCreatedFileContext(task)) {
+    return { ok: true, context: null };
+  }
+  if (!kv) {
+    return { ok: false, reason: "last_created_file_context_not_found" };
+  }
+  const latest = await getLatestCreatedFileContext(kv);
+  if (!latest.ok) {
+    return { ok: false, reason: latest.reason || "last_created_file_context_not_found" };
+  }
+  return latest;
+}
+
+function requiresRecentCreatedFileContext(task = {}) {
+  const text = `${task.original_user_text || ""}\n${task.instruction || ""}`;
+  return /(?:讀取|讀|查看|回報).*(?:剛才|剛剛|剛建立|剛才建立|剛才那個|剛剛那個|上一個).*(?:檔案|文字檔)|(?:剛才|剛剛|剛才那個|剛剛那個).*(?:檔案|文字檔)/.test(text);
+}
+
+function isCreateFileTask(task = {}) {
+  const text = `${task.original_user_text || ""}\n${task.instruction || ""}`;
+  return /(?:建立|新增|產生|寫入|create).*(?:檔案|文字檔|file)|內容(?:寫|為|是)/i.test(text);
+}
+
+async function getLatestCreatedFileContext(kv) {
+  const directRaw = await kv.get(CODEX_LAST_CREATED_FILE_KEY);
+  const direct = normalizeCreatedFileContext(parseJsonSafely(directRaw));
+  if (direct.ok) return direct;
+
+  const resultKeys = await kv.list(`${TASK_PREFIX}:result:`);
+  const contexts = [];
+  for (const key of resultKeys) {
+    const raw = await kv.get(key.name || key);
+    const record = parseJsonSafely(raw);
+    if (!record || record.status !== "completed") continue;
+    const fromRecord = await createdFileContextFromResultRecord(record);
+    if (fromRecord.ok) contexts.push(fromRecord.context);
+  }
+  contexts.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  if (contexts[0]) {
+    await kv.put(CODEX_LAST_CREATED_FILE_KEY, JSON.stringify(contexts[0]));
+    return { ok: true, context: contexts[0] };
+  }
+  return { ok: false, reason: "last_created_file_context_not_found" };
+}
+
+async function createdFileContextFromExecution(task = {}, execution = {}) {
+  if (task.action !== CODEX_DELEGATE_ACTION || !isCreateFileTask(task)) {
+    return { ok: false, reason: "not_create_file_task" };
+  }
+  return createdFileContextFromCandidates({
+    task_id: task.task_id,
+    created_at: task.created_at || new Date().toISOString(),
+    paths: [
+      ...(Array.isArray(execution.changed_files) ? execution.changed_files : []),
+      ...extractRuntimeTextFilePaths(`${execution.summary || ""}\n${execution.result_text || ""}`),
+    ],
+  });
+}
+
+async function createdFileContextFromResultRecord(record = {}) {
+  const direct = normalizeCreatedFileContext({
+    task_id: record.task_id,
+    created_at: record.created_file_created_at || record.created_at,
+    path: record.created_file_path,
+    relative_path: record.created_file_relative_path,
+    content_sha256: record.created_file_content_sha256,
+  });
+  if (direct.ok) return direct;
+  if (record.status !== "completed") {
+    return { ok: false, reason: "not_completed" };
+  }
+  return createdFileContextFromCandidates({
+    task_id: record.task_id,
+    created_at: record.created_at || "",
+    paths: extractRuntimeTextFilePaths(`${record.summary || ""}\n${(record.changed_files || []).join("\n")}`),
+  });
+}
+
+async function createdFileContextFromCandidates({ task_id = "", created_at = "", paths = [] } = {}) {
+  const seen = new Set();
+  for (const candidate of paths) {
+    const safe = resolveRuntimeTextFile(candidate);
+    if (!safe.ok || seen.has(safe.path)) continue;
+    seen.add(safe.path);
+    try {
+      const fileStat = await stat(safe.path);
+      if (!fileStat.isFile() || fileStat.size > 1024 * 64) continue;
+      const content = await readFile(safe.path);
+      return {
+        ok: true,
+        context: {
+          task_id: sanitizeId(task_id),
+          created_at: String(created_at || new Date().toISOString()),
+          path: safe.path,
+          relative_path: safe.relative_path,
+          content_sha256: createHash("sha256").update(content).digest("hex"),
+        },
+      };
+    } catch {
+      // Try the next safe runtime candidate.
+    }
+  }
+  return { ok: false, reason: "created_file_context_not_found" };
+}
+
+function normalizeCreatedFileContext(value = {}) {
+  if (!value || typeof value !== "object") {
+    return { ok: false, reason: "missing_context" };
+  }
+  const resolved = resolveRuntimeTextFile(value.path || value.relative_path || "");
+  if (!resolved.ok || !/^[a-f0-9]{64}$/.test(String(value.content_sha256 || ""))) {
+    return { ok: false, reason: "invalid_context" };
+  }
+  return {
+    ok: true,
+    context: {
+      task_id: sanitizeId(value.task_id || ""),
+      created_at: String(value.created_at || ""),
+      path: resolved.path,
+      relative_path: resolved.relative_path,
+      content_sha256: String(value.content_sha256),
+    },
+  };
+}
+
+function resolveRuntimeTextFile(value = "") {
+  const text = String(value || "").trim().replace(/^["'`「『]+|["'`」』]+$/g, "");
+  if (!text || text.includes("\0") || text.includes("..")) {
+    return { ok: false, reason: "unsafe_path" };
+  }
+  const root = resolve(PROJECT_ROOT);
+  const runtimeRoot = resolve(PROJECT_ROOT, "runtime", "codex-gateway");
+  const absolute = text.startsWith(root) ? resolve(text) : resolve(PROJECT_ROOT, text);
+  if (!absolute.startsWith(`${runtimeRoot}${sep}`) || !absolute.endsWith(".txt")) {
+    return { ok: false, reason: "outside_runtime_text_scope" };
+  }
+  return {
+    ok: true,
+    path: absolute,
+    relative_path: absolute.slice(root.length + 1),
+  };
+}
+
+function extractRuntimeTextFilePaths(text = "") {
+  const paths = new Set();
+  const pattern = /(?:\/Users\/phoebe\/Documents\/菲比 LINE 智能助理_03\/)?runtime\/codex-gateway\/[A-Za-z0-9_.:-]+\.txt/g;
+  for (const match of String(text || "").matchAll(pattern)) {
+    paths.add(match[0]);
+  }
+  return [...paths];
+}
+
+function parseJsonSafely(value = "") {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 function approvalKey(code = "") {
   return `${TASK_PREFIX}:approval:${sanitizeId(code)}`;
 }
@@ -1176,6 +1366,7 @@ function sanitizeEvidenceRecord(record) {
     "tool_event_count",
     "approval_required",
     "approval_code",
+    "context_updated",
   ]);
   const safe = {};
   for (const [key, value] of Object.entries(record)) {

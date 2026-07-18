@@ -817,6 +817,15 @@ Date: 2026-07-18
 - Repair: Codex final text now extracts safe content snippets or uses the completed fallback when the raw summary is unsafe.
 - Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_FINAL_SANITIZER.md`.
 
+## Codex Delegate Recent File Context
+
+- C read-file picked an older runtime file because the Gateway prompt lacked a deterministic "latest successful created file" target.
+- Monitor now derives safe created-file metadata from completed `codex_delegate` results and writes `codex_task:v1:context:last_created_file`.
+- Recent-file read requests receive an internal prompt block with the exact `_03` runtime text file path and content hash.
+- The context resolver only accepts `_03` `runtime/codex-gateway/*.txt` candidates from result metadata/summary and verifies the file exists before use.
+- Missing context returns `last_created_file_context_not_found` and does not submit to Codex.
+- Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_RECENT_FILE_CONTEXT.md`.
+
 ## Codex Default Delegation Implementation
 
 - Implemented `monitor/src/codex_gateway.js`.

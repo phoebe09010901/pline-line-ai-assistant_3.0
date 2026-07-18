@@ -411,3 +411,11 @@
 - Added focused Worker tests for unsafe raw summary sanitization and read-file completed-result finalization.
 - Deployed Worker version `b9251772-c031-491d-a300-9d7268022386`.
 - Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_FINAL_SANITIZER.md`.
+
+## 2026-07-18 - Codex Delegate Recent File Context
+
+- Added durable latest-created-file context for `codex_delegate` create-file results.
+- Added prompt context for read requests such as `剛才建立的檔案`, scoped to `_03` `runtime/codex-gateway/*.txt`.
+- Added truthful failure when a recent-file read request has no successful created-file context.
+- Added focused monitor tests for old/new created-file selection and missing-context failure.
+- Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_RECENT_FILE_CONTEXT.md`.

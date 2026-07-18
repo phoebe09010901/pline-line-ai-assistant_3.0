@@ -2481,6 +2481,27 @@ FIX validation:
 
 Next TEST handoff: rerun Codex Gateway live B/C from `TEST_EVIDENCE_CODEX_GATEWAY_LIVE.md`.
 
+## Codex Delegate Recent File Context Regression
+
+Required validation:
+
+- After a successful B create-file task, C `讀取剛才建立的檔案` reads the latest B file, not an older runtime file.
+- If two completed create-file results exist, the later `created_at` context wins.
+- If no successful created-file context exists, read-file task fails truthfully and does not guess.
+- User-visible final remains sanitized and does not expose local paths or runtime paths.
+- Exactly-once remains unchanged.
+- idea_create/Dropbox regressions remain unchanged.
+
+FIX validation:
+
+- `npm --prefix monitor test`: PASS
+- `npm --prefix worker test`: PASS
+- `node --check monitor/src/monitor.js`: PASS
+- `node --check monitor/src/codex_gateway.js`: PASS
+- `node --check worker/src/index.js`: PASS
+
+Next TEST handoff: rerun C after B on `gate/codex-default-delegation`.
+
 ## Codex Default Delegation Gate
 
 Current result: `BLOCKED_FOR_DEFAULT_DELEGATION`.

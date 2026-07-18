@@ -338,6 +338,15 @@ export async function discoverHostCapabilities(env = process.env, options = {}) 
 }
 
 export function normalizeGatewayTask(task = {}) {
+  const recentCreatedFile = task.recent_created_file && typeof task.recent_created_file === "object"
+    ? {
+      task_id: safeId(task.recent_created_file.task_id || ""),
+      created_at: String(task.recent_created_file.created_at || ""),
+      path: safePath(task.recent_created_file.path || ""),
+      relative_path: safePath(task.recent_created_file.relative_path || ""),
+      content_sha256: safeId(task.recent_created_file.content_sha256 || ""),
+    }
+    : null;
   return {
     schema: CODEX_GATEWAY_SCHEMA,
     task_id: safeId(task.task_id || ""),
@@ -350,12 +359,13 @@ export function normalizeGatewayTask(task = {}) {
     instruction: String(task.instruction || task.original_user_text || ""),
     approval: task.approval || null,
     created_at: String(task.created_at || ""),
+    recent_created_file: recentCreatedFile?.path ? recentCreatedFile : null,
   };
 }
 
 export function createCodexPrompt(task = {}) {
   const normalized = normalizeGatewayTask(task);
-  return [
+  const lines = [
     "你正在處理菲比 LINE 智能助理_03 的 Codex delegated task。",
     "嚴格限制：只允許使用 project_path 內的檔案與 runtime；不得讀取舊專案、_02、舊 Dropbox、舊 secret store、舊 logs、舊 User ID；不得輸出 secret/raw User ID/full webhook payload。",
     `project_name: ${normalized.project_name}`,
@@ -371,7 +381,21 @@ export function createCodexPrompt(task = {}) {
     "<original_user_text>",
     normalized.original_user_text,
     "</original_user_text>",
-  ].join("\n");
+  ];
+  if (normalized.recent_created_file?.path) {
+    lines.push(
+      "<recent_successful_created_file>",
+      "使用者若要求讀取「剛才建立的檔案」或「剛才那個檔案」，只能讀取下列目標；不得改讀其他 runtime 舊檔。",
+      `target_file_path: ${normalized.recent_created_file.path}`,
+      `target_relative_path: ${normalized.recent_created_file.relative_path}`,
+      `target_created_at: ${normalized.recent_created_file.created_at}`,
+      `target_task_id: ${normalized.recent_created_file.task_id}`,
+      `target_content_sha256: ${normalized.recent_created_file.content_sha256}`,
+      "若此檔案不存在或不可讀，請回報失敗，不要猜測其他檔案。",
+      "</recent_successful_created_file>",
+    );
+  }
+  return lines.join("\n");
 }
 
 export function evaluateApprovalRequirement(task = {}) {

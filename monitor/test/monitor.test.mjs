@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { access, mkdir, readFile, rm } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   DROPBOX_IDEA_DIR,
   CODEX_DELEGATE_ACTION,
+  CODEX_LAST_CREATED_FILE_KEY,
   FIXED_ACTION,
   IDEA_TASK_PREFIX,
   SAVE_IDEA_ACTION,
@@ -145,6 +146,23 @@ const delegatePrompt = createCodexPrompt({
 assert.equal(delegatePrompt.includes("<task_instruction>\n建立 runtime/codex-gateway/prompt-unit.txt，內容為 PROMPT_UNIT_OK\n</task_instruction>"), true);
 assert.equal(delegatePrompt.includes("不得把 delegated task 改寫成舊的 create_smoke_file"), true);
 assert.equal(delegatePrompt.includes("<original_user_text>\n請 Codex 做測試\n</original_user_text>"), true);
+const recentPrompt = createCodexPrompt({
+  task_id: "prompt-recent-unit",
+  request_id: "prompt-recent-unit",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03",
+  instruction: "請讀取剛才建立的檔案",
+  original_user_text: "請讀取剛才建立的檔案",
+  recent_created_file: {
+    task_id: "codex-delegate-new",
+    created_at: "2026-07-18T13:21:55.000Z",
+    path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-gateway/codex-delegate-new.txt",
+    relative_path: "runtime/codex-gateway/codex-delegate-new.txt",
+    content_sha256: "a".repeat(64),
+  },
+});
+assert.equal(recentPrompt.includes("<recent_successful_created_file>"), true);
+assert.equal(recentPrompt.includes("target_file_path: /Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-gateway/codex-delegate-new.txt"), true);
+assert.equal(recentPrompt.includes("不得改讀其他 runtime 舊檔"), true);
 
 const fakeCodexJsonl = join(fakeCodexDir, "codex-jsonl");
 await import("node:fs/promises").then(({ writeFile, chmod }) => writeFile(fakeCodexJsonl, [
@@ -224,6 +242,126 @@ const duplicateDelegateClaim = await claimOnce({
   legacyScan: false,
 });
 assert.equal(duplicateDelegateClaim.claimed, false);
+
+const recentContextDir = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-gateway";
+await mkdir(recentContextDir, { recursive: true });
+const oldRecentFile = join(recentContextDir, "codex-delegate-old-context.txt");
+const newRecentFile = join(recentContextDir, "codex-delegate-new-context.txt");
+await writeFile(oldRecentFile, "真正 Codex 執行成功 T3201-20260718210047", "utf8");
+await writeFile(newRecentFile, "真正 Codex 執行成功 T3301-20260718211955", "utf8");
+const recentContextKv = createMemoryKv();
+await recentContextKv.put(`${TASK_PREFIX}:result:codex-delegate-old-context`, JSON.stringify({
+  task_id: "codex-delegate-old-context",
+  status: "completed",
+  created_at: "2026-07-18T13:00:00.000Z",
+  summary: "已完成。 在 `runtime/codex-gateway/codex-delegate-old-context.txt` 建立檔案，內容符合：`真正 Codex 執行成功 T3201-20260718210047`。",
+  tests: "PASS",
+  changed_files: [],
+  commit: null,
+  error: null,
+}));
+await recentContextKv.put(`${TASK_PREFIX}:result:codex-delegate-new-context`, JSON.stringify({
+  task_id: "codex-delegate-new-context",
+  status: "completed",
+  created_at: "2026-07-18T13:21:55.000Z",
+  summary: "已完成。 在 `runtime/codex-gateway/codex-delegate-new-context.txt` 建立檔案，內容符合：`真正 Codex 執行成功 T3301-20260718211955`。",
+  tests: "PASS",
+  changed_files: [],
+  commit: null,
+  error: null,
+}));
+await recentContextKv.put(`${TASK_PREFIX}:task:codex-read-recent-unit`, JSON.stringify({
+  schema: "pline-v3-test-codex-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: "codex-read-recent-unit",
+  task_type: "codex_task",
+  project: "菲比 LINE 智能助理_03",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03",
+  instruction: "請 Codex 讀取剛才建立的檔案，並告訴我內容。",
+  original_user_text: "請 Codex 讀取剛才建立的檔案，並告訴我內容。",
+  request_id: "pline-v3-read-recent-unit",
+  marker: "T3302-20260718212430",
+  action: CODEX_DELEGATE_ACTION,
+  finalize_token: "test-finalize-token",
+  line_user_ref: "v1.encrypted.ref",
+  created_at: "2026-07-18T13:24:30.000Z",
+}));
+await recentContextKv.put(`${TASK_PREFIX}:pending:codex-read-recent-unit`, `${TASK_PREFIX}:task:codex-read-recent-unit`);
+const recentGatewayCalls = [];
+const recentClaim = await claimOnce({
+  kv: recentContextKv,
+  env: { CODEX_BIN: fakeCodex, PATH: "", CODEX_FINALIZE_DISABLED: "1" },
+  gateway: {
+    async submit_task(task, options = {}) {
+      recentGatewayCalls.push(task);
+      await options.onCodexStarted?.({
+        task_id: task.task_id,
+        request_id: task.request_id,
+        thread_id: "thread-read-recent",
+        turn_id: "turn-read-recent",
+      });
+      return {
+        ok: true,
+        status: "completed",
+        thread_id: "thread-read-recent",
+        turn_id: "turn-read-recent",
+        codex_received: true,
+        codex_execution: true,
+        tool_events: [{ type: "command_execution", status: "completed" }],
+        changed_files: [],
+        tests: "PASS",
+        summary: "已讀取檔案。內容是：```text\n真正 Codex 執行成功 T3301-20260718211955\n```",
+      };
+    },
+  },
+});
+assert.equal(recentClaim.ok, true);
+assert.equal(recentClaim.claimed, true);
+assert.equal(recentGatewayCalls.length, 1);
+assert.equal(recentGatewayCalls[0].recent_created_file.relative_path, "runtime/codex-gateway/codex-delegate-new-context.txt");
+assert.equal(recentGatewayCalls[0].recent_created_file.task_id, "codex-delegate-new-context");
+assert.notEqual(recentGatewayCalls[0].recent_created_file.relative_path, "runtime/codex-gateway/codex-delegate-old-context.txt");
+const latestContextRecord = JSON.parse(await recentContextKv.get(CODEX_LAST_CREATED_FILE_KEY));
+assert.equal(latestContextRecord.relative_path, "runtime/codex-gateway/codex-delegate-new-context.txt");
+const readRecentResult = JSON.parse(await recentContextKv.get(`${TASK_PREFIX}:result:codex-read-recent-unit`));
+assert.equal(readRecentResult.status, "completed");
+
+const missingContextKv = createMemoryKv();
+await missingContextKv.put(`${TASK_PREFIX}:task:codex-read-missing-context`, JSON.stringify({
+  schema: "pline-v3-test-codex-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: "codex-read-missing-context",
+  task_type: "codex_task",
+  project: "菲比 LINE 智能助理_03",
+  project_path: "/Users/phoebe/Documents/菲比 LINE 智能助理_03",
+  instruction: "請 Codex 讀取剛才建立的檔案",
+  original_user_text: "請 Codex 讀取剛才建立的檔案",
+  request_id: "pline-v3-read-missing-context",
+  marker: "T3302M-20260718212430",
+  action: CODEX_DELEGATE_ACTION,
+  finalize_token: "test-finalize-token",
+  line_user_ref: "v1.encrypted.ref",
+  created_at: "2026-07-18T13:25:30.000Z",
+}));
+await missingContextKv.put(`${TASK_PREFIX}:pending:codex-read-missing-context`, `${TASK_PREFIX}:task:codex-read-missing-context`);
+let missingContextGatewayCalled = false;
+const missingContextClaim = await claimOnce({
+  kv: missingContextKv,
+  env: { CODEX_BIN: fakeCodex, PATH: "", CODEX_FINALIZE_DISABLED: "1" },
+  gateway: {
+    async submit_task() {
+      missingContextGatewayCalled = true;
+      return { ok: true, status: "completed" };
+    },
+  },
+});
+assert.equal(missingContextClaim.ok, false);
+assert.equal(missingContextClaim.reason, "last_created_file_context_not_found");
+assert.equal(missingContextGatewayCalled, false);
+const missingContextTask = JSON.parse(await missingContextKv.get(`${TASK_PREFIX}:task:codex-read-missing-context`));
+assert.equal(missingContextTask.status, "failed");
 
 const delegateProcessingKv = createMemoryKv();
 await delegateProcessingKv.put(`${TASK_PREFIX}:task:delegate-processing-unit`, JSON.stringify({

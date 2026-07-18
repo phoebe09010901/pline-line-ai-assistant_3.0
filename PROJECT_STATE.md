@@ -1032,3 +1032,17 @@ Status: `DEPLOYED`.
 - Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_FINAL_SANITIZER.md`.
 
 Next: TEST can rerun Codex Gateway B/C live checks.
+
+## Codex Delegate Recent File Context - 2026-07-18
+
+Status: `READY_FOR_TEST`.
+
+- TEST rerun B created the current file for marker `T3301-20260718211955`, but C read-file selected an older `T3201` runtime file.
+- Root cause: `codex_delegate` had no durable latest-created-file context; Codex was left to infer from existing runtime files.
+- Monitor now records `codex_task:v1:context:last_created_file` for successful create-file delegation.
+- Read requests for `剛才建立的檔案` now receive a specific internal prompt target from the latest successful created-file metadata.
+- If no latest context exists, the read task fails truthfully instead of guessing an old file.
+- Monitor runner was reloaded and heartbeat is `ready`.
+- Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_RECENT_FILE_CONTEXT.md`.
+
+Next: TEST can rerun C after B.
