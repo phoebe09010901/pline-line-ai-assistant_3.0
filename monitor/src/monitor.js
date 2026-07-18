@@ -1,6 +1,6 @@
-import { access, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
@@ -14,7 +14,12 @@ export const RUNTIME_KV_NAMESPACE_ID = "10cdfe018b3942b483faeaca6e517ae5";
 export const SMOKE_FILE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/codex-smoke.txt";
 export const SMOKE_FILE_CONTENT = "Codex 已打通";
 export const FIXED_ACTION = "create_smoke_file";
+export const SAVE_IDEA_ACTION = "save_idea_json";
+export const DROPBOX_IDEA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03";
+export const WORKER_BASE_URL = "https://pline-v3-test-line-gateway.phy4175.workers.dev";
+export const IDEA_FINALIZE_PATH = "/test/idea-finalize";
 export const TASK_PREFIX = "codex_task:v1";
+export const IDEA_TASK_PREFIX = "idea_json:v1";
 export const EVIDENCE_PREFIX = "evidence:v1";
 export const EVIDENCE_TTL_SECONDS = 172800;
 
@@ -56,7 +61,11 @@ export async function health(env = process.env) {
     fixed_action: FIXED_ACTION,
     smoke_file_path: SMOKE_FILE_PATH,
     smoke_file_content: SMOKE_FILE_CONTENT,
+    supported_actions: [FIXED_ACTION, SAVE_IDEA_ACTION],
+    task_prefixes: [TASK_PREFIX, IDEA_TASK_PREFIX],
     task_prefix: TASK_PREFIX,
+    idea_task_prefix: IDEA_TASK_PREFIX,
+    dropbox_idea_dir: DROPBOX_IDEA_DIR,
     evidence_prefix: EVIDENCE_PREFIX,
     runtime_kv_namespace_id: RUNTIME_KV_NAMESPACE_ID,
     codex_bin: codex,
@@ -70,6 +79,10 @@ export async function runTask(task, env = process.env) {
   }
 
   const normalized = normalizeTask(task);
+  if (normalized.action === SAVE_IDEA_ACTION) {
+    return saveIdeaJson(normalized);
+  }
+
   if (normalized.action !== FIXED_ACTION) {
     return { ok: false, reason: "unsupported_action" };
   }
@@ -101,7 +114,11 @@ export function normalizeTask(task = {}) {
     marker: sanitizeId(task.marker || ""),
     action: task.action || FIXED_ACTION,
     target_path: task.target_path || SMOKE_FILE_PATH,
+    target_dir: task.target_dir || DROPBOX_IDEA_DIR,
     content: task.content || SMOKE_FILE_CONTENT,
+    idea: task.idea || null,
+    finalize_token: sanitizeId(task.finalize_token || ""),
+    line_user_ref: String(task.line_user_ref || ""),
   };
 }
 
@@ -109,7 +126,10 @@ export async function claimOnce(options = {}) {
   const env = options.env || process.env;
   const kv = options.kv || createWranglerKv(env);
   const now = new Date().toISOString();
-  const keys = await kv.list(`${TASK_PREFIX}:task:`);
+  const keys = [];
+  for (const prefix of [`${TASK_PREFIX}:task:`, `${IDEA_TASK_PREFIX}:task:`]) {
+    keys.push(...await kv.list(prefix));
+  }
 
   for (const key of keys) {
     const raw = await kv.get(key.name || key);
@@ -134,7 +154,7 @@ export async function claimOnce(options = {}) {
       monitor: MONITOR_NAME,
       claimed_at: now,
     };
-    await kv.put(taskKey(task.task_id), JSON.stringify(claimRecord));
+    await kv.put(taskKey(task.task_id, task.action), JSON.stringify(claimRecord));
     await writeEvidenceStage(kv, task, "monitor_claimed", {
       monitor: MONITOR_NAME,
       claimed: true,
@@ -143,12 +163,21 @@ export async function claimOnce(options = {}) {
 
     const execution = await runTask(task, env);
     if (!execution.ok) {
-      await kv.put(taskKey(task.task_id), JSON.stringify({
+      await kv.put(taskKey(task.task_id, task.action), JSON.stringify({
         ...claimRecord,
         status: "failed",
         failed_at: new Date().toISOString(),
         reason: execution.reason,
       }));
+      if (task.action === SAVE_IDEA_ACTION) {
+        const callbackResult = await notifyIdeaFinalizer(task, "failed", env);
+        await writeEvidenceStage(kv, task, callbackResult.ok ? "idea_json_final_callback_completed" : "idea_json_final_callback_failed", {
+          monitor: MONITOR_NAME,
+          action: task.action,
+          status: "failed",
+          reason: callbackResult.ok ? "" : callbackResult.reason,
+        });
+      }
       await writeEvidenceStage(kv, task, "codex_execution_failed", {
         monitor: MONITOR_NAME,
         reason: execution.reason,
@@ -157,27 +186,40 @@ export async function claimOnce(options = {}) {
       return { ok: false, reason: execution.reason, task_id: task.task_id, request_id: task.request_id };
     }
 
+    const completedStatus = execution.status === "duplicate" ? "duplicate" : "completed";
     const completedAt = new Date().toISOString();
-    await writeEvidenceStage(kv, task, "codex_execution_completed", {
+    await writeEvidenceStage(kv, task, task.action === SAVE_IDEA_ACTION ? "idea_json_saved" : "codex_execution_completed", {
       monitor: MONITOR_NAME,
-      codex_execution: true,
+      codex_execution: task.action === FIXED_ACTION || undefined,
+      saved: task.action === SAVE_IDEA_ACTION ? execution.status || "saved" : undefined,
       action: task.action,
     });
-    await writeEvidenceStage(kv, task, "smoke_file_written", {
+    await writeEvidenceStage(kv, task, task.action === SAVE_IDEA_ACTION ? "idea_json_file_written" : "smoke_file_written", {
       monitor: MONITOR_NAME,
       file_written: true,
       action: task.action,
-      status: "completed",
+      status: completedStatus,
+      file_name: execution.file_name,
     });
-    await kv.put(taskKey(task.task_id), JSON.stringify({
+    await kv.put(taskKey(task.task_id, task.action), JSON.stringify({
       ...claimRecord,
-      status: "completed",
+      status: completedStatus,
       completed_at: completedAt,
       codex_execution: true,
       file_written: true,
       mtime_ms: execution.mtime_ms,
       mtime_iso: execution.mtime_iso,
+      file_name: execution.file_name,
     }));
+    if (task.action === SAVE_IDEA_ACTION) {
+      const callbackResult = await notifyIdeaFinalizer(task, completedStatus, env);
+      await writeEvidenceStage(kv, task, callbackResult.ok ? "idea_json_final_callback_completed" : "idea_json_final_callback_failed", {
+        monitor: MONITOR_NAME,
+        action: task.action,
+        status: completedStatus,
+        reason: callbackResult.ok ? "" : callbackResult.reason,
+      });
+    }
 
     return {
       ok: true,
@@ -188,6 +230,8 @@ export async function claimOnce(options = {}) {
       action: task.action,
       codex_execution: true,
       file_written: true,
+      status: completedStatus,
+      file_name: execution.file_name,
       mtime_iso: execution.mtime_iso,
     };
   }
@@ -220,7 +264,7 @@ export async function createSyntheticTask(task = {}, options = {}) {
     target_path: SMOKE_FILE_PATH,
     content: SMOKE_FILE_CONTENT,
   });
-  await kv.put(taskKey(normalized.task_id), JSON.stringify({
+  await kv.put(taskKey(normalized.task_id, normalized.action), JSON.stringify({
     ...normalized,
     schema: "pline-v3-test-codex-task/v1",
     status: "pending",
@@ -228,6 +272,203 @@ export async function createSyntheticTask(task = {}, options = {}) {
     created_at: new Date().toISOString(),
   }));
   return { ok: true, ...normalized };
+}
+
+export async function createSyntheticIdeaTask(task = {}, options = {}) {
+  const kv = options.kv || createWranglerKv(options.env || process.env);
+  const idea = normalizeIdeaJson(task.idea || {
+    schema_version: "1.0",
+    idea_id: task.idea_id || `idea-${sanitizeId(task.task_id || Date.now()).slice(0, 16)}`,
+    content: task.content || "FIX selftest idea",
+    created_at: task.created_at || "2026-07-18T07:00:00+08:00",
+    source: "line",
+    actor_fingerprint: task.actor_fingerprint || "a".repeat(64),
+    line_event_key: task.line_event_key || "b".repeat(64),
+    intent: "idea_create",
+    status: "saved",
+  });
+  const normalized = normalizeTask({
+    task_id: task.task_id || `idea-${Date.now()}`,
+    request_id: task.request_id || `pline-v3-idea-${Date.now()}`,
+    marker: task.marker || "",
+    action: SAVE_IDEA_ACTION,
+    target_dir: DROPBOX_IDEA_DIR,
+    idea,
+    finalize_token: task.finalize_token || "",
+  });
+  await kv.put(taskKey(normalized.task_id, normalized.action), JSON.stringify({
+    ...normalized,
+    schema: "pline-v3-test-idea-task/v1",
+    status: "pending",
+    monitor: MONITOR_NAME,
+    created_at: new Date().toISOString(),
+  }));
+  return { ok: true, ...normalized };
+}
+
+export async function saveIdeaJson(task = {}) {
+  const normalized = normalizeTask(task);
+  if (normalized.action !== SAVE_IDEA_ACTION) {
+    return { ok: false, reason: "unsupported_action" };
+  }
+  if (normalized.target_dir !== DROPBOX_IDEA_DIR) {
+    return { ok: false, reason: "unsupported_target_dir" };
+  }
+
+  const idea = normalizeIdeaJson(normalized.idea);
+  const validation = validateIdeaJson(idea);
+  if (!validation.ok) {
+    return validation;
+  }
+
+  await mkdir(DROPBOX_IDEA_DIR, { recursive: true });
+  const fileName = ideaFileName(idea);
+  const finalPath = join(DROPBOX_IDEA_DIR, fileName);
+  if (!finalPath.startsWith(`${DROPBOX_IDEA_DIR}${sep}`)) {
+    return { ok: false, reason: "unsafe_target_path" };
+  }
+
+  if (await fileExists(finalPath)) {
+    const fileStat = await stat(finalPath);
+    return {
+      ok: true,
+      status: "duplicate",
+      duplicate: true,
+      action: SAVE_IDEA_ACTION,
+      target_dir: DROPBOX_IDEA_DIR,
+      file_name: fileName,
+      mtime_ms: fileStat.mtimeMs,
+      mtime_iso: fileStat.mtime.toISOString(),
+    };
+  }
+
+  const tempPath = join(DROPBOX_IDEA_DIR, `.${fileName}.${process.pid}.${Date.now()}.tmp`);
+  const body = `${JSON.stringify(idea, null, 2)}\n`;
+  try {
+    await writeFile(tempPath, body, { encoding: "utf8", flag: "wx" });
+    const parsed = JSON.parse(await readFile(tempPath, "utf8"));
+    const parsedValidation = validateIdeaJson(parsed);
+    if (!parsedValidation.ok) {
+      await safeUnlink(tempPath);
+      return parsedValidation;
+    }
+    if (await fileExists(finalPath)) {
+      await safeUnlink(tempPath);
+      const fileStat = await stat(finalPath);
+      return {
+        ok: true,
+        status: "duplicate",
+        duplicate: true,
+        action: SAVE_IDEA_ACTION,
+        target_dir: DROPBOX_IDEA_DIR,
+        file_name: fileName,
+        mtime_ms: fileStat.mtimeMs,
+        mtime_iso: fileStat.mtime.toISOString(),
+      };
+    }
+    await rename(tempPath, finalPath);
+  } catch (error) {
+    await safeUnlink(tempPath);
+    return { ok: false, reason: "idea_json_write_failed", error_name: error?.name || "Error" };
+  }
+
+  const fileStat = await stat(finalPath);
+  return {
+    ok: true,
+    status: "saved",
+    saved: true,
+    action: SAVE_IDEA_ACTION,
+    target_dir: DROPBOX_IDEA_DIR,
+    file_name: fileName,
+    mtime_ms: fileStat.mtimeMs,
+    mtime_iso: fileStat.mtime.toISOString(),
+  };
+}
+
+export async function notifyIdeaFinalizer(task = {}, status = "completed", env = process.env) {
+  if (task.action !== SAVE_IDEA_ACTION) {
+    return { ok: true, status: "skipped_non_idea_task" };
+  }
+  if (env.IDEA_FINALIZE_DISABLED === "1") {
+    return { ok: true, status: "disabled" };
+  }
+  if (!task.finalize_token) {
+    return { ok: false, reason: "missing_finalize_token" };
+  }
+  const baseUrl = String(env.WORKER_BASE_URL || WORKER_BASE_URL).replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}${IDEA_FINALIZE_PATH}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      task_id: task.task_id,
+      request_id: task.request_id,
+      action: SAVE_IDEA_ACTION,
+      status,
+      finalize_token: task.finalize_token,
+    }),
+  });
+  let body = {};
+  try {
+    body = await response.json();
+  } catch {
+    body = {};
+  }
+  if (!response.ok || body.status === "rejected") {
+    return {
+      ok: false,
+      reason: body.reason || `finalize_http_${response.status}`,
+      status: body.status || "failed",
+    };
+  }
+  return {
+    ok: true,
+    status: body.status || "ok",
+    pushed: Boolean(body.pushed),
+  };
+}
+
+export function normalizeIdeaJson(idea = {}) {
+  return {
+    schema_version: idea.schema_version,
+    idea_id: sanitizeId(idea.idea_id),
+    content: String(idea.content || ""),
+    created_at: String(idea.created_at || ""),
+    source: idea.source,
+    actor_fingerprint: sanitizeId(idea.actor_fingerprint),
+    line_event_key: sanitizeId(idea.line_event_key),
+    intent: idea.intent,
+    status: idea.status,
+  };
+}
+
+export function validateIdeaJson(idea = {}) {
+  const allowedKeys = [
+    "schema_version",
+    "idea_id",
+    "content",
+    "created_at",
+    "source",
+    "actor_fingerprint",
+    "line_event_key",
+    "intent",
+    "status",
+  ];
+  const keys = Object.keys(idea).sort();
+  if (JSON.stringify(keys) !== JSON.stringify([...allowedKeys].sort())) {
+    return { ok: false, reason: "invalid_idea_json_schema_keys" };
+  }
+  if (idea.schema_version !== "1.0") return { ok: false, reason: "invalid_schema_version" };
+  if (!/^idea-[A-Za-z0-9:_\-.]{8,80}$/.test(idea.idea_id)) return { ok: false, reason: "invalid_idea_id" };
+  if (typeof idea.content !== "string" || idea.content.trim().length === 0) return { ok: false, reason: "invalid_content" };
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$/.test(idea.created_at)) return { ok: false, reason: "invalid_created_at" };
+  if (idea.source !== "line") return { ok: false, reason: "invalid_source" };
+  if (!/^[a-f0-9]{64}$/.test(idea.actor_fingerprint)) return { ok: false, reason: "invalid_actor_fingerprint" };
+  if (!/^[a-f0-9]{64}$/.test(idea.line_event_key)) return { ok: false, reason: "invalid_line_event_key" };
+  if (idea.intent !== "idea_create") return { ok: false, reason: "invalid_intent" };
+  if (idea.status !== "saved") return { ok: false, reason: "invalid_status" };
+  return { ok: true };
 }
 
 export async function writeEvidenceStage(kv, task, stage, details = {}) {
@@ -290,8 +531,9 @@ export function createWranglerKv(env = process.env) {
   };
 }
 
-function taskKey(taskId) {
-  return `${TASK_PREFIX}:task:${sanitizeId(taskId)}`;
+function taskKey(taskId, action = FIXED_ACTION) {
+  const prefix = action === SAVE_IDEA_ACTION ? IDEA_TASK_PREFIX : TASK_PREFIX;
+  return `${prefix}:task:${sanitizeId(taskId)}`;
 }
 
 function sanitizeEvidenceRecord(record) {
@@ -308,6 +550,8 @@ function sanitizeEvidenceRecord(record) {
     "claimed",
     "codex_execution",
     "file_written",
+    "saved",
+    "file_name",
     "action",
   ]);
   const safe = {};
@@ -322,6 +566,29 @@ function sanitizeEvidenceRecord(record) {
 
 function sanitizeId(value) {
   return String(value || "").replace(/[^A-Za-z0-9:_\-.]/g, "").slice(0, 160);
+}
+
+function ideaFileName(idea) {
+  const stamp = idea.created_at.replace(/[-:]/g, "").replace("T", "-").replace("+0800", "").slice(0, 15);
+  const shortId = sanitizeId(idea.idea_id).replace(/^idea-/, "").slice(0, 12);
+  return `idea-${stamp}-${shortId}.json`;
+}
+
+async function fileExists(path) {
+  try {
+    await access(path, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function safeUnlink(path) {
+  try {
+    await unlink(path);
+  } catch {
+    // Best-effort cleanup for temp files only.
+  }
 }
 
 function sleep(ms) {
@@ -368,6 +635,25 @@ async function main() {
     });
     printJson(await claimOnce({ env: process.env }));
     if (!task.ok) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === "idea-selftest") {
+    const task = await createSyntheticIdeaTask({
+      task_id: argValue("task_id") || `idea-fix-dropbox-selftest-${Date.now()}`,
+      request_id: argValue("request_id") || `pline-v3-idea-selftest-${Date.now()}`,
+      marker: argValue("marker"),
+      content: argValue("content") || "FIX selftest idea",
+    });
+    const result = await claimOnce({ env: process.env });
+    printJson({
+      ...result,
+      task_created: task.ok,
+      content_recorded: undefined,
+    });
+    if (!task.ok || !result.ok || !result.claimed) {
       process.exitCode = 1;
     }
     return;

@@ -273,3 +273,83 @@ Date: 2026-07-18
 - Git: not a Git repository; no commit or push performed.
 - Evidence: `RELEASE_EVIDENCE_RELEASE_01.md`.
 - Secrets/raw User IDs/FORMAL/old project: not exposed, not touched.
+
+## Dropbox idea_create JSON Extension
+
+Date: 2026-07-18
+
+- Scope stayed inside `/Users/phoebe/Documents/菲比 LINE 智能助理_03` plus fixed Dropbox directory `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`.
+- Worker Path A now treats n8n `idea_create` as a request to enqueue monitor action `save_idea_json`; n8n Cloud does not receive local filesystem permissions.
+- Monitor `save_idea_json` accepts only validated idea schema data and writes only to the fixed Dropbox directory.
+- JSON file names are generated internally as `idea-YYYYMMDD-HHmmss-<short-id>.json`.
+- `actor_fingerprint` and `line_event_key` are irreversible SHA-256 fingerprints; raw LINE User ID is not recorded.
+- Duplicate event handling uses deterministic event fingerprint/task/file identity and no-overwrite file checks.
+- Success LINE final text for this extension is sent only after monitor result `completed` or `duplicate`; failure uses a safe failure reply.
+- Live no-secret selftest proved remote KV task claim and Dropbox JSON write with marker `TIDEA-20260718075500`.
+- Worker deployed version: `d5cda8d2-65bc-4cc2-b953-f67d761fde39`.
+- Evidence: `FIX_EVIDENCE_DROPBOX_IDEA_JSON.md`.
+
+## Dropbox idea_create Final Reply Repair
+
+Date: 2026-07-18
+
+- TEST showed JSON write/schema/fingerprint/duplicate passed, but three live runs lacked Worker `idea_json_final_push_completed`.
+- Root cause: Worker only watched the monitor task record; monitor evidence `idea_json_file_written` could exist before the final task status was visible to Worker.
+- Worker now recognizes durable stage `idea_json_file_written` as completion proof for `save_idea_json`.
+- Worker sends `已幫妳記下這個想法 💡` only after task completion or file-written evidence proves save success.
+- Worker sends no success text on timeout/failure.
+- Duplicate idea processing suppresses formal final push and records `idea_json_final_push_suppressed`.
+- Worker deployed version: `3ba57849-b02c-4b6e-a066-8da95575563c`.
+- Evidence: `FIX_EVIDENCE_DROPBOX_IDEA_FINAL_REPLY.md`.
+
+## Dropbox idea_create Final Exactly-Once Repair
+
+Date: 2026-07-18
+
+- TEST still lacked `idea_json_final_push_completed` after Dropbox JSON write, so Worker timing-window waiting was removed from the idea final path.
+- Worker now enqueues `save_idea_json` with a task-scoped `finalize_token` and encrypted `line_user_ref`.
+- Monitor now calls Worker `/test/idea-finalize` after `save_idea_json` completion or failure.
+- Worker finalizer verifies task id, request id, and finalize token before using the existing LINE token.
+- Worker writes durable final state `idea_json:v1:final:<task_id>` so repeated callbacks do not send another LINE push.
+- Duplicate and failed statuses do not send the success text.
+- Worker deployed version: `cbadc5a1-4e07-44b2-853d-335c5486b11b`.
+- Evidence: `FIX_EVIDENCE_DROPBOX_IDEA_FINAL_EXACTLY_ONCE.md`.
+
+## Dropbox Idea JSON Gate TEST
+
+- TEST wrote three formal `_03` Dropbox idea JSON files from LINE messages and validated parse/schema/fingerprints.
+- Duplicate deterministic reprocess returned `duplicate` with no extra JSON file.
+- Gate remains not passed because the formal LINE success final evidence `idea_json_final_push_completed` was missing.
+- Evidence: `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.
+
+## Dropbox Idea JSON Gate Rerun After Final Reply Fix
+
+Date: 2026-07-18
+
+- Reran the Gate after Worker version `3ba57849-b02c-4b6e-a066-8da95575563c`.
+- Continuous markers: `T1901-20260718082215`, `T1902-20260718082305`, `T1903-20260718082309`.
+- New Dropbox JSON files:
+  - `idea-20260718-082302-d255b4b825ef.json`
+  - `idea-20260718-082310-f4ec851098fd.json`
+  - `idea-20260718-082314-c72fb7e8e6e2.json`
+- JSON parse/schema/content/fingerprint checks passed.
+- Duplicate deterministic reprocess marker `T2099-20260718082930` returned `duplicate`; Dropbox JSON count stayed `13 -> 13`.
+- Serial control marker `T2001-20260718082810` also wrote JSON, but formal final evidence was still absent.
+- Result: `DROPBOX IDEA JSON PATH PARTIAL`; `DROPBOX IDEA JSON PATH PASS` is not marked.
+- Evidence: `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.
+
+## Dropbox Idea JSON Gate PASS After Durable Finalizer
+
+Date: 2026-07-18
+
+- Reran the Gate after Worker version `cbadc5a1-4e07-44b2-853d-335c5486b11b`.
+- Continuous markers: `T2201-20260718084633`, `T2202-20260718084802`, `T2203-20260718084935`.
+- New Dropbox JSON files:
+  - `idea-20260718-084641-1847198916c4.json`
+  - `idea-20260718-084810-24eb8fc7c5c5.json`
+  - `idea-20260718-084944-8a308a7a67f5.json`
+- JSON parse/schema/content/fingerprint checks passed.
+- Each run had durable `idea_json_final_push_completed` evidence.
+- Repeated finalizer callback for `T2203-20260718084935` returned `already_completed`, `pushed=false`, with no new Dropbox JSON and no second final push.
+- Result: `DROPBOX IDEA JSON PATH PASS`.
+- Evidence: `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.

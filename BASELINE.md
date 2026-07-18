@@ -45,3 +45,19 @@ Excluded:
 ## Baseline Acceptance
 
 This DOC baseline is accepted when all ten required files exist in the project root and describe only the minimal dual-path `_03` scope.
+
+## Post-Baseline TEST Extension
+
+The accepted TEST project now includes a fixed Dropbox idea JSON save path for Path A. The extension keeps the same clean-room boundaries and uses only:
+
+```text
+/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03
+```
+
+No Dropbox JSON files, temp files, secrets, raw LINE User IDs, or full webhook payloads belong in the repository.
+
+TEST note: Dropbox JSON write/schema and duplicate behavior have live `_03` evidence, but the final success LINE reply after JSON save still needs FIX evidence before `DROPBOX IDEA JSON PATH PASS` can be marked.
+
+Latest TEST rerun note: after Worker version `3ba57849-b02c-4b6e-a066-8da95575563c`, three new live Dropbox JSON files passed parse/schema/fingerprint checks and duplicate reprocess stayed idempotent. Formal LINE success final evidence `idea_json_final_push_completed` remained missing, so the extension remains `DROPBOX IDEA JSON PATH PARTIAL`.
+
+Latest accepted TEST note: after durable exactly-once finalizer Worker version `cbadc5a1-4e07-44b2-853d-335c5486b11b`, three live Dropbox JSON files passed parse/schema/fingerprint checks, each run produced `idea_json_final_push_completed`, and repeated finalizer callback produced no second push or JSON file. The extension is marked `DROPBOX IDEA JSON PATH PASS`. Evidence: `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.

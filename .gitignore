@@ -34,3 +34,7 @@ data/runtime/
 
 # Local smoke artifact
 codex-smoke.txt
+
+# Local idea JSON/runtime artifacts
+idea-*.json
+.idea-*.tmp

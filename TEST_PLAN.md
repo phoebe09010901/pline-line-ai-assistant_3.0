@@ -28,6 +28,8 @@ Required evidence per run:
 - Codex task = 0
 - no duplicate
 - no non-`_03` resource
+- Dropbox idea JSON file written for the `save_idea_json` extension when that extension is under test
+- success final text only after JSON `saved` or `duplicate`
 
 Pass rule:
 
@@ -155,6 +157,48 @@ Only when Gate 1 and Gate 2 both pass:
 
 ```text
 _03 MINIMAL DUAL-PATH PASS
+```
+
+## Dropbox idea_create JSON Extension
+
+Date: 2026-07-18
+
+Required TEST precondition:
+
+- Start the local monitor before sending the LINE idea message so Worker can observe `save_idea_json` completion inside the background wait window.
+
+Monitor command:
+
+```text
+MONITOR_POLL_ITERATIONS=45 MONITOR_POLL_INTERVAL_MS=1000 node monitor/src/monitor.js poll
+```
+
+Required evidence:
+
+- Worker `idea_json_save_enqueued`
+- Monitor `monitor_claimed`
+- Monitor `idea_json_saved`
+- Monitor `idea_json_file_written`
+- Worker `idea_json_saved`
+- Worker `idea_json_final_push_completed`
+- Dropbox file exists in the fixed `_03` directory
+- JSON has exactly the allowed schema fields
+- no raw LINE User ID, secret, token, signature, or full webhook payload in JSON or evidence
+- duplicate same LINE event does not create a second JSON and does not send a second formal success reply
+
+Final reply repair expectation:
+
+- Worker no longer relies on a monitor timing window for idea final success.
+- Monitor must call Worker `/test/idea-finalize` after `save_idea_json`.
+- Worker finalizer must verify task-scoped `finalize_token` and use durable final state `idea_json:v1:final:<task_id>`.
+- A saved non-duplicate idea must produce LINE final text `已幫妳記下這個想法 💡` and Worker evidence `idea_json_final_push_completed`.
+- A timeout/failure must not send the success text.
+- A duplicate or repeated callback must not send a second formal final push and may record `idea_json_final_push_suppressed` or already-completed/suppressed final state.
+
+No-secret monitor selftest:
+
+```text
+node monitor/src/monitor.js idea-selftest --task_id=<safe-id> --request_id=<safe-request-id> --marker=<safe-marker>
 ```
 
 ## Current DOC Stage Verification
@@ -1360,3 +1404,125 @@ Closeout readbacks:
 - Evidence: `RELEASE_EVIDENCE_RELEASE_01.md`.
 
 No further TEST Gate message is required for RELEASE-01.
+
+## Dropbox Idea JSON Gate Attempt
+
+Date: 2026-07-18
+
+- Formal test messages:
+  - `T1801-20260718080448`
+  - `T1802-20260718080635`
+  - `T1803-20260718080827`
+- Dropbox JSON written for each formal attempt:
+  - `idea-20260718-080456-e4722723e9e6.json`
+  - `idea-20260718-080643-44455ed5b925.json`
+  - `idea-20260718-080836-f137480285ba.json`
+- JSON parse/schema/fingerprint checks: PASS
+- Duplicate reprocess: PASS, JSON count stayed `8 -> 8`, result `duplicate`
+- Missing Gate evidence: `idea_json_final_push_completed`
+
+Result:
+
+```text
+DROPBOX IDEA JSON PATH PASS: not marked
+```
+
+Required next step:
+
+```text
+FIX must ensure the formal LINE success final is emitted and persisted exactly once after JSON save/duplicate.
+```
+
+## Dropbox Idea JSON Gate Rerun After Final Reply Fix
+
+Date: 2026-07-18
+
+Scope:
+
+- `_03` project only.
+- Fixed Dropbox directory only: `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`
+- No Git execution.
+- No secret/raw User ID/full payload recorded.
+
+Continuous markers:
+
+- `T1901-20260718082215`
+- `T1902-20260718082305`
+- `T1903-20260718082309`
+
+Dropbox JSON files:
+
+- `idea-20260718-082302-d255b4b825ef.json`
+- `idea-20260718-082310-f4ec851098fd.json`
+- `idea-20260718-082314-c72fb7e8e6e2.json`
+
+Evidence:
+
+- LINE event / Worker invocation evidence: present by marker readback.
+- `signature_pass`, `admin_pass`, `idempotency_pass`: present.
+- n8n background start and `idea_create` / `save_idea_json` evidence: present.
+- Monitor claim and Dropbox JSON write: present.
+- JSON parse/schema/content/fingerprint checks: PASS.
+- Codex task: 0.
+- Duplicate deterministic reprocess marker `T2099-20260718082930`: PASS, JSON count stayed `13 -> 13`.
+- Missing Gate evidence: `idea_json_final_push_completed`.
+
+Result:
+
+```text
+DROPBOX IDEA JSON PATH PASS: not marked
+DROPBOX IDEA JSON PATH PARTIAL
+```
+
+Required next step:
+
+```text
+FIX must ensure the formal LINE success final is emitted and persisted exactly once after JSON save completion evidence.
+```
+
+## Dropbox Idea JSON Gate PASS After Durable Finalizer
+
+Date: 2026-07-18
+
+Scope:
+
+- `_03` project only.
+- Fixed Dropbox directory only: `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`
+- No Git execution.
+- No secret/raw User ID/full payload recorded.
+
+Continuous markers:
+
+- `T2201-20260718084633`
+- `T2202-20260718084802`
+- `T2203-20260718084935`
+
+Dropbox JSON files:
+
+- `idea-20260718-084641-1847198916c4.json`
+- `idea-20260718-084810-24eb8fc7c5c5.json`
+- `idea-20260718-084944-8a308a7a67f5.json`
+
+Evidence:
+
+- LINE event / Worker invocation evidence: present by marker readback.
+- `signature_pass`, `admin_pass`, `idempotency_pass`: present.
+- n8n background completed and `idea_create` / `save_idea_json` evidence: present.
+- Monitor claim and Dropbox JSON write: present.
+- JSON parse/schema/content/fingerprint checks: PASS.
+- Formal LINE final success evidence `idea_json_final_push_completed`: PASS for all three runs.
+- Codex task: 0.
+- Repeated finalizer callback for `T2203-20260718084935`: PASS, result `already_completed`, `pushed=false`, JSON count stayed `20 -> 20`.
+- Evidence file: `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.
+
+Result:
+
+```text
+DROPBOX IDEA JSON PATH PASS
+```
+
+Required next step:
+
+```text
+RELEASE must run git status, secret scan, commit, and push to v1/minimal-dual-path.
+```

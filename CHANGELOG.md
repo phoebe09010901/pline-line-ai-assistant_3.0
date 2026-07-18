@@ -127,3 +127,49 @@
 - Confirmed monitor health `ready`, remote Gate 2 evidence stages, completed remote task record, and `codex-smoke.txt` mtime/content.
 - Confirmed folder is not a Git repository; no commit or push performed.
 - Added no-secret evidence file `RELEASE_EVIDENCE_RELEASE_01.md`.
+- Added post-release TEST extension for Dropbox idea JSON saving on Path A `idea_create`.
+- Worker now enqueues fixed monitor action `save_idea_json` after n8n confirms `intent=idea_create` and `tool_called=idea_create`.
+- Monitor now validates and writes one idea JSON per event to `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`.
+- Added schema, fixed-directory, generated-filename, temp-then-rename, duplicate, and no raw User ID coverage for `save_idea_json`.
+- Added monitor `idea-selftest` command for no-secret remote KV claim/write verification.
+- Updated `.gitignore` for local idea JSON/temp artifacts.
+- Deployed Worker version `d5cda8d2-65bc-4cc2-b953-f67d761fde39`.
+- Added no-secret evidence file `FIX_EVIDENCE_DROPBOX_IDEA_JSON.md`.
+- Repaired Dropbox idea JSON final LINE reply evidence gap.
+- Worker now accepts monitor `idea_json_file_written` durable evidence as save completion proof if the final task record is not yet visible.
+- Worker now suppresses formal final push for duplicate idea tasks and records `idea_json_final_push_suppressed`.
+- Added tests for success final push after monitor evidence, timeout/failure not sending success text, duplicate suppress, and no raw User ID in evidence.
+- Deployed Worker version `3ba57849-b02c-4b6e-a066-8da95575563c`.
+- Added no-secret evidence file `FIX_EVIDENCE_DROPBOX_IDEA_FINAL_REPLY.md`.
+- Replaced idea final reply timing-window behavior with durable exactly-once monitor callback.
+- Worker now creates task-scoped `finalize_token`, stores encrypted `line_user_ref`, exposes `/test/idea-finalize`, and writes final state under `idea_json:v1:final:<task_id>`.
+- Monitor now calls the Worker finalizer after `save_idea_json` completion/failure and records callback evidence.
+- Added tests for saved callback push-once, repeated callback no second push, duplicate suppress, failure no success push, encrypted ref preservation, and no raw User ID in evidence.
+- Deployed Worker version `cbadc5a1-4e07-44b2-853d-335c5486b11b`.
+- Added no-secret evidence file `FIX_EVIDENCE_DROPBOX_IDEA_FINAL_EXACTLY_ONCE.md`.
+
+## 2026-07-18 - TEST Dropbox Idea JSON Gate
+
+- Ran live `_03` Dropbox idea JSON Gate using Computer Use against `菲比智能客服 測試_03`.
+- Verified three Dropbox JSON writes, schema parse/9-key validation, irreversible fingerprints, and duplicate reprocess protection.
+- Did not mark `DROPBOX IDEA JSON PATH PASS` because the formal LINE success final stage `idea_json_final_push_completed` was not proven.
+- Added no-secret evidence file `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.
+
+## 2026-07-18 - TEST Dropbox Idea JSON Gate Rerun After Final Reply Fix
+
+- Reran live `_03` Dropbox idea JSON Gate after Worker version `3ba57849-b02c-4b6e-a066-8da95575563c`.
+- Sent continuous markers `T1901-20260718082215`, `T1902-20260718082305`, and `T1903-20260718082309` through the authorized LINE app.
+- Verified three new Dropbox JSON writes, JSON parse/9-key schema validation, normalized content, irreversible fingerprints, and Codex task count `0`.
+- Verified duplicate deterministic reprocess with marker `T2099-20260718082930`; Dropbox JSON count stayed `13 -> 13`.
+- Did not mark `DROPBOX IDEA JSON PATH PASS` because durable evidence still lacked `idea_json_final_push_completed`; current result is `DROPBOX IDEA JSON PATH PARTIAL`.
+- Updated no-secret evidence file `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.
+
+## 2026-07-18 - TEST Dropbox Idea JSON Gate PASS
+
+- Reran live `_03` Dropbox idea JSON Gate after durable exactly-once finalizer Worker version `cbadc5a1-4e07-44b2-853d-335c5486b11b`.
+- Sent continuous markers `T2201-20260718084633`, `T2202-20260718084802`, and `T2203-20260718084935` through the authorized LINE app.
+- Verified three new Dropbox JSON writes, JSON parse/9-key schema validation, normalized content, irreversible fingerprints, and Codex task count `0`.
+- Verified each run produced durable `idea_json_final_push_completed` evidence.
+- Verified repeated finalizer callback returned `already_completed`, `pushed=false`, Dropbox JSON count stayed `20 -> 20`, and no second final push was produced.
+- Marked `DROPBOX IDEA JSON PATH PASS`.
+- Updated no-secret evidence file `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.

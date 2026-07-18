@@ -18,10 +18,16 @@ const FAST_ACK_REPLY_TEXT = "已收到 _03 TEST 訊息，我會繼續處理。";
 const LINE_REPLY_MODE = "fast_ack_then_background_n8n";
 const CODEX_TASK_FINAL_MODE = "background_push_final";
 const CODEX_TASK_PREFIX = "codex_task:v1";
+const IDEA_TASK_PREFIX = "idea_json:v1";
 const CODEX_MONITOR_NAME = "pline-v3-test-codex-monitor";
 const CODEX_TASK_ACTION = "create_smoke_file";
+const IDEA_TASK_ACTION = "save_idea_json";
 const CODEX_SMOKE_FILE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/codex-smoke.txt";
 const CODEX_SMOKE_FILE_CONTENT = "Codex 已打通";
+const DROPBOX_IDEA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03";
+const IDEA_SAVED_REPLY_TEXT = "已幫妳記下這個想法 💡";
+const IDEA_SAVE_FAILED_REPLY_TEXT = "這次想法沒有成功寫入，我已保留失敗狀態供測試查證。";
+const IDEA_FINALIZE_PATH = "/test/idea-finalize";
 const EVIDENCE_PREFIX = "evidence:v1";
 const EVIDENCE_TTL_SECONDS = 172800;
 const FAST_ACK_EVIDENCE_CHECKPOINT_TIMEOUT_MS = 1500;
@@ -41,6 +47,10 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/test/evidence/selfcheck") {
       return handleEvidenceSelfcheck(request, env);
+    }
+
+    if (request.method === "POST" && url.pathname === IDEA_FINALIZE_PATH) {
+      return handleIdeaFinalize(request, env);
     }
 
     if (request.method === "POST" && url.pathname === "/line/webhook") {
@@ -230,11 +240,16 @@ export function workerHealth(env = {}) {
       idempotency_kv_bound: Boolean(env.IDEMPOTENCY_KV),
       selfcheck_secret_configured: Boolean(env.EVIDENCE_SELFTEST_SECRET),
     },
+    idea_finalizer: {
+      path: IDEA_FINALIZE_PATH,
+      mode: "task_token_exactly_once",
+    },
     codex_monitor: {
       name: CODEX_MONITOR_NAME,
-      task_prefix: CODEX_TASK_PREFIX,
-      action: CODEX_TASK_ACTION,
+      task_prefixes: [CODEX_TASK_PREFIX, IDEA_TASK_PREFIX],
+      actions: [CODEX_TASK_ACTION, IDEA_TASK_ACTION],
       target_path: CODEX_SMOKE_FILE_PATH,
+      dropbox_idea_dir: DROPBOX_IDEA_DIR,
     },
     admin_bootstrap: {
       phrase: ADMIN_BOOTSTRAP_PHRASE,
@@ -378,7 +393,67 @@ export async function processN8nInBackground(normalized, env) {
     };
   }
 
-  if (contractResult.body.intent === "codex_task") {
+  if (contractResult.body.intent === "idea_create") {
+    const enqueueResult = await enqueueIdeaTask(env, normalized);
+    await persistEvidenceStage(env, normalized, enqueueResult.ok ? "idea_json_save_enqueued" : "idea_json_save_enqueue_failed", {
+      intent: contractResult.body.intent,
+      action: IDEA_TASK_ACTION,
+      status: enqueueResult.ok ? enqueueResult.status : "failed",
+      reason: enqueueResult.ok ? "" : enqueueResult.reason,
+    });
+    logStage(enqueueResult.ok ? "idea_json_save_enqueued" : "idea_json_save_enqueue_failed", {
+      request_id: normalized.request_id,
+      action: IDEA_TASK_ACTION,
+      status: enqueueResult.ok ? enqueueResult.status : "failed",
+      reason: enqueueResult.ok ? undefined : enqueueResult.reason,
+    });
+
+    if (!enqueueResult.ok) {
+      await persistEvidenceStage(env, normalized, "idea_json_save_failed", {
+        intent: contractResult.body.intent,
+        action: IDEA_TASK_ACTION,
+        status: "failed",
+        reason: enqueueResult.reason,
+      });
+      const pushResult = await pushToLine(normalized.user_id, IDEA_SAVE_FAILED_REPLY_TEXT, env);
+      await persistEvidenceStage(env, normalized, pushResult.ok ? "idea_json_final_push_failed_notice_completed" : "idea_json_final_push_failed", {
+        intent: contractResult.body.intent,
+        action: IDEA_TASK_ACTION,
+        status: "failed",
+        reason: pushResult.ok ? "save_enqueue_failed" : pushResult.reason,
+      });
+      logStage(pushResult.ok ? "idea_json_final_push_failed_notice_completed" : "idea_json_final_push_failed", {
+        request_id: normalized.request_id,
+        action: IDEA_TASK_ACTION,
+        status: "failed",
+        reason: pushResult.ok ? "save_enqueue_failed" : pushResult.reason,
+      });
+    } else if (enqueueResult.duplicate) {
+      await persistEvidenceStage(env, normalized, "idea_json_final_push_suppressed", {
+        intent: contractResult.body.intent,
+        action: IDEA_TASK_ACTION,
+        status: "duplicate",
+        reason: "duplicate_idea_task",
+      });
+      logStage("idea_json_final_push_suppressed", {
+        request_id: normalized.request_id,
+        action: IDEA_TASK_ACTION,
+        status: "duplicate",
+        reason: "duplicate_idea_task",
+      });
+    } else {
+      await persistEvidenceStage(env, normalized, "idea_json_final_outbox_pending", {
+        intent: contractResult.body.intent,
+        action: IDEA_TASK_ACTION,
+        status: "pending",
+      });
+      logStage("idea_json_final_outbox_pending", {
+        request_id: normalized.request_id,
+        action: IDEA_TASK_ACTION,
+        status: "pending",
+      });
+    }
+  } else if (contractResult.body.intent === "codex_task") {
     const enqueueResult = await enqueueCodexTask(env, normalized, contractResult.body);
     await persistEvidenceStage(env, normalized, enqueueResult.ok ? "codex_task_enqueued" : "codex_task_enqueue_failed", {
       intent: contractResult.body.intent,
@@ -464,6 +539,64 @@ export async function enqueueCodexTask(env = {}, normalized = {}, body = {}) {
   const key = codexTaskKey(body.task_id);
   await env.RUNTIME_KV.put(key, JSON.stringify(task), { expirationTtl: EVIDENCE_TTL_SECONDS });
   return { ok: true, key };
+}
+
+export async function enqueueIdeaTask(env = {}, normalized = {}) {
+  if (!env.RUNTIME_KV) {
+    return { ok: false, reason: "missing_RUNTIME_KV" };
+  }
+  if (!normalized?.request_id || !normalized.line_event_id) {
+    return { ok: false, reason: "missing_idea_task_identity" };
+  }
+
+  const content = extractIdeaContent(normalized.message_text);
+  if (!content) {
+    return { ok: false, reason: "missing_idea_content" };
+  }
+
+  const lineEventKey = await fingerprint(`line-event:${normalized.line_event_id}`, env);
+  const actorFingerprint = await fingerprint(`line-actor:${normalized.user_id || "unknown"}`, env);
+  const lineUserRef = await sealLineUserRef(normalized.user_id, env);
+  if (!lineUserRef.ok) {
+    return lineUserRef;
+  }
+  const ideaId = `idea-${lineEventKey.slice(0, 16)}`;
+  const taskId = `idea-${lineEventKey.slice(0, 24)}`;
+  const key = ideaTaskKey(taskId);
+  const existingRaw = await env.RUNTIME_KV.get(key);
+  if (existingRaw) {
+    try {
+      const existing = JSON.parse(existingRaw);
+      return {
+        ok: true,
+        duplicate: true,
+        key,
+        task_id: existing.task_id || taskId,
+        status: existing.status === "completed" ? "duplicate" : existing.status || "pending",
+      };
+    } catch {
+      return { ok: false, reason: "unreadable_existing_idea_task" };
+    }
+  }
+
+  const task = sanitizeIdeaTaskRecord({
+    status: "pending",
+    task_id: taskId,
+    request_id: normalized.request_id,
+    marker: normalized.gate_marker,
+    line_user_ref: lineUserRef.value,
+    finalize_token: createFinalizeToken(),
+    idea: {
+      idea_id: ideaId,
+      content,
+      created_at: taipeiIsoString(new Date()),
+      actor_fingerprint: actorFingerprint,
+      line_event_key: lineEventKey,
+    },
+    created_at: new Date().toISOString(),
+  });
+  await env.RUNTIME_KV.put(key, JSON.stringify(task), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  return { ok: true, key, task_id: taskId, status: "pending" };
 }
 
 export async function callN8nWebhook(payload, env) {
@@ -738,6 +871,74 @@ export async function handleEvidenceSelfcheck(request, env = {}) {
   }, ok ? 200 : 500);
 }
 
+export async function handleIdeaFinalize(request, env = {}) {
+  if (!env.RUNTIME_KV) {
+    return jsonResponse({ status: "rejected", reason: "missing_RUNTIME_KV" }, 503);
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ status: "rejected", reason: "invalid_json" }, 400);
+  }
+
+  const taskId = sanitizeEvidenceId(body.task_id || "");
+  const requestId = sanitizeEvidenceId(body.request_id || "");
+  const providedToken = sanitizeEvidenceId(body.finalize_token || "");
+  const callbackStatus = sanitizeEvidenceId(body.status || "");
+  if (!taskId || !requestId || !providedToken) {
+    return jsonResponse({ status: "rejected", reason: "missing_finalize_identity" }, 400);
+  }
+
+  const taskRaw = await env.RUNTIME_KV.get(ideaTaskKey(taskId));
+  if (!taskRaw) {
+    return jsonResponse({ status: "rejected", reason: "missing_idea_task" }, 404);
+  }
+
+  let task;
+  try {
+    task = JSON.parse(taskRaw);
+  } catch {
+    return jsonResponse({ status: "rejected", reason: "unreadable_idea_task" }, 409);
+  }
+
+  if (task.action !== IDEA_TASK_ACTION || task.request_id !== requestId) {
+    return jsonResponse({ status: "rejected", reason: "finalize_task_mismatch" }, 409);
+  }
+  if (!task.finalize_token || !constantTimeEqual(task.finalize_token, providedToken)) {
+    return jsonResponse({ status: "rejected", reason: "invalid_finalize_token" }, 401);
+  }
+
+  const normalized = {
+    request_id: task.request_id,
+    gate_marker: task.marker || "",
+  };
+  if (callbackStatus === "failed" || task.status === "failed") {
+    await persistEvidenceStage(env, normalized, "idea_json_save_failed", {
+      action: IDEA_TASK_ACTION,
+      status: "failed",
+      reason: "monitor_task_failed",
+    });
+    return jsonResponse({ status: "no_success_push", reason: "monitor_task_failed", request_id: task.request_id });
+  }
+
+  if (callbackStatus !== "completed" && callbackStatus !== "duplicate") {
+    return jsonResponse({ status: "rejected", reason: "unsupported_finalize_status" }, 400);
+  }
+  if (task.status !== "completed" && task.status !== "duplicate") {
+    return jsonResponse({ status: "rejected", reason: "idea_task_not_saved" }, 409);
+  }
+
+  if (task.status === "duplicate" || callbackStatus === "duplicate") {
+    const suppressed = await suppressIdeaFinalOnce(env, task, "duplicate_idea_task");
+    return jsonResponse(suppressed, suppressed.ok ? 200 : 500);
+  }
+
+  const result = await pushIdeaFinalOnce(env, task);
+  return jsonResponse(result, result.ok ? 200 : 500);
+}
+
 export async function persistFastAckEvidenceCheckpoint(env = {}, normalized = {}, details = {}) {
   return persistEvidenceStages(env, normalized, [
     ["line_event_received", { marker: normalized.gate_marker }],
@@ -746,6 +947,137 @@ export async function persistFastAckEvidenceCheckpoint(env = {}, normalized = {}
     ["idempotency_pass", {}],
     ["line_fast_reply_completed", { reply_mode: LINE_REPLY_MODE }],
   ]);
+}
+
+async function pushIdeaFinalOnce(env = {}, task = {}) {
+  const finalKey = ideaFinalKey(task.task_id);
+  const existingRaw = await env.RUNTIME_KV.get(finalKey);
+  if (existingRaw) {
+    const existing = parseJsonSafely(existingRaw);
+    if (existing?.status === "completed" || existing?.status === "sending") {
+      return {
+        ok: true,
+        status: existing.status === "completed" ? "already_completed" : "already_sending",
+        pushed: false,
+        request_id: task.request_id,
+      };
+    }
+    if (existing?.status === "suppressed") {
+      return {
+        ok: true,
+        status: "suppressed",
+        pushed: false,
+        request_id: task.request_id,
+      };
+    }
+  }
+
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-idea-final/v1",
+    status: "sending",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+
+  const userId = await openLineUserRef(task.line_user_ref, env);
+  if (!userId.ok) {
+    await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+      schema: "pline-v3-test-idea-final/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: userId.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    await persistEvidenceStage(env, ideaTaskEvidenceTarget(task), "idea_json_final_push_failed", {
+      action: IDEA_TASK_ACTION,
+      status: "failed",
+      reason: userId.reason,
+    });
+    return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
+  }
+
+  const pushResult = await pushToLine(userId.value, IDEA_SAVED_REPLY_TEXT, env);
+  if (!pushResult.ok) {
+    await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+      schema: "pline-v3-test-idea-final/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: pushResult.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    await persistEvidenceStage(env, ideaTaskEvidenceTarget(task), "idea_json_final_push_failed", {
+      action: IDEA_TASK_ACTION,
+      status: "failed",
+      reason: pushResult.reason,
+    });
+    return { ok: false, status: "failed", reason: pushResult.reason, request_id: task.request_id };
+  }
+
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-idea-final/v1",
+    status: "completed",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await persistEvidenceStage(env, ideaTaskEvidenceTarget(task), "idea_json_final_push_completed", {
+    action: IDEA_TASK_ACTION,
+    status: "completed",
+    final_mode: "monitor_callback_exactly_once",
+  });
+  logStage("idea_json_final_push_completed", {
+    request_id: task.request_id,
+    action: IDEA_TASK_ACTION,
+    status: "completed",
+    final_mode: "monitor_callback_exactly_once",
+  });
+  return { ok: true, status: "completed", pushed: true, request_id: task.request_id };
+}
+
+async function suppressIdeaFinalOnce(env = {}, task = {}, reason = "duplicate_idea_task") {
+  const finalKey = ideaFinalKey(task.task_id);
+  const existingRaw = await env.RUNTIME_KV.get(finalKey);
+  if (existingRaw) {
+    const existing = parseJsonSafely(existingRaw);
+    if (existing?.status === "completed" || existing?.status === "suppressed" || existing?.status === "sending") {
+      return {
+        ok: true,
+        status: existing.status === "completed" ? "already_completed" : "suppressed",
+        pushed: false,
+        request_id: task.request_id,
+      };
+    }
+  }
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-idea-final/v1",
+    status: "suppressed",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    reason,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await persistEvidenceStage(env, ideaTaskEvidenceTarget(task), "idea_json_final_push_suppressed", {
+    action: IDEA_TASK_ACTION,
+    status: "duplicate",
+    reason,
+  });
+  logStage("idea_json_final_push_suppressed", {
+    request_id: task.request_id,
+    action: IDEA_TASK_ACTION,
+    status: "duplicate",
+    reason,
+  });
+  return { ok: true, status: "suppressed", pushed: false, request_id: task.request_id };
+}
+
+function ideaTaskEvidenceTarget(task = {}) {
+  return {
+    request_id: task.request_id,
+    gate_marker: task.marker || task.gate_marker || "",
+  };
 }
 
 export async function persistEvidenceStages(env = {}, normalized = {}, entries = []) {
@@ -954,7 +1286,7 @@ export function summarizeEvidenceStages(stages = []) {
     if (stage.stage === "n8n_background_started") summary.n8n_started = true;
     if (stage.stage === "n8n_background_completed") summary.n8n_completed = true;
     if (stage.stage === "n8n_background_failed" || stage.stage === "n8n_background_contract_failed") summary.n8n_failed = true;
-    if (stage.stage === "line_push_final_completed") summary.final_push = true;
+    if (stage.stage === "line_push_final_completed" || stage.stage === "idea_json_final_push_completed") summary.final_push = true;
     if (stage.intent) summary.intent = stage.intent;
     if (stage.tool_called) summary.tool_called = stage.tool_called;
     if (stage.saved_record) summary.saved_record = stage.saved_record;
@@ -980,6 +1312,14 @@ function codexTaskKey(taskId) {
   return `${CODEX_TASK_PREFIX}:task:${sanitizeEvidenceId(taskId)}`;
 }
 
+function ideaTaskKey(taskId) {
+  return `${IDEA_TASK_PREFIX}:task:${sanitizeEvidenceId(taskId)}`;
+}
+
+function ideaFinalKey(taskId) {
+  return `${IDEA_TASK_PREFIX}:final:${sanitizeEvidenceId(taskId)}`;
+}
+
 function sanitizeEvidenceId(value) {
   return String(value || "").replace(/[^A-Za-z0-9:_\-.]/g, "").slice(0, 160);
 }
@@ -997,6 +1337,144 @@ function sanitizeCodexTaskRecord(record) {
     content: CODEX_SMOKE_FILE_CONTENT,
     created_at: record.created_at,
   };
+}
+
+function sanitizeIdeaTaskRecord(record) {
+  return {
+    schema: "pline-v3-test-idea-task/v1",
+    status: record.status,
+    monitor: CODEX_MONITOR_NAME,
+    task_id: sanitizeEvidenceId(record.task_id),
+    request_id: sanitizeEvidenceId(record.request_id),
+    marker: sanitizeEvidenceId(record.marker || ""),
+    action: IDEA_TASK_ACTION,
+    target_dir: DROPBOX_IDEA_DIR,
+    line_user_ref: String(record.line_user_ref || ""),
+    finalize_token: sanitizeEvidenceId(record.finalize_token || ""),
+    idea: sanitizeIdeaJson(record.idea || {}),
+    created_at: record.created_at,
+  };
+}
+
+function sanitizeIdeaJson(idea) {
+  return {
+    schema_version: "1.0",
+    idea_id: sanitizeEvidenceId(idea.idea_id),
+    content: String(idea.content || "").trim().slice(0, 4000),
+    created_at: String(idea.created_at || ""),
+    source: "line",
+    actor_fingerprint: sanitizeEvidenceId(idea.actor_fingerprint),
+    line_event_key: sanitizeEvidenceId(idea.line_event_key),
+    intent: "idea_create",
+    status: "saved",
+  };
+}
+
+function extractIdeaContent(messageText = "") {
+  return String(messageText || "")
+    .replace(GATE_MARKER_PATTERN, "")
+    .replace(/^\s*記一下[:：]\s*/, "")
+    .trim();
+}
+
+async function fingerprint(value, env = {}) {
+  const salt = env.N8N_SHARED_SECRET || WORKER_NAME;
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${salt}:${value}`));
+  return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function createFinalizeToken() {
+  return `fin-${crypto.randomUUID()}-${crypto.randomUUID()}`;
+}
+
+async function sealLineUserRef(userId, env = {}) {
+  if (!userId) {
+    return { ok: false, reason: "missing_user_id" };
+  }
+  if (!env.N8N_SHARED_SECRET) {
+    return { ok: false, reason: "missing_N8N_SHARED_SECRET" };
+  }
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await lineUserRefKey(env);
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(userId),
+  );
+  return {
+    ok: true,
+    value: `v1.${base64UrlEncode(iv)}.${base64UrlEncode(new Uint8Array(encrypted))}`,
+  };
+}
+
+async function openLineUserRef(lineUserRef, env = {}) {
+  const parts = String(lineUserRef || "").split(".");
+  if (parts.length !== 3 || parts[0] !== "v1") {
+    return { ok: false, reason: "invalid_line_user_ref" };
+  }
+  if (!env.N8N_SHARED_SECRET) {
+    return { ok: false, reason: "missing_N8N_SHARED_SECRET" };
+  }
+  try {
+    const key = await lineUserRefKey(env);
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: base64UrlDecode(parts[1]) },
+      key,
+      base64UrlDecode(parts[2]),
+    );
+    return { ok: true, value: new TextDecoder().decode(decrypted) };
+  } catch {
+    return { ok: false, reason: "line_user_ref_decrypt_failed" };
+  }
+}
+
+async function lineUserRefKey(env = {}) {
+  const material = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${WORKER_NAME}:line-user-ref:${env.N8N_SHARED_SECRET}`),
+  );
+  return crypto.subtle.importKey("raw", material, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+function base64UrlEncode(bytes) {
+  const base64 = bytesToBase64(bytes);
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlDecode(value) {
+  const padded = String(value || "").replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(String(value || "").length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function parseJsonSafely(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function taipeiIsoString(date) {
+  const formatter = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  return `${formatter.format(date).replace(" ", "T")}+08:00`;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function sanitizeEvidenceRecord(record) {
@@ -1023,6 +1501,8 @@ function sanitizeEvidenceRecord(record) {
     "claimed",
     "codex_execution",
     "file_written",
+    "saved",
+    "source",
   ]);
   for (const [key, value] of Object.entries(record)) {
     if (!allowed.has(key) || value === undefined || value === "") {

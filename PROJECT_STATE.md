@@ -5,7 +5,7 @@
 - Name: `菲比 LINE 智能助理_03`
 - Root: `/Users/phoebe/Documents/菲比 LINE 智能助理_03`
 - Mode: clean-room TEST baseline
-- Current stage: RELEASE-01 TEST-only closeout complete
+- Current stage: post-release TEST extension for Dropbox idea JSON
 
 ## Scope Confirmation
 
@@ -43,6 +43,43 @@ Build the smallest dual-path LINE loop:
 - Repository: not a Git repository; no commit or push performed
 - Evidence: `RELEASE_EVIDENCE_RELEASE_01.md`
 - Secrets/raw User IDs/FORMAL/old project: not exposed, not touched
+
+## Dropbox idea_create JSON Extension
+
+- Date: 2026-07-18
+- Scope: `_03` TEST-only; no `_02`, old project, old secret store, old logs, or old User ID used.
+- Worker deployed version: `d5cda8d2-65bc-4cc2-b953-f67d761fde39`
+- Worker URL: `https://pline-v3-test-line-gateway.phy4175.workers.dev`
+- Dropbox fixed directory: `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`
+- Path A extension: `idea_create` now enqueues fixed monitor action `save_idea_json`.
+- Monitor: `pline-v3-test-codex-monitor` supports fixed actions `create_smoke_file` and `save_idea_json`.
+- JSON schema: only `schema_version`, `idea_id`, `content`, `created_at`, `source`, `actor_fingerprint`, `line_event_key`, `intent`, `status`.
+- Duplicate strategy: deterministic LINE event fingerprint creates one task/file identity; duplicate task/file returns existing result without overwrite.
+- Live no-secret selftest: remote `_03` KV task was claimed by monitor, Dropbox JSON was written, evidence marker `TIDEA-20260718075500` resolved to request id `pline-v3-idea-fix-dropbox-20260718075500`.
+- Validation passed: Worker syntax, monitor syntax, Worker unit tests, monitor unit tests, Wrangler dry-run, deploy, `/health`, invalid-signature route `401`, remote KV marker readback.
+- Evidence: `FIX_EVIDENCE_DROPBOX_IDEA_JSON.md`
+
+## Dropbox idea_create Final Reply Repair
+
+- Date: 2026-07-18
+- Scope: `_03` TEST-only; no `_02`, old project, old Dropbox data, old logs, old User ID, or old secret store used.
+- Root cause: Worker waited only for monitor task record completion; live monitor wrote `idea_json_file_written` evidence before the final task record update, so Worker could miss the save completion inside its wait window.
+- Repair: Worker now accepts `idea_json_file_written` durable evidence as monitor completion proof, then sends formal LINE final success for non-duplicate saved events.
+- Duplicate behavior: duplicate task processing writes `idea_json_final_push_suppressed` and does not repeat formal final LINE push.
+- Worker deployed version: `3ba57849-b02c-4b6e-a066-8da95575563c`
+- Validation passed: Worker syntax, Worker unit tests, monitor syntax, monitor unit tests, Wrangler dry-run, deploy, `/health`, invalid-signature route `401`, monitor health.
+- Evidence: `FIX_EVIDENCE_DROPBOX_IDEA_FINAL_REPLY.md`
+
+## Dropbox idea_create Final Exactly-Once Repair
+
+- Date: 2026-07-18
+- Scope: `_03` TEST-only; no `_02`, old project, old Dropbox data, old logs, old User ID, or old secret store used.
+- Root cause: idea final reply still depended on Worker/monitor timing-window visibility.
+- Repair: monitor now calls Worker `/test/idea-finalize` after `save_idea_json`; Worker verifies a task-scoped `finalize_token`, decrypts encrypted `line_user_ref`, and writes durable final state `idea_json:v1:final:<task_id>` before LINE push.
+- Exactly-once behavior: repeated callback does not send a second push; duplicate status suppresses formal final; failed status sends no success final.
+- Worker deployed version: `cbadc5a1-4e07-44b2-853d-335c5486b11b`
+- Validation passed: Worker syntax, monitor syntax, Worker unit tests, monitor unit tests, Wrangler dry-run, deploy, `/health`, invalid-signature route `401`, invalid finalize route `400`, monitor health.
+- Evidence: `FIX_EVIDENCE_DROPBOX_IDEA_FINAL_EXACTLY_ONCE.md`
 
 ## Current Evidence
 
@@ -344,3 +381,61 @@ Build the smallest dual-path LINE loop:
 ## Next Stage
 
 Hand off to `PLine03｜RELEASE｜部署與收尾` because TEST Gate 1 and Gate 2 both passed in `_03` TEST.
+
+## Dropbox Idea JSON Gate Attempt
+
+- TEST ran the Dropbox idea JSON Gate inside `_03` clean-room scope plus fixed Dropbox directory `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`.
+- Worker/monitor readiness confirmed `save_idea_json`, fixed Dropbox directory, remote `_03` KV, and monitor health `ready`.
+- A pre-Gate marker-like message `TIDEA1-20260718080351` did not match the Worker T-code marker pattern and was not counted.
+- Formal Gate attempts used `T1801-20260718080448`, `T1802-20260718080635`, and `T1803-20260718080827`.
+- Each formal attempt wrote one Dropbox JSON file and produced remote evidence through `idea_json_file_written`.
+- JSON files parsed successfully, used only the 9 allowed schema fields, and stored irreversible fingerprints rather than raw LINE User ID or raw event id.
+- Duplicate reprocess for existing idea JSON returned `status=duplicate`; Dropbox JSON count stayed `8 -> 8`.
+- Formal success LINE final evidence `idea_json_final_push_completed` was missing for the live attempts.
+- `DROPBOX IDEA JSON PATH PASS` is not marked.
+- No-secret evidence file: `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.
+
+## Next Stage
+
+Hand off to `PLine03｜FIX｜Worker 與程式` to ensure Worker sends and persists the formal LINE success reply exactly once after `save_idea_json` returns `completed` or `duplicate`.
+
+## Dropbox Idea JSON Gate Rerun After Final Reply Fix
+
+- TEST reran the live Dropbox idea JSON Gate after Worker version `3ba57849-b02c-4b6e-a066-8da95575563c`.
+- Scope stayed inside `/Users/phoebe/Documents/菲比 LINE 智能助理_03` plus fixed Dropbox directory `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`.
+- LINE app target was `菲比智能客服 測試_03`.
+- Continuous markers: `T1901-20260718082215`, `T1902-20260718082305`, `T1903-20260718082309`.
+- Dropbox JSON files written:
+  - `idea-20260718-082302-d255b4b825ef.json`
+  - `idea-20260718-082310-f4ec851098fd.json`
+  - `idea-20260718-082314-c72fb7e8e6e2.json`
+- JSON parse/schema/content/fingerprint checks passed for the three Gate files.
+- Duplicate deterministic reprocess marker `T2099-20260718082930` returned `duplicate`; Dropbox JSON count stayed `13 -> 13`.
+- Serial control marker `T2001-20260718082810` also wrote JSON successfully but did not produce formal final evidence.
+- Missing evidence remains `idea_json_final_push_completed`; `DROPBOX IDEA JSON PATH PASS` is not marked.
+- Current result: `DROPBOX IDEA JSON PATH PARTIAL`.
+- No-secret evidence file: `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.
+
+## Next Stage
+
+Hand off to `PLine03｜FIX｜Worker 與程式` to repair formal LINE success final emission/evidence after `save_idea_json` completion evidence.
+
+## Dropbox Idea JSON Gate Rerun After Durable Exactly-Once Finalizer
+
+- TEST reran the live Dropbox idea JSON Gate after Worker version `cbadc5a1-4e07-44b2-853d-335c5486b11b`.
+- Scope stayed inside `/Users/phoebe/Documents/菲比 LINE 智能助理_03` plus fixed Dropbox directory `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`.
+- LINE app target was `菲比智能客服 測試_03`.
+- Continuous markers: `T2201-20260718084633`, `T2202-20260718084802`, `T2203-20260718084935`.
+- Dropbox JSON files written:
+  - `idea-20260718-084641-1847198916c4.json`
+  - `idea-20260718-084810-24eb8fc7c5c5.json`
+  - `idea-20260718-084944-8a308a7a67f5.json`
+- Each marker had durable evidence for LINE event, Worker invocation, `signature_pass`, `admin_pass`, `idempotency_pass`, n8n background completed, `idea_create`, `save_idea_json`, monitor claim, Dropbox JSON write, and `idea_json_final_push_completed`.
+- JSON parse/schema/content/fingerprint checks passed for all three Gate files.
+- Repeated finalizer callback for marker `T2203-20260718084935` returned `already_completed`, `pushed=false`; Dropbox JSON count stayed `20 -> 20`, and the final push completed stage remained single-key exactly-once evidence.
+- `DROPBOX IDEA JSON PATH PASS` is marked.
+- No-secret evidence file: `TEST_EVIDENCE_DROPBOX_IDEA_JSON.md`.
+
+## Next Stage
+
+Hand off to `PLine03｜RELEASE｜部署與收尾` for git status, secret scan, commit, and push to `v1/minimal-dual-path`.

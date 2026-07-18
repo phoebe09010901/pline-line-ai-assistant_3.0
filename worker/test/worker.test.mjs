@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import {
   extractGateMarker,
   enqueueCodexTask,
+  enqueueIdeaTask,
   handleEvidenceRead,
   handleEvidenceSelfcheck,
+  handleIdeaFinalize,
   handleLineWebhook,
   lineAuthorizationHeader,
   normalizeN8nResponseBody,
@@ -34,8 +36,9 @@ assert.equal(health.evidence.selfcheck_guard_header, "x-pline-v3-selftest-secret
 assert.equal(health.evidence.runtime_kv_bound, false);
 assert.equal(health.evidence.selfcheck_secret_configured, false);
 assert.equal(health.codex_monitor.name, "pline-v3-test-codex-monitor");
-assert.equal(health.codex_monitor.task_prefix, "codex_task:v1");
-assert.equal(health.codex_monitor.action, "create_smoke_file");
+assert.deepEqual(health.codex_monitor.task_prefixes, ["codex_task:v1", "idea_json:v1"]);
+assert.deepEqual(health.codex_monitor.actions, ["create_smoke_file", "save_idea_json"]);
+assert.equal(health.codex_monitor.dropbox_idea_dir, "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03");
 assert.deepEqual(health.supported_intents, ["idea_create", "codex_task", "clarify", "unsupported"]);
 assert.deepEqual(health.gate_test_intents, ["idea_create", "codex_task"]);
 assert.equal(health.required_env.N8N_WEBHOOK_URL, false);
@@ -350,12 +353,256 @@ const enqueueRecord = JSON.parse(await enqueueKv.get("codex_task:v1:task:task-en
 assert.equal(enqueueRecord.status, "pending");
 assert.equal(enqueueRecord.content, "Codex 已打通");
 
+const ideaKv = createMemoryKv();
+const ideaEnqueueResult = await enqueueIdeaTask({
+  RUNTIME_KV: ideaKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-IDEA1",
+  line_event_id: "LINE-EVENT-IDEA1",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
+  message_text: "記一下：這是新的繁中想法 T1702-20260718010102",
+  gate_marker: "T1702-20260718010102",
+});
+assert.equal(ideaEnqueueResult.ok, true);
+const ideaKeys = await ideaKv.list({ prefix: "idea_json:v1:task:" });
+assert.equal(ideaKeys.keys.length, 1);
+const ideaRecord = JSON.parse(await ideaKv.get(ideaKeys.keys[0].name));
+assert.equal(ideaRecord.action, "save_idea_json");
+assert.equal(ideaRecord.target_dir, "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03");
+assert.equal(ideaRecord.idea.schema_version, "1.0");
+assert.equal(ideaRecord.idea.content, "這是新的繁中想法");
+assert.equal(ideaRecord.idea.source, "line");
+assert.equal(ideaRecord.idea.intent, "idea_create");
+assert.equal(ideaRecord.idea.status, "saved");
+assert.equal(/^[a-f0-9]{64}$/.test(ideaRecord.idea.actor_fingerprint), true);
+assert.equal(/^[a-f0-9]{64}$/.test(ideaRecord.idea.line_event_key), true);
+assert.equal(typeof ideaRecord.finalize_token, "string");
+assert.equal(ideaRecord.finalize_token.startsWith("fin-"), true);
+assert.equal(typeof ideaRecord.line_user_ref, "string");
+assert.equal(ideaRecord.line_user_ref.startsWith("v1."), true);
+assert.equal(JSON.stringify(ideaRecord).includes("U_RAW_SHOULD_NOT_STORE"), false);
+const duplicateIdeaEnqueue = await enqueueIdeaTask({
+  RUNTIME_KV: ideaKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-IDEA1",
+  line_event_id: "LINE-EVENT-IDEA1",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
+  message_text: "記一下：這是新的繁中想法 T1702-20260718010102",
+  gate_marker: "T1702-20260718010102",
+});
+assert.equal(duplicateIdeaEnqueue.ok, true);
+assert.equal(duplicateIdeaEnqueue.duplicate, true);
+
+const duplicateSuppressCalls = [];
+const duplicateSuppressKv = createMemoryKv();
+const duplicateSuppressNormalized = {
+  request_id: "pline-v3-IDEA-DUP",
+  line_event_id: "LINE-EVENT-IDEA-DUP",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
+  message_text: "記一下：duplicate suppress T1703-20260718010103",
+  gate_marker: "T1703-20260718010103",
+};
+await enqueueIdeaTask({
+  RUNTIME_KV: duplicateSuppressKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, duplicateSuppressNormalized);
+const duplicateSuppressKeys = await duplicateSuppressKv.list({ prefix: "idea_json:v1:task:" });
+const duplicateSuppressTask = JSON.parse(await duplicateSuppressKv.get(duplicateSuppressKeys.keys[0].name));
+await duplicateSuppressKv.put(duplicateSuppressKeys.keys[0].name, JSON.stringify({
+  ...duplicateSuppressTask,
+  status: "completed",
+  file_written: true,
+}));
+globalThis.fetch = async (url) => {
+  duplicateSuppressCalls.push(url);
+  return new Response(JSON.stringify({
+    request_id: "pline-v3-IDEA-DUP",
+    intent: "idea_create",
+    reply_text: "已記下",
+    tool_called: "idea_create",
+    saved_record: 1,
+    status: "completed",
+  }), { status: 200 });
+};
+const duplicateSuppressResult = await processN8nInBackground(duplicateSuppressNormalized, {
+  N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  RUNTIME_KV: duplicateSuppressKv,
+});
+assert.equal(duplicateSuppressResult.ok, true);
+assert.deepEqual(duplicateSuppressCalls, ["https://n8n.example.test/webhook"]);
+const duplicateSuppressEvidence = await readEvidenceForRequest({ RUNTIME_KV: duplicateSuppressKv }, "pline-v3-IDEA-DUP");
+assert.equal(duplicateSuppressEvidence.stages.some((stage) => stage.stage === "idea_json_final_push_suppressed"), true);
+assert.equal(JSON.stringify(duplicateSuppressEvidence).includes("U_RAW_SHOULD_NOT_STORE"), false);
+globalThis.fetch = originalFetch;
+
+const finalizerCalls = [];
+const finalizerKv = createMemoryKv();
+await enqueueIdeaTask({
+  RUNTIME_KV: finalizerKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-IDEA-FINALIZE",
+  line_event_id: "LINE-EVENT-FINALIZE",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
+  message_text: "記一下：finalize callback T1704-20260718010104",
+  gate_marker: "T1704-20260718010104",
+});
+const finalizerKeys = await finalizerKv.list({ prefix: "idea_json:v1:task:" });
+const finalizerTask = JSON.parse(await finalizerKv.get(finalizerKeys.keys[0].name));
+await finalizerKv.put(finalizerKeys.keys[0].name, JSON.stringify({
+  ...finalizerTask,
+  status: "completed",
+  file_written: true,
+}));
+globalThis.fetch = async (url, options) => {
+  finalizerCalls.push({ url, options });
+  if (url === "https://api.line.me/v2/bot/message/push") {
+    return new Response("", { status: 200 });
+  }
+  return new Response("{}", { status: 404 });
+};
+const finalizerRequestBody = {
+  task_id: finalizerTask.task_id,
+  request_id: finalizerTask.request_id,
+  action: "save_idea_json",
+  status: "completed",
+  finalize_token: finalizerTask.finalize_token,
+};
+const finalizerResponse = await handleIdeaFinalize(new Request("https://worker.example.test/test/idea-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(finalizerRequestBody),
+}), {
+  RUNTIME_KV: finalizerKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(finalizerResponse.status, 200);
+assert.equal((await finalizerResponse.json()).status, "completed");
+assert.deepEqual(finalizerCalls.map((call) => call.url), ["https://api.line.me/v2/bot/message/push"]);
+assert.equal(JSON.parse(finalizerCalls[0].options.body).messages[0].text, "已幫妳記下這個想法 💡");
+const repeatedFinalizerResponse = await handleIdeaFinalize(new Request("https://worker.example.test/test/idea-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(finalizerRequestBody),
+}), {
+  RUNTIME_KV: finalizerKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(repeatedFinalizerResponse.status, 200);
+assert.equal((await repeatedFinalizerResponse.json()).pushed, false);
+assert.equal(finalizerCalls.length, 1);
+const finalizerEvidenceRead = await readEvidenceForRequest({ RUNTIME_KV: finalizerKv }, "pline-v3-IDEA-FINALIZE");
+assert.equal(finalizerEvidenceRead.stages.some((stage) => stage.stage === "idea_json_final_push_completed"), true);
+assert.equal(summarizeEvidenceStages(finalizerEvidenceRead.stages).final_push, true);
+assert.equal(JSON.stringify(finalizerEvidenceRead).includes("U_RAW_SHOULD_NOT_STORE"), false);
+globalThis.fetch = originalFetch;
+
+const duplicateCallbackCalls = [];
+const duplicateCallbackKv = createMemoryKv();
+await enqueueIdeaTask({
+  RUNTIME_KV: duplicateCallbackKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-IDEA-DUP-CALLBACK",
+  line_event_id: "LINE-EVENT-DUP-CALLBACK",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
+  message_text: "記一下：duplicate callback T1705-20260718010105",
+  gate_marker: "T1705-20260718010105",
+});
+const duplicateCallbackKeys = await duplicateCallbackKv.list({ prefix: "idea_json:v1:task:" });
+const duplicateCallbackTask = JSON.parse(await duplicateCallbackKv.get(duplicateCallbackKeys.keys[0].name));
+await duplicateCallbackKv.put(duplicateCallbackKeys.keys[0].name, JSON.stringify({
+  ...duplicateCallbackTask,
+  status: "duplicate",
+  file_written: true,
+}));
+globalThis.fetch = async (url, options) => {
+  duplicateCallbackCalls.push({ url, options });
+  return new Response("", { status: 200 });
+};
+const duplicateCallbackResponse = await handleIdeaFinalize(new Request("https://worker.example.test/test/idea-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    task_id: duplicateCallbackTask.task_id,
+    request_id: duplicateCallbackTask.request_id,
+    action: "save_idea_json",
+    status: "duplicate",
+    finalize_token: duplicateCallbackTask.finalize_token,
+  }),
+}), {
+  RUNTIME_KV: duplicateCallbackKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(duplicateCallbackResponse.status, 200);
+assert.equal((await duplicateCallbackResponse.json()).status, "suppressed");
+assert.equal(duplicateCallbackCalls.length, 0);
+const duplicateCallbackEvidence = await readEvidenceForRequest({ RUNTIME_KV: duplicateCallbackKv }, "pline-v3-IDEA-DUP-CALLBACK");
+assert.equal(duplicateCallbackEvidence.stages.some((stage) => stage.stage === "idea_json_final_push_suppressed"), true);
+globalThis.fetch = originalFetch;
+
+const failedCallbackCalls = [];
+const failedCallbackKv = createMemoryKv();
+await enqueueIdeaTask({
+  RUNTIME_KV: failedCallbackKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-IDEA-FAILED-CALLBACK",
+  line_event_id: "LINE-EVENT-FAILED-CALLBACK",
+  user_id: "U_RAW_SHOULD_NOT_STORE",
+  message_text: "記一下：failed callback T1706-20260718010106",
+  gate_marker: "T1706-20260718010106",
+});
+const failedCallbackKeys = await failedCallbackKv.list({ prefix: "idea_json:v1:task:" });
+const failedCallbackTask = JSON.parse(await failedCallbackKv.get(failedCallbackKeys.keys[0].name));
+await failedCallbackKv.put(failedCallbackKeys.keys[0].name, JSON.stringify({
+  ...failedCallbackTask,
+  status: "failed",
+  reason: "unit_failure",
+}));
+globalThis.fetch = async (url, options) => {
+  failedCallbackCalls.push({ url, options });
+  return new Response("", { status: 200 });
+};
+const failedCallbackResponse = await handleIdeaFinalize(new Request("https://worker.example.test/test/idea-finalize", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    task_id: failedCallbackTask.task_id,
+    request_id: failedCallbackTask.request_id,
+    action: "save_idea_json",
+    status: "failed",
+    finalize_token: failedCallbackTask.finalize_token,
+  }),
+}), {
+  RUNTIME_KV: failedCallbackKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+});
+assert.equal(failedCallbackResponse.status, 200);
+assert.equal((await failedCallbackResponse.json()).status, "no_success_push");
+assert.equal(failedCallbackCalls.length, 0);
+const failedCallbackEvidence = await readEvidenceForRequest({ RUNTIME_KV: failedCallbackKv }, "pline-v3-IDEA-FAILED-CALLBACK");
+assert.equal(failedCallbackEvidence.stages.some((stage) => stage.stage === "idea_json_final_push_completed"), false);
+assert.equal(JSON.stringify(failedCallbackEvidence).includes("U_RAW_SHOULD_NOT_STORE"), false);
+globalThis.fetch = originalFetch;
+
 const webhookFetchCalls = [];
 const waitUntilPromises = [];
 const liveWebhookEvidenceKv = createMemoryKv();
-globalThis.fetch = async (url) => {
-  webhookFetchCalls.push(url);
+globalThis.fetch = async (url, options) => {
+  webhookFetchCalls.push({ url, options });
   if (url === "https://api.line.me/v2/bot/message/reply") {
+    return new Response("", { status: 200 });
+  }
+  if (url === "https://api.line.me/v2/bot/message/push") {
     return new Response("", { status: 200 });
   }
   return new Response(JSON.stringify({
@@ -407,9 +654,10 @@ assert.deepEqual(await webhookResponse.json(), {
   request_id: "pline-v3-WEBHOOK1",
   reply_mode: "fast_ack_then_background_n8n",
 });
-assert.equal(webhookFetchCalls[0], "https://api.line.me/v2/bot/message/reply");
-assert.equal(webhookFetchCalls[1], "https://n8n.example.test/webhook");
+assert.equal(webhookFetchCalls[0].url, "https://api.line.me/v2/bot/message/reply");
+assert.equal(webhookFetchCalls[1].url, "https://n8n.example.test/webhook");
 await Promise.all(waitUntilPromises);
+assert.equal(webhookFetchCalls.length, 2);
 const liveEvidenceResponse = await handleEvidenceRead(new Request("https://worker.example.test/test/evidence?marker=T1501-20260718010105", {
   headers: { "x-pline-v3-shared-secret": "unit-test-secret" },
 }), {
@@ -430,6 +678,8 @@ assert.equal(liveEvidenceBody.summary.n8n_completed, true);
 assert.equal(liveEvidenceBody.summary.intent, "idea_create");
 assert.equal(liveEvidenceBody.summary.tool_called, "idea_create");
 assert.equal(liveEvidenceBody.summary.saved_record, 1);
+assert.equal(liveEvidenceBody.stages.some((stage) => stage.stage === "idea_json_final_outbox_pending"), true);
+assert.equal(liveEvidenceBody.summary.final_push, false);
 assert.ok(liveEvidenceBody.stages.length >= 7);
 globalThis.fetch = originalFetch;
 
