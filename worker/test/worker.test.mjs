@@ -5,11 +5,16 @@ import {
   enqueueCodexTask,
   enqueueIdeaTask,
   handleCodexApprovalReply,
+  handleCrudConfirmationReply,
+  handleCrudConfirmationSelfcheck,
   handleCodexFinalize,
+  handleCrudFinalize,
   handleEvidenceRead,
   handleEvidenceSelfcheck,
   handleIdeaFinalize,
   handleLineWebhook,
+  handleN8nContractSelfcheck,
+  enqueueCrudTask,
   lineAuthorizationHeader,
   markLineMessageAsRead,
   markLineMessageAsReadForEvent,
@@ -26,6 +31,7 @@ import {
   validateN8nContract,
   verifyAdmin,
   workerHealth,
+  prefixRouteFromMessage,
 } from "../src/index.js";
 
 const originalFetch = globalThis.fetch;
@@ -42,6 +48,7 @@ assert.deepEqual(health.n8n.webhook_target, {
   path_fingerprint: n8nWebhookAttribution("https://n8nphy.app.n8n.cloud/webhook/pline-v3-test-ai-agent").path_fingerprint,
 });
 assert.equal(health.n8n.shared_secret_header, "x-pline-v3-shared-secret");
+assert.equal(health.n8n.contract_selfcheck_path, "/test/n8n-contract/selfcheck");
 assert.equal(health.line_reply_mode, "no_visible_ack_background_n8n");
 assert.deepEqual(health.line_mark_as_read, {
   enabled: false,
@@ -55,6 +62,13 @@ assert.deepEqual(health.line_mark_as_read, {
   transient_token_only: true,
 });
 assert.equal(health.codex_task_final_mode, "monitor_callback_exactly_once");
+assert.equal(health.crud_confirmation_handler.version, "post-check-requeue-v2");
+assert.equal(health.crud_confirmation_handler.check_stage, "crud_confirmation_check_started");
+assert.equal(health.crud_confirmation_handler.pending_index_written_last, true);
+assert.equal(health.crud_confirmation_handler.n8n_bypass_for_confirmation_text, true);
+assert.equal(health.crud_confirmation_handler.live_selfcheck_path, "/test/crud-confirmation/selfcheck");
+assert.equal(health.crud_confirmation_handler.post_check_stages.includes("crud_confirmation_pending_loaded"), true);
+assert.equal(health.crud_confirmation_handler.post_check_stages.includes("crud_confirmation_handler_failed"), true);
 assert.equal(health.evidence.persistence, "RUNTIME_KV");
 assert.equal(health.evidence.read_path, "/test/evidence");
 assert.equal(health.evidence.selfcheck_path, "/test/evidence/selfcheck");
@@ -63,8 +77,8 @@ assert.equal(health.evidence.selfcheck_guard_header, "x-pline-v3-selftest-secret
 assert.equal(health.evidence.runtime_kv_bound, false);
 assert.equal(health.evidence.selfcheck_secret_configured, false);
 assert.equal(health.codex_monitor.name, "pline-v3-test-codex-monitor");
-assert.deepEqual(health.codex_monitor.task_prefixes, ["codex_task:v1", "idea_json:v1"]);
-assert.deepEqual(health.codex_monitor.actions, ["codex_delegate", "create_smoke_file", "save_idea_json"]);
+assert.deepEqual(health.codex_monitor.task_prefixes, ["codex_task:v1", "idea_json:v1", "crud_task:v1"]);
+assert.deepEqual(health.codex_monitor.actions, ["codex_delegate", "create_smoke_file", "save_idea_json", "crud_task"]);
 assert.equal(health.codex_monitor.project_path, "/Users/phoebe/Documents/菲比 LINE 智能助理_03");
 assert.equal(health.codex_monitor.selected_interface, "codex_exec_json");
 assert.equal(health.codex_monitor.original_user_text_delivery, true);
@@ -79,6 +93,567 @@ assert.deepEqual(lineAuthorizationHeader({ LINE_CHANNEL_ACCESS_TOKEN: "test-toke
   ok: true,
   value: "Bearer test-token",
 });
+
+assert.deepEqual(prefixRouteFromMessage("備忘錄 今天喝水"), { domain: "memo", body_text: "今天喝水" });
+assert.deepEqual(prefixRouteFromMessage("行事曆：明天 10 點開會"), { domain: "calendar", body_text: "明天 10 點開會" });
+assert.deepEqual(prefixRouteFromMessage("記一下：不是 CRUD"), { domain: "", body_text: "" });
+
+const crudContract = validateN8nContract({
+  request_id: "pline-v3-crud-unit",
+  domain: "memo",
+  operation: "memo_create",
+  status: "ready",
+  reply_text: "備忘錄已新增好了。",
+}, "pline-v3-crud-unit");
+assert.equal(crudContract.ok, true);
+assert.equal(crudContract.body.intent, "memo_crud");
+assert.equal(crudContract.body.tool_called, "memo_create");
+
+const crudKv = createMemoryKv();
+const crudEnqueue = await enqueueCrudTask({
+  RUNTIME_KV: crudKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-crud-finalize",
+  line_event_id: "CRUD-WEBHOOK1",
+  user_id: "U_CRUD_SHOULD_NOT_STORE",
+  gate_marker: "T4001-20260718010101",
+  message_text: "備忘錄 今天喝水",
+  body_text: "今天喝水",
+}, {
+  domain: "memo",
+  operation: "memo_create",
+  status: "ready",
+  reply_text: "備忘錄已新增好了。",
+  content: "今天喝水",
+});
+assert.equal(crudEnqueue.ok, true);
+const crudTask = JSON.parse(await crudKv.get(`crud_task:v1:task:${crudEnqueue.task_id}`));
+assert.equal(crudTask.domain, "memo");
+assert.equal(crudTask.operation, "memo_create");
+assert.equal(JSON.stringify(crudTask).includes("U_CRUD_SHOULD_NOT_STORE"), false);
+
+const crudCreateNormalizedKv = createMemoryKv();
+const crudCreateNormalized = await enqueueCrudTask({
+  RUNTIME_KV: crudCreateNormalizedKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-crud-create-normalized",
+  line_event_id: "CRUD-CREATE-NORMALIZED",
+  user_id: "U_CRUD_CREATE_SHOULD_NOT_STORE",
+  gate_marker: "T4006-20260719010101",
+  message_text: "備忘錄 新增：M3501 今天喝水",
+  body_text: "新增：M3501 今天喝水",
+}, {
+  domain: "memo",
+  operation: "memo_create",
+  status: "ready",
+  reply_text: "備忘錄已新增好了。",
+  content: "新增：M3501 今天喝水",
+});
+assert.equal(crudCreateNormalized.ok, true);
+const crudCreateNormalizedTask = JSON.parse(await crudCreateNormalizedKv.get(`crud_task:v1:task:${crudCreateNormalized.task_id}`));
+assert.equal(crudCreateNormalizedTask.body.content, "M3501 今天喝水");
+assert.equal(crudCreateNormalizedTask.body.content.includes("新增"), false);
+assert.equal(JSON.stringify(crudCreateNormalizedTask).includes("U_CRUD_CREATE_SHOULD_NOT_STORE"), false);
+
+const crudUpdateKv = createMemoryKv();
+const crudUpdate = await enqueueCrudTask({
+  RUNTIME_KV: crudUpdateKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-crud-update-map",
+  line_event_id: "CRUD-UPDATE-MAP",
+  user_id: "U_CRUD_UPDATE_SHOULD_NOT_STORE",
+  gate_marker: "T4007-20260719010101",
+  message_text: "備忘錄 把「M3501 今天喝水」改成「M3501 今天喝 1500cc 水」",
+  body_text: "把「M3501 今天喝水」改成「M3501 今天喝 1500cc 水」",
+}, {
+  domain: "memo",
+  operation: "memo_update",
+  status: "ready",
+  reply_text: "我來幫妳更新。",
+});
+assert.equal(crudUpdate.ok, true);
+const crudUpdateTask = JSON.parse(await crudUpdateKv.get(`crud_task:v1:task:${crudUpdate.task_id}`));
+assert.equal(crudUpdateTask.body.query, "M3501 今天喝水");
+assert.equal(crudUpdateTask.body.new_content, "M3501 今天喝 1500cc 水");
+assert.equal(JSON.stringify(crudUpdateTask).includes("U_CRUD_UPDATE_SHOULD_NOT_STORE"), false);
+
+for (const [index, bodyText, expectedQuery, expectedNewContent] of [
+  [
+    "natural-content",
+    "把 M4001-20260719071906 的內容改成 我今天要喝 1800cc 的水",
+    "M4001-20260719071906",
+    "我今天要喝 1800cc 的水",
+  ],
+  [
+    "prefixed-natural-content",
+    "修改備忘錄：把 M4002-20260719071906 的內容改成 我今天要喝 1900cc 的水",
+    "M4002-20260719071906",
+    "我今天要喝 1900cc 的水",
+  ],
+  [
+    "natural-memo",
+    "把 M4003-20260719071906 的備忘錄改成 我今天要喝 2000cc 的水",
+    "M4003-20260719071906",
+    "我今天要喝 2000cc 的水",
+  ],
+]) {
+  const naturalUpdateKv = createMemoryKv();
+  const naturalUpdate = await enqueueCrudTask({
+    RUNTIME_KV: naturalUpdateKv,
+    N8N_SHARED_SECRET: "unit-test-secret",
+  }, {
+    request_id: `pline-v3-crud-update-${index}`,
+    line_event_id: `CRUD-UPDATE-${index}`,
+    user_id: "U_CRUD_NATURAL_UPDATE_SHOULD_NOT_STORE",
+    gate_marker: expectedQuery,
+    message_text: `備忘錄 ${bodyText}`,
+    body_text: bodyText,
+  }, {
+    domain: "memo",
+    operation: "memo_update",
+    status: "ready",
+    reply_text: "我來幫妳更新。",
+    query: bodyText,
+  });
+  assert.equal(naturalUpdate.ok, true);
+  const naturalUpdateTask = JSON.parse(await naturalUpdateKv.get(`crud_task:v1:task:${naturalUpdate.task_id}`));
+  assert.equal(naturalUpdateTask.body.query, expectedQuery);
+  assert.equal(naturalUpdateTask.body.new_content, expectedNewContent);
+  assert.equal(naturalUpdateTask.body.query.includes("把"), false);
+  assert.equal(naturalUpdateTask.body.query.includes("改成"), false);
+}
+
+const crudDeleteKv = createMemoryKv();
+const crudDelete = await enqueueCrudTask({
+  RUNTIME_KV: crudDeleteKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-crud-delete-map",
+  line_event_id: "CRUD-DELETE-MAP",
+  user_id: "U_CRUD_DELETE_SHOULD_NOT_STORE",
+  gate_marker: "T4010-20260719010101",
+  message_text: "備忘錄 刪除 M3601-20260719023036",
+  body_text: "刪除 M3601-20260719023036",
+}, {
+  domain: "memo",
+  operation: "memo_delete",
+  status: "ready",
+  reply_text: "我先幫妳確認要刪哪一筆。",
+});
+assert.equal(crudDelete.ok, true);
+const crudDeleteTask = JSON.parse(await crudDeleteKv.get(`crud_task:v1:task:${crudDelete.task_id}`));
+assert.equal(crudDeleteTask.body.query, "M3601-20260719023036");
+assert.equal(crudDeleteTask.body.query.includes("刪除"), false);
+assert.equal(JSON.stringify(crudDeleteTask).includes("U_CRUD_DELETE_SHOULD_NOT_STORE"), false);
+
+const confirmKv = createMemoryKv();
+const confirmActorBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("unit-test-secret:line-actor:U_CONFIRM_TEST"));
+const confirmActor = [...new Uint8Array(confirmActorBytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+const confirmTaskId = "memo-confirm-delete-unit";
+const confirmId = "confirm-delete-unit";
+await confirmKv.put(`crud_task:v1:task:${confirmTaskId}`, JSON.stringify({
+  schema: "pline-v3-test-crud-task/v1",
+  status: "needs_confirmation",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: confirmTaskId,
+  task_type: "crud_task",
+  action: "crud_task",
+  domain: "memo",
+  operation: "memo_delete",
+  body: { query: "M3601-20260719023036" },
+  body_text: "刪除 M3601-20260719023036",
+  actor_fingerprint: confirmActor,
+  line_event_key: "a".repeat(64),
+  request_id: "pline-v3-crud-confirm-delete",
+  marker: "T4012-20260719010101",
+  line_user_ref: "v1.encrypted.ref",
+  finalize_token: "confirm-finalize-token",
+  final_reply_text: "要刪除這筆備忘錄嗎？請回覆「確認」。",
+  confirmation_id: confirmId,
+  created_at: "2026-07-19T08:00:00.000Z",
+}));
+await confirmKv.put(`crud_task:v1:confirmation:${confirmId}`, JSON.stringify({
+  schema: "pline-v3-test-crud-confirmation/v1",
+  confirmation_id: confirmId,
+  task_id: confirmTaskId,
+  actor_fingerprint: confirmActor,
+  domain: "memo",
+  operation: "memo_delete",
+  status: "pending",
+  details: { target_file_name: "memo-safe.json", target_summary: "M3601 safe memo" },
+  created_at: "2026-07-19T08:00:00.000Z",
+  expires_at: "2999-01-01T00:00:00.000Z",
+}));
+await confirmKv.put(`crud_task:v1:confirmation_actor:${confirmActor}`, confirmId);
+await confirmKv.put(`crud_task:v1:final:${confirmTaskId}`, JSON.stringify({
+  schema: "pline-v3-test-crud-final/v1",
+  status: "needs_confirmation",
+  task_id: confirmTaskId,
+  request_id: "pline-v3-crud-confirm-delete",
+  updated_at: "2026-07-19T08:00:00.000Z",
+}));
+const confirmPushCalls = [];
+globalThis.fetch = async (url, options) => {
+  confirmPushCalls.push({ url, options });
+  return new Response(JSON.stringify({ ok: true }), { status: 200 });
+};
+const confirmReply = await handleCrudConfirmationReply({
+  message_text: "確認",
+  user_id: "U_CONFIRM_TEST",
+  request_id: "pline-v3-crud-confirm-event",
+  gate_marker: "T4013-20260719010101",
+}, {
+  RUNTIME_KV: confirmKv,
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  N8N_SHARED_SECRET: "unit-test-secret",
+});
+assert.equal(confirmReply.handled, true);
+assert.equal(confirmReply.ok, true);
+assert.equal(confirmReply.status, "confirmed");
+const requeuedTask = JSON.parse(await confirmKv.get(`crud_task:v1:task:${confirmTaskId}`));
+assert.equal(requeuedTask.status, "queued");
+assert.equal(requeuedTask.confirmed, true);
+assert.equal(await confirmKv.get(`crud_task:v1:pending:${confirmTaskId}`), `crud_task:v1:task:${confirmTaskId}`);
+assert.equal(JSON.parse(await confirmKv.get(`crud_task:v1:confirmation:${confirmId}`)).status, "used");
+assert.equal(JSON.parse(await confirmKv.get(`crud_task:v1:final:${confirmTaskId}`)).status, "confirmation_accepted");
+const repeatedConfirm = await handleCrudConfirmationReply({
+  message_text: "確認",
+  user_id: "U_CONFIRM_TEST",
+  request_id: "pline-v3-crud-confirm-repeat",
+}, {
+  RUNTIME_KV: confirmKv,
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  N8N_SHARED_SECRET: "unit-test-secret",
+});
+assert.equal(repeatedConfirm.status, "no_pending_confirmation");
+assert.equal(await confirmKv.get(`crud_task:v1:pending:${confirmTaskId}`), `crud_task:v1:task:${confirmTaskId}`);
+assert.equal(confirmPushCalls.length, 2);
+globalThis.fetch = originalFetch;
+
+const webhookConfirmKv = createMemoryKv();
+const webhookIdempotencyKv = createMemoryKv();
+const webhookConfirmActorBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("unit-test-secret:line-actor:U_CONFIRM_WEBHOOK"));
+const webhookConfirmActor = [...new Uint8Array(webhookConfirmActorBytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+const webhookConfirmTaskId = "memo-confirm-webhook-unit";
+const webhookConfirmId = "confirm-webhook-unit";
+await webhookConfirmKv.put(`crud_task:v1:task:${webhookConfirmTaskId}`, JSON.stringify({
+  schema: "pline-v3-test-crud-task/v1",
+  status: "needs_confirmation",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: webhookConfirmTaskId,
+  task_type: "crud_task",
+  action: "crud_task",
+  domain: "memo",
+  operation: "memo_delete",
+  body: { query: "M3801-20260719064042" },
+  body_text: "刪除 M3801-20260719064042",
+  actor_fingerprint: webhookConfirmActor,
+  line_event_key: "b".repeat(64),
+  request_id: "pline-v3-crud-confirm-webhook-delete",
+  marker: "T4014-20260719010101",
+  line_user_ref: "v1.encrypted.ref",
+  finalize_token: "webhook-confirm-finalize-token",
+  final_reply_text: "要刪除這筆備忘錄嗎？請回覆「確認」。",
+  confirmation_id: webhookConfirmId,
+  created_at: "2026-07-19T08:00:00.000Z",
+}));
+await webhookConfirmKv.put(`crud_task:v1:confirmation:${webhookConfirmId}`, JSON.stringify({
+  schema: "pline-v3-test-crud-confirmation/v1",
+  confirmation_id: webhookConfirmId,
+  task_id: webhookConfirmTaskId,
+  actor_fingerprint: webhookConfirmActor,
+  domain: "memo",
+  operation: "memo_delete",
+  status: "pending",
+  details: { target_file_name: "memo-safe.json", target_summary: "M3801 safe memo" },
+  created_at: "2026-07-19T08:00:00.000Z",
+  expires_at: "2999-01-01T00:00:00.000Z",
+}));
+await webhookConfirmKv.put(`crud_task:v1:confirmation_actor:${webhookConfirmActor}`, webhookConfirmId);
+await webhookConfirmKv.put(`crud_task:v1:final:${webhookConfirmTaskId}`, JSON.stringify({
+  schema: "pline-v3-test-crud-final/v1",
+  status: "needs_confirmation",
+  task_id: webhookConfirmTaskId,
+  request_id: "pline-v3-crud-confirm-webhook-delete",
+  updated_at: "2026-07-19T08:00:00.000Z",
+}));
+const webhookConfirmPutOrder = [];
+const webhookConfirmOriginalPut = webhookConfirmKv.put;
+webhookConfirmKv.put = async (key, value, options) => {
+  if (key === `crud_task:v1:task:${webhookConfirmTaskId}`) webhookConfirmPutOrder.push("task");
+  if (key === `crud_task:v1:final:${webhookConfirmTaskId}`) webhookConfirmPutOrder.push("final");
+  if (key === `crud_task:v1:confirmation:${webhookConfirmId}`) webhookConfirmPutOrder.push("confirmation");
+  if (key === `crud_task:v1:pending:${webhookConfirmTaskId}`) webhookConfirmPutOrder.push("pending");
+  return webhookConfirmOriginalPut(key, value, options);
+};
+const webhookConfirmFetchCalls = [];
+const webhookConfirmChannelSecret = "line-channel-secret-for-crud-confirmation-webhook-unit";
+globalThis.fetch = async (url, options) => {
+  webhookConfirmFetchCalls.push({ url, options });
+  return new Response(JSON.stringify({ ok: true }), { status: 200 });
+};
+const webhookConfirmPayload = JSON.stringify({
+  events: [{
+    type: "message",
+    webhookEventId: "CRUD-CONFIRM-WEBHOOK",
+    replyToken: "reply-confirm-webhook",
+    source: { type: "user", userId: "U_CONFIRM_WEBHOOK" },
+    message: { id: "confirm-message", type: "text", text: "確認。" },
+  }],
+});
+const webhookConfirmResponse = await handleLineWebhook(new Request("https://worker.example.test/line/webhook", {
+  method: "POST",
+  headers: {
+    "x-line-signature": await signLineBody(webhookConfirmPayload, webhookConfirmChannelSecret),
+    "content-type": "application/json",
+  },
+  body: webhookConfirmPayload,
+}), {
+  LINE_CHANNEL_SECRET: webhookConfirmChannelSecret,
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  LINE_TEST_ADMIN_USER_IDS: "U_CONFIRM_WEBHOOK",
+  N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
+  N8N_SHARED_SECRET: "unit-test-secret",
+  RUNTIME_KV: webhookConfirmKv,
+  IDEMPOTENCY_KV: webhookIdempotencyKv,
+}, {
+  waitUntil: (promise) => Promise.resolve(promise),
+});
+assert.equal(webhookConfirmResponse.status, 200);
+assert.deepEqual(await webhookConfirmResponse.json(), {
+  status: "accepted",
+  request_id: "pline-v3-CRUD-CONFIRM-WEBHOOK",
+  confirmation: "accepted",
+  reason: "",
+});
+assert.equal(await webhookConfirmKv.get(`crud_task:v1:pending:${webhookConfirmTaskId}`), `crud_task:v1:task:${webhookConfirmTaskId}`);
+assert.equal(JSON.parse(await webhookConfirmKv.get(`crud_task:v1:task:${webhookConfirmTaskId}`)).confirmed, true);
+assert.equal(JSON.parse(await webhookConfirmKv.get(`crud_task:v1:confirmation:${webhookConfirmId}`)).status, "used");
+assert.equal(JSON.parse(await webhookConfirmKv.get(`crud_task:v1:final:${webhookConfirmTaskId}`)).status, "confirmation_accepted");
+assert.equal(webhookConfirmPutOrder.indexOf("final") < webhookConfirmPutOrder.indexOf("pending"), true);
+assert.equal(webhookConfirmPutOrder.indexOf("confirmation") < webhookConfirmPutOrder.indexOf("pending"), true);
+assert.equal(webhookConfirmFetchCalls.length, 1);
+assert.equal(webhookConfirmFetchCalls[0].url, "https://api.line.me/v2/bot/message/push");
+const webhookConfirmEvidence = await readEvidenceForRequest({ RUNTIME_KV: webhookConfirmKv }, "pline-v3-CRUD-CONFIRM-WEBHOOK");
+assert.equal(webhookConfirmEvidence.stages.some((stage) => stage.stage === "crud_confirmation_check_started" && stage.is_confirmation_text === true && stage.pending_found === true), true);
+assert.equal(webhookConfirmEvidence.stages.some((stage) => stage.stage === "crud_confirmation_pending_loaded" && stage.status === "pending"), true);
+assert.equal(webhookConfirmEvidence.stages.some((stage) => stage.stage === "crud_confirmation_task_marked_confirmed" && stage.status === "queued"), true);
+assert.equal(webhookConfirmEvidence.stages.some((stage) => stage.stage === "crud_confirmation_pending_written" && stage.pending_written === true), true);
+assert.equal(webhookConfirmEvidence.stages.some((stage) => stage.stage === "crud_confirmation_requeued" && stage.status === "queued"), true);
+assert.equal(webhookConfirmEvidence.stages.some((stage) => stage.stage === "crud_confirmation_reply_completed" && stage.status === "confirmed"), true);
+assert.equal(webhookConfirmEvidence.stages.some((stage) => stage.stage === "n8n_background_started"), false);
+globalThis.fetch = originalFetch;
+
+const crudConfirmationSelfcheckKv = createMemoryKv();
+const crudConfirmationSelfcheck = await handleCrudConfirmationSelfcheck(new Request("https://worker.example.test/test/crud-confirmation/selfcheck", {
+  method: "POST",
+  headers: { "x-pline-v3-selftest-secret": "selfcheck-secret" },
+}), {
+  RUNTIME_KV: crudConfirmationSelfcheckKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+  EVIDENCE_SELFTEST_SECRET: "selfcheck-secret",
+});
+assert.equal(crudConfirmationSelfcheck.status, 200);
+const crudConfirmationSelfcheckBody = await crudConfirmationSelfcheck.json();
+assert.equal(crudConfirmationSelfcheckBody.status, "ok");
+assert.equal(crudConfirmationSelfcheckBody.handler_version, "post-check-requeue-v2");
+assert.equal(crudConfirmationSelfcheckBody.handled, true);
+assert.equal(crudConfirmationSelfcheckBody.task_confirmed, true);
+assert.equal(crudConfirmationSelfcheckBody.pending_written, true);
+assert.equal(crudConfirmationSelfcheckBody.confirmation_status, "used");
+assert.equal(crudConfirmationSelfcheckBody.stage_names.includes("crud_confirmation_check_started"), true);
+assert.equal(crudConfirmationSelfcheckBody.stage_names.includes("crud_confirmation_pending_loaded"), true);
+assert.equal(crudConfirmationSelfcheckBody.stage_names.includes("crud_confirmation_task_marked_confirmed"), true);
+assert.equal(crudConfirmationSelfcheckBody.stage_names.includes("crud_confirmation_pending_written"), true);
+assert.equal(crudConfirmationSelfcheckBody.stage_names.includes("crud_confirmation_requeued"), true);
+assert.equal(crudConfirmationSelfcheckBody.stage_names.includes("crud_confirmation_ack_push_skipped_selfcheck"), true);
+assert.equal(crudConfirmationSelfcheckBody.n8n_bypassed, true);
+
+const pendingFailKv = createMemoryKv();
+const pendingFailActorBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("unit-test-secret:line-actor:U_CONFIRM_PENDING_FAIL"));
+const pendingFailActor = [...new Uint8Array(pendingFailActorBytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+const pendingFailTaskId = "memo-confirm-pending-fail-unit";
+const pendingFailConfirmId = "confirm-pending-fail-unit";
+await pendingFailKv.put(`crud_task:v1:task:${pendingFailTaskId}`, JSON.stringify({
+  schema: "pline-v3-test-crud-task/v1",
+  status: "needs_confirmation",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: pendingFailTaskId,
+  task_type: "crud_task",
+  action: "crud_task",
+  domain: "memo",
+  operation: "memo_delete",
+  body: { query: "M4201-20260719074032" },
+  body_text: "刪除 M4201-20260719074032",
+  actor_fingerprint: pendingFailActor,
+  line_event_key: "c".repeat(64),
+  request_id: "pline-v3-crud-confirm-pending-fail-delete",
+  marker: "T4016-20260719010101",
+  line_user_ref: "v1.encrypted.ref",
+  finalize_token: "pending-fail-finalize-token",
+  final_reply_text: "要刪除這筆備忘錄嗎？請回覆「確認」。",
+  confirmation_id: pendingFailConfirmId,
+  created_at: "2026-07-19T08:00:00.000Z",
+}));
+await pendingFailKv.put(`crud_task:v1:confirmation:${pendingFailConfirmId}`, JSON.stringify({
+  schema: "pline-v3-test-crud-confirmation/v1",
+  confirmation_id: pendingFailConfirmId,
+  task_id: pendingFailTaskId,
+  actor_fingerprint: pendingFailActor,
+  domain: "memo",
+  operation: "memo_delete",
+  status: "pending",
+  details: { target_file_name: "memo-safe.json", target_summary: "M4201 safe memo" },
+  created_at: "2026-07-19T08:00:00.000Z",
+  expires_at: "2999-01-01T00:00:00.000Z",
+}));
+await pendingFailKv.put(`crud_task:v1:confirmation_actor:${pendingFailActor}`, pendingFailConfirmId);
+const pendingFailPut = pendingFailKv.put;
+pendingFailKv.put = async (key, value, options) => {
+  if (key === `crud_task:v1:pending:${pendingFailTaskId}`) throw new Error("unit_pending_write_failed");
+  return pendingFailPut(key, value, options);
+};
+const pendingFailReply = await handleCrudConfirmationReply({
+  message_text: "確認",
+  user_id: "U_CONFIRM_PENDING_FAIL",
+  request_id: "pline-v3-crud-confirm-pending-fail-event",
+  gate_marker: "T4017-20260719010101",
+}, {
+  RUNTIME_KV: pendingFailKv,
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  N8N_SHARED_SECRET: "unit-test-secret",
+});
+assert.equal(pendingFailReply.handled, true);
+assert.equal(pendingFailReply.ok, false);
+assert.equal(pendingFailReply.reason, "crud_confirmation_pending_write_failed");
+const pendingFailEvidence = await readEvidenceForRequest({ RUNTIME_KV: pendingFailKv }, "pline-v3-crud-confirm-pending-fail-event");
+assert.equal(pendingFailEvidence.stages.some((stage) => stage.stage === "crud_confirmation_check_started" && stage.pending_found === true), true);
+assert.equal(pendingFailEvidence.stages.some((stage) => stage.stage === "crud_confirmation_pending_write_failed" && stage.status === "failed"), true);
+
+const webhookNoPendingKv = createMemoryKv();
+const webhookNoPendingIdempotencyKv = createMemoryKv();
+const webhookNoPendingFetchCalls = [];
+const webhookNoPendingChannelSecret = "line-channel-secret-for-crud-no-pending-webhook-unit";
+globalThis.fetch = async (url, options) => {
+  webhookNoPendingFetchCalls.push({ url, options });
+  return new Response(JSON.stringify({ ok: true }), { status: 200 });
+};
+const webhookNoPendingPayload = JSON.stringify({
+  events: [{
+    type: "message",
+    webhookEventId: "CRUD-CONFIRM-NO-PENDING",
+    replyToken: "reply-confirm-no-pending",
+    source: { type: "user", userId: "U_CONFIRM_NO_PENDING" },
+    message: { id: "confirm-no-pending-message", type: "text", text: "確認" },
+  }],
+});
+const webhookNoPendingResponse = await handleLineWebhook(new Request("https://worker.example.test/line/webhook", {
+  method: "POST",
+  headers: {
+    "x-line-signature": await signLineBody(webhookNoPendingPayload, webhookNoPendingChannelSecret),
+    "content-type": "application/json",
+  },
+  body: webhookNoPendingPayload,
+}), {
+  LINE_CHANNEL_SECRET: webhookNoPendingChannelSecret,
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  LINE_TEST_ADMIN_USER_IDS: "U_CONFIRM_NO_PENDING",
+  N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
+  N8N_SHARED_SECRET: "unit-test-secret",
+  RUNTIME_KV: webhookNoPendingKv,
+  IDEMPOTENCY_KV: webhookNoPendingIdempotencyKv,
+}, {
+  waitUntil: (promise) => Promise.resolve(promise),
+});
+assert.equal(webhookNoPendingResponse.status, 200);
+assert.deepEqual(await webhookNoPendingResponse.json(), {
+  status: "accepted",
+  request_id: "pline-v3-CRUD-CONFIRM-NO-PENDING",
+  confirmation: "accepted",
+  reason: "",
+});
+assert.equal(webhookNoPendingFetchCalls.length, 1);
+assert.equal(JSON.parse(webhookNoPendingFetchCalls[0].options.body).messages[0].text, "目前沒有待確認的動作。");
+const webhookNoPendingEvidence = await readEvidenceForRequest({ RUNTIME_KV: webhookNoPendingKv }, "pline-v3-CRUD-CONFIRM-NO-PENDING");
+assert.equal(webhookNoPendingEvidence.stages.some((stage) => stage.stage === "crud_confirmation_check_started" && stage.pending_found === false), true);
+assert.equal(webhookNoPendingEvidence.stages.some((stage) => stage.stage === "crud_confirmation_no_pending"), true);
+assert.equal(webhookNoPendingEvidence.stages.some((stage) => stage.stage === "crud_confirmation_reply_completed" && stage.status === "no_pending_confirmation"), true);
+assert.equal(webhookNoPendingEvidence.stages.some((stage) => stage.stage === "n8n_background_started"), false);
+globalThis.fetch = originalFetch;
+
+await crudKv.put(`crud_task:v1:task:${crudEnqueue.task_id}`, JSON.stringify({
+  ...crudTask,
+  status: "completed",
+  final_reply_text: "備忘錄已新增好了。",
+}));
+const crudFinalCalls = [];
+globalThis.fetch = async (url, options) => {
+  crudFinalCalls.push({ url, options });
+  return new Response(JSON.stringify({ ok: true }), { status: 200 });
+};
+const crudFinalize = await handleCrudFinalize(new Request("https://worker.example.test/test/crud-finalize", {
+  method: "POST",
+  body: JSON.stringify({
+    task_id: crudEnqueue.task_id,
+    request_id: "pline-v3-crud-finalize",
+    status: "completed",
+    finalize_token: crudTask.finalize_token,
+  }),
+}), {
+  RUNTIME_KV: crudKv,
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  N8N_SHARED_SECRET: "unit-test-secret",
+});
+assert.equal(crudFinalize.status, 200);
+assert.equal(crudFinalCalls.length, 1);
+assert.equal(JSON.parse(crudFinalCalls[0].options.body).messages[0].text, "備忘錄已新增好了。");
+const repeatedCrudFinalize = await handleCrudFinalize(new Request("https://worker.example.test/test/crud-finalize", {
+  method: "POST",
+  body: JSON.stringify({
+    task_id: crudEnqueue.task_id,
+    request_id: "pline-v3-crud-finalize",
+    status: "completed",
+    finalize_token: crudTask.finalize_token,
+  }),
+}), {
+  RUNTIME_KV: crudKv,
+  LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+  N8N_SHARED_SECRET: "unit-test-secret",
+});
+assert.equal(repeatedCrudFinalize.status, 200);
+assert.equal(crudFinalCalls.length, 1);
+assert.equal(JSON.stringify(await readEvidenceForRequest({ RUNTIME_KV: crudKv }, "pline-v3-crud-finalize")).includes("U_CRUD_SHOULD_NOT_STORE"), false);
+globalThis.fetch = originalFetch;
+
+const crudSearchKv = createMemoryKv();
+const crudSearchEnqueue = await enqueueCrudTask({
+  RUNTIME_KV: crudSearchKv,
+  N8N_SHARED_SECRET: "unit-test-secret",
+}, {
+  request_id: "pline-v3-crud-search-map",
+  line_event_id: "CRUD-SEARCH-MAP",
+  user_id: "U_CRUD_SEARCH_SHOULD_NOT_STORE",
+  gate_marker: "T4003-20260719010101",
+  message_text: "備忘錄 搜尋 M3501 水",
+  body_text: "搜尋 M3501 水",
+}, {
+  domain: "memo",
+  operation: "memo_search",
+  status: "ready",
+  reply_text: "我幫妳找找。",
+  search_query: "M3501 水",
+});
+assert.equal(crudSearchEnqueue.ok, true);
+const crudSearchTask = JSON.parse(await crudSearchKv.get(`crud_task:v1:task:${crudSearchEnqueue.task_id}`));
+assert.equal(crudSearchTask.operation, "memo_search");
+assert.equal(crudSearchTask.body.query, "M3501 水");
+assert.equal(crudSearchTask.body_text, "搜尋 M3501 水");
+assert.equal(JSON.stringify(crudSearchTask).includes("Codex 任務測試成功"), false);
+assert.equal(JSON.stringify(crudSearchTask).includes("U_CRUD_SEARCH_SHOULD_NOT_STORE"), false);
+
 assert.deepEqual(lineAuthorizationHeader({ LINE_CHANNEL_ACCESS_TOKEN: "test-token" }), {
   ok: true,
   value: "Bearer test-token",
@@ -256,6 +831,50 @@ assert.equal(acceptedSelfcheckBody.marker_roundtrip, true);
 assert.equal(acceptedSelfcheckBody.stage_names.includes("selfcheck_started"), true);
 assert.equal(acceptedSelfcheckBody.stage_names.includes("selfcheck_completed"), true);
 assert.equal(await selfcheckKv.get("evidence:v1:marker:T1601-20260718010203"), "pline-v3-selfcheck-unit");
+
+const rejectedN8nSelfcheck = await handleN8nContractSelfcheck(new Request("https://worker.example.test/test/n8n-contract/selfcheck", {
+  method: "POST",
+}), {
+  N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
+  N8N_SHARED_SECRET: "unit-n8n-secret",
+});
+assert.equal(rejectedN8nSelfcheck.status, 401);
+const n8nSelfcheckCalls = [];
+globalThis.fetch = async (url, options) => {
+  n8nSelfcheckCalls.push({
+    url,
+    hasSharedSecretHeader: options.headers["x-pline-v3-shared-secret"] === "unit-n8n-secret",
+  });
+  const body = JSON.parse(options.body);
+  return new Response(JSON.stringify({
+    request_id: body.request_id,
+    worker_request_id: body.worker_request_id,
+    canonicalRequestId: body.request_id,
+    domain: "memo",
+    operation: "memo_create",
+    tool_called: "memo_create",
+    status: "ready",
+    reply_text: "備忘錄可以處理。",
+  }), { status: 200, headers: { "content-type": "application/json" } });
+};
+const acceptedN8nSelfcheck = await handleN8nContractSelfcheck(new Request("https://worker.example.test/test/n8n-contract/selfcheck", {
+  method: "POST",
+  headers: { "x-pline-v3-shared-secret": "unit-n8n-secret" },
+}), {
+  N8N_WEBHOOK_URL: "https://n8n.example.test/webhook",
+  N8N_SHARED_SECRET: "unit-n8n-secret",
+});
+assert.equal(acceptedN8nSelfcheck.status, 200);
+const acceptedN8nSelfcheckBody = await acceptedN8nSelfcheck.json();
+assert.equal(acceptedN8nSelfcheckBody.status, "ok");
+assert.equal(acceptedN8nSelfcheckBody.request_id_preserved, true);
+assert.equal(acceptedN8nSelfcheckBody.domain, "memo");
+assert.equal(acceptedN8nSelfcheckBody.tool_called, "memo_create");
+assert.deepEqual(n8nSelfcheckCalls, [{
+  url: "https://n8n.example.test/webhook",
+  hasSharedSecretHeader: true,
+}]);
+globalThis.fetch = originalFetch;
 
 const ideaResult = validateN8nContract({
   request_id: "pline-v3-E1",
@@ -1710,6 +2329,9 @@ function createMemoryKv() {
     get: async (key) => store.get(key) || null,
     put: async (key, value) => {
       store.set(key, value);
+    },
+    delete: async (key) => {
+      store.delete(key);
     },
     list: async ({ prefix = "", limit = 100 } = {}) => ({
       keys: [...store.keys()]

@@ -18,6 +18,18 @@ Allowed sources for future secret setup:
 
 Never place real values in `.env.example`.
 
+## n8n Shared Secret Guard
+
+The `_03` production n8n webhook is guarded by Header Auth using header:
+
+```text
+x-pline-v3-shared-secret
+```
+
+The current n8n plan does not expose project variables or external secrets, so the Header Auth credential is the primary shared-secret target for workflow `kcMcBQos5cxsnWU1`. The Worker stores the matching value only as Cloudflare secret `N8N_SHARED_SECRET`.
+
+Normalize Input may compare `$vars.N8N_SHARED_SECRET` when available in a future n8n plan, but production acceptance must already be enforced before workflow execution by Webhook Header Auth. No secret value is stored in repo files or evidence.
+
 ## Environment Isolation
 
 All future resources must be dedicated to `_03`:
@@ -147,7 +159,49 @@ Future monitor implementation must:
 
 ## Out-of-Scope Features
 
-Do not add Google Calendar, accounting, email, attachments, multiple agents, FORMAL mode, real-time wake, WebSocket, complex queueing, complex state machines, compatibility layers, or broad regex/if/else routing in the first version.
+Calendar operations are allowed only inside the Memo/Calendar Basic CRUD Gate's fixed TEST `行事曆` boundary. Accounting, email, attachments, multiple agents, FORMAL mode, real-time wake, WebSocket, complex queueing, complex state machines, compatibility layers, Google Tasks, and broad regex/if/else routing remain out of scope.
+
+## Memo / Calendar Basic CRUD Guard
+
+The Memo/Calendar Basic CRUD Gate adds two fixed LINE prefixes:
+
+- `備忘錄`
+- `行事曆`
+
+The prefix check is deterministic after trim and must not use AI route guessing, broad regex, or large fixed phrase lists.
+
+Memo security:
+
+- Allowed actions are `memo_create`, `memo_update`, `memo_delete`, and `memo_search`.
+- Memo storage is limited to `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`.
+- Memo tooling must not accept arbitrary shell commands, arbitrary paths, arbitrary filenames, or scans outside the fixed `_03` Dropbox directory.
+- Memo delete requires confirmation.
+- Memo update requires exactly one match; zero or multiple matches require follow-up or candidate confirmation.
+
+Calendar security:
+
+- Allowed actions are `calendar_create`, `calendar_update`, `calendar_delete`, and `calendar_search`.
+- Calendar operations are limited to the authorized TEST Calendar boundary.
+- Do not operate non-TEST calendars or private official events.
+- Do not connect Google Tasks in this Gate.
+- Do not expose Google Calendar event IDs in LINE replies or evidence summaries.
+- Calendar delete requires confirmation.
+- Calendar update requires exactly one match unless the user confirms from a safe candidate summary.
+- Broad recurring-event changes require confirmation.
+
+Confirmation security:
+
+- Confirmation state must be scoped to the same actor fingerprint.
+- Confirmation state must be short-lived.
+- Confirmation state must not store raw LINE User ID.
+- Each confirmation must execute exactly once.
+- Expired, mismatched, duplicate, or ambiguous confirmations must fail safely.
+
+Natural reply security:
+
+- LINE replies must not expose n8n, Worker, JSON, Dropbox, tool names, intent names, event IDs, Google event IDs, local paths, secrets, raw LINE User IDs, full payloads, or internal task identifiers.
+- Replies must not claim success until the action actually completes.
+- Fast memo/calendar tasks should not emit a fixed processing ACK; webhook HTTP `200` remains the delivery acknowledgement.
 
 ## TEST Result: Natural Final Without Visible ACK
 
@@ -242,3 +296,11 @@ With OA Chat off, LINE handles read state automatically. Worker records `line_ma
 - Approval codes are non-secret operational tokens and are mapped to task IDs in runtime KV with the same test evidence TTL.
 - Browser and Computer Use host surfaces are reported unavailable from the launchd adapter; unavailable host tools do not unlock broader permissions.
 - Runtime result files, Gateway live outputs, Wrangler local state, logs, and Dropbox idea JSON remain ignored by Git.
+## Memo/Calendar CRUD TEST Boundary - 2026-07-18
+
+- CRUD routing is deterministic by first token only: `備忘錄` or `行事曆`.
+- Worker stores no raw LINE User ID, secret, OAuth token, or full webhook payload for CRUD tasks.
+- Memo CRUD is limited to `memo-*.json` in `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`.
+- Calendar CRUD currently uses only a local `_03` TEST Calendar adapter at `runtime/google-calendar-test/events.json`.
+- Delete and ambiguous operations require actor-fingerprint scoped confirmation with short TTL.
+- n8n production now rejects missing and dummy shared-secret headers without returning a normal contract, but real Worker-origin pass remains blocked until n8n has an expected `N8N_SHARED_SECRET` variable/credential aligned with Worker. Do not mark the Memo/Calendar CRUD Gate PASS until no-header reject, dummy reject, and real Worker pass are all proven without exposing the secret value.

@@ -5,7 +5,22 @@
 - Name: `菲比 LINE 智能助理_03`
 - Root: `/Users/phoebe/Documents/菲比 LINE 智能助理_03`
 - Mode: clean-room TEST baseline
-- Current stage: N8N phase-aware codex reply contract
+- Current stage: TEST Memo/Calendar Basic CRUD Gate in progress
+
+## FIX: N8N Shared Secret Alignment
+
+- Date: 2026-07-18
+- Result: `_03` Worker and n8n production shared-secret alignment PASS.
+- Cloudflare Worker target: `pline-v3-test-line-gateway`.
+- n8n workflow target: `kcMcBQos5cxsnWU1`.
+- Secret names only: Worker `N8N_SHARED_SECRET`; n8n Header Auth credential for `x-pline-v3-shared-secret`.
+- Production webhook path: `/webhook/pline-v3-test-ai-agent`.
+- n8n variables/external secrets were unavailable on the current plan, so Webhook Header Auth credential is the primary guard and Normalize Input keeps `$vars.N8N_SHARED_SECRET` as optional compare when available.
+- Worker deployed version: `62655f93-ca5d-4ace-a67e-36ddf47709a0`.
+- Worker-origin protected n8n selfcheck: PASS, `request_id_preserved=true`, memo contract PASS.
+- Direct no-header and dummy-header n8n probes: rejected with HTTP `403`.
+- Direct real-secret memo/calendar contract probes: PASS.
+- Evidence: `FIX_EVIDENCE_N8N_SHARED_SECRET_ALIGNMENT.md`.
 
 ## Scope Confirmation
 
@@ -14,12 +29,66 @@
 - OLD_PROJECT_ACCESS: prohibited
 - CWD_CONFIRMED: yes
 
+## Daily Closeout: 2026-07-19
+
+- Closeout scope: `菲比 LINE 智能助理_03` only.
+- Active branch at closeout: `gate/codex-default-delegation`.
+- Today's main gate: `PLINE03 MEMO AND CALENDAR BASIC CRUD PASS`.
+- Today's work can be closed out as a workday checkpoint, but the full Memo/Calendar CRUD Gate is **not PASS**.
+- Latest fresh live memo marker before stop: `M4401-20260719082850`.
+- Memo A1 create: PASS in the latest fresh live run.
+- Memo A2 search: PASS in the latest fresh live run.
+- Memo A3 update: PASS in the latest fresh live run.
+- Memo A4 search after update: PASS in the latest fresh live run.
+- Memo A5 delete request with confirmation requirement: PASS in the latest fresh live run.
+- Memo A6 plain confirmation after delete request: BLOCKED/INCOMPLETE. The confirmation message was sent and TEST was waiting for the original delete task terminal state when the user stopped the run; no fresh live PASS or FAILED conclusion was recorded.
+- Memo A7 post-delete search: NOT_RUN because A6 did not reach a terminal fresh-live conclusion.
+- Memo A8 idempotency/replay check: NOT_RUN because A6 did not reach a terminal fresh-live conclusion.
+- Calendar CRUD: NOT_RUN in the latest live sequence because Memo A6 did not complete.
+- Regression after Memo/Calendar CRUD: NOT_RUN for this gate because the live sequence stopped before Calendar and final regression.
+- Latest Worker deployed version from today's FIX evidence: `294d56fa-f925-4db1-9f79-a10d4e9c4382`.
+- Worker `/health` exposes `crud_confirmation_handler.version = post-check-requeue-v2`.
+- M4301 and earlier confirmation repairs were recorded as bug recoveries only; they must not be counted as fresh live A6 PASS.
+- LINE webhook HTTP `200` behavior remains part of the preserved Worker path; invalid-signature regression returned HTTP `401` in FIX validation.
+- LINE visible fixed engineering ACK remains removed; user-visible replies must not expose `_03`, `TEST`, Worker, n8n, JSON, Codex internals, local paths, secrets, task ids, or raw identifiers.
+- Clean-room status: no `_02`, old project, old User ID, old secrets, old logs, or full payload data were used for closeout.
+- Safety note: Google Calendar external CRUD was not proven today; do not claim Google Calendar PASS.
+- Next fixed category: `PLine｜TEST｜測試與驗收`.
+- Next exact test to continue: rerun a fresh Memo A1-A8 sequence or resume by sending a new fresh delete-confirmation path, with special focus on Memo A6 plain `確認` evidence after `crud_confirmation_check_started`; only after A6 PASS should TEST proceed to Calendar CRUD.
+
+## FIX: Memo Confirmation Post-Check Live Path
+
+- Date: 2026-07-19
+- Scope: `_03` TEST-only Worker/RUNTIME_KV; no old project, `_02`, old workflow, old logs, old secret store, raw LINE User ID, or full payload used.
+- Root issue: fresh M4301 confirmation reached `crud_confirmation_check_started` but no post-check stage, requeue, or reply-completed stage appeared; the deployed `/health` response did not expose a confirmation-handler bundle marker, so live evidence could not distinguish bundle mismatch from a handler exception/early return.
+- Repair: Worker now exposes `crud_confirmation_handler.version = post-check-requeue-v2` in `/health`, lists expected post-check stages, and includes protected `/test/crud-confirmation/selfcheck` for no-secret live-path verification without LINE push or n8n.
+- Worker deployed version: `294d56fa-f925-4db1-9f79-a10d4e9c4382`.
+- M4301 recovery: original delete task `memo-d95411aaa9c1b8e90264e71e` was requeued as confirmed, monitor completed it, pending queue drained to `[]`, final state is `completed`, and confirmation record is `used`.
+- Evidence: `FIX_EVIDENCE_MEMO_CONFIRMATION_POST_CHECK.md`.
+
 ## Objective
 
 Build the smallest dual-path LINE loop:
 
 - Path A: receive one LINE message, classify it as `idea_create`, save one sentence, and reply to LINE.
 - Path B: receive one LINE message, classify it as `codex_task`, let the local monitor create `codex-smoke.txt`, and send a final LINE reply.
+
+## Memo/Calendar Basic CRUD Gate
+
+- Gate marker: `PLINE03 MEMO AND CALENDAR BASIC CRUD PASS`
+- Stage type: DOC design only.
+- Fixed LINE entry prefixes after trim:
+  - `備忘錄` -> memo route
+  - `行事曆` -> calendar route
+- Prefix routing is deterministic and safety-only. Natural-language understanding after the first word belongs to n8n AI Agent.
+- Memo actions: `memo_create`, `memo_update`, `memo_delete`, `memo_search`.
+- Memo storage boundary: `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`.
+- Calendar actions: `calendar_create`, `calendar_update`, `calendar_delete`, `calendar_search`.
+- Calendar boundary: current authorized TEST Google Calendar only; no Google Tasks.
+- Confirmation required for memo delete, calendar delete, multi-candidate update, broad recurring-event change, and any target that AI cannot identify uniquely.
+- Confirmation state is bound to the same actor fingerprint, short-lived, does not store raw LINE User ID, and executes exactly once.
+- LINE replies must be Traditional Chinese, natural, 1-3 sentences, with only a small amount of emoji when suitable.
+- LINE replies must state only real completed actions and must not mention n8n, Worker, JSON, Dropbox, tool, intent, event ID, Google event ID, local path, secrets, raw LINE User ID, full payload, or internal task identifiers.
 
 ## Completion Markers
 
@@ -934,6 +1003,23 @@ Status: N8N production synthetic PASS; TEST live validation required.
 
 Next: TEST sends fresh live LINE idea_create markers such as T3101/T3102 and confirms final LINE text is natural/content-aware while Dropbox JSON and final delivery remain PASS.
 
+## N8N Memo / Calendar Basic CRUD Contract - 2026-07-18
+
+Status: N8N stage PASS; production workflow published and self-checked.
+
+- Local workflow artifact `N8N_WORKFLOW_PLINE_V3_TEST_AI_AGENT.json` now defines `domain=memo|calendar` CRUD contract, confirmation object fields, safe reply fields, request id preservation, and TEST Calendar boundary.
+- Local synthetic contract tests passed for memo create/search/update/delete-confirm, calendar create/search/update/delete-confirm, unsupported domain, request id preservation, and safe reply text.
+- API/REST update was not available without API key, so the logged-in n8n UI was used.
+- `Actions > Import from file...` appended duplicate nodes and was immediately undone; the final update was made by editing existing nodes only.
+- n8n production workflow `kcMcBQos5cxsnWU1` was published with version label `N8N memo calendar CRUD pronoun guard`; UI status returned `Published`.
+- Production self-check on `/webhook/pline-v3-test-ai-agent` returned memo/calendar contract fields with request id preserved for `memo_create` and `calendar_delete`.
+- No-header direct probe did not return a normal contract response.
+- Google Calendar credential/TEST Calendar was not inspected; no OAuth token or event id was read.
+- No LINE live test was run; future LINE target must be exactly `菲比智能助理 測試_03`.
+- Evidence: `N8N_EVIDENCE_MEMO_CALENDAR_BASIC_CRUD_CONTRACT.md`.
+
+Next: Worker/FIX implements deterministic prefix router, memo backend, confirmation TTL/exactly-once, and TEST Calendar executor; TEST validates only after FIX wiring.
+
 ### TEST Result: T3101/T3102 Live Natural Finals
 
 Status: PASS.
@@ -1060,3 +1146,173 @@ Status: `READY_FOR_TEST`.
 - Evidence: `FIX_EVIDENCE_CODEX_DELEGATE_RECENT_FILE_CONTEXT.md`.
 
 Next: TEST can rerun C.
+
+## Memo/Calendar Basic CRUD Worker + Monitor - 2026-07-18
+
+Status: `BLOCKED_ON_N8N_LIVE_SECRET_GUARD`.
+
+- Worker deterministic prefix routing is implemented for `備忘錄` and `行事曆`.
+- Worker now enqueues `crud_task:v1` records and exposes `/test/crud-finalize` with task-token exactly-once final behavior.
+- Monitor durable runner now claims `crud_task:v1:pending:*`.
+- Memo executor writes only `_03` fixed Dropbox `memo-*.json` files with atomic write and schema validation.
+- Calendar executor is ready as a local `_03` TEST Calendar adapter at `runtime/google-calendar-test/events.json`; no Google OAuth token is stored.
+- Worker deployed version `e688338d-ae5d-4c25-b1d9-9ed387de522a`; monitor runner heartbeat is `ready`.
+- Local n8n artifact now rejects missing expected shared secret, missing header, and mismatched header.
+- Live production n8n dummy-header probe still returned a normal contract, so live shared-secret hardening is not yet proven.
+- Evidence: `FIX_EVIDENCE_MEMO_CALENDAR_BASIC_CRUD_WORKER_MONITOR.md`.
+
+Next: N8N must publish/verify the hardened shared-secret guard before TEST runs the full CRUD Gate.
+
+## N8N Strict Shared-Secret Guard Follow-up - 2026-07-18
+
+Status: `BLOCKED_ON_N8N_EXPECTED_SECRET_ALIGNMENT`.
+
+- Target workflow only: `kcMcBQos5cxsnWU1`.
+- Published n8n version: `N8N regex-free strict shared-secret guard`.
+- `Normalize Input` now fails closed when `$vars.N8N_SHARED_SECRET` is missing, when `x-pline-v3-shared-secret` is missing, or when the header value does not equal the expected secret.
+- Production no-header probe returned no normal contract.
+- Production dummy-header probe returned no normal contract.
+- Latest n8n execution reason after regex-free publish: `missing_expected_n8n_shared_secret`, not syntax error.
+- Worker live `/health` confirms `required_env.N8N_SHARED_SECRET=true` and target route `production /webhook/pline-v3-test-ai-agent`.
+- Real Worker-origin pass remains blocked until n8n expected secret variable/credential is aligned with the Worker secret without exposing the value.
+- Evidence: `N8N_EVIDENCE_SHARED_SECRET_HARDENING.md`.
+
+Next: FIX/N8N must set or align n8n `N8N_SHARED_SECRET` via a safe variable/credential path, then TEST reruns no-header reject, dummy reject, and real Worker-origin pass.
+
+## Memo Search Mapping and Pending Cleanup - 2026-07-19
+
+Status: `READY_FOR_TEST`.
+
+- Live Memo A2 failed because `memo_search` reached monitor claim but stayed non-terminal with a remaining `crud_task:v1:pending:*` key.
+- Root cause: Worker did not map n8n `search_query` into the queued CRUD task query, monitor CRUD tasks could inherit legacy smoke fallback content, and executor exceptions after claim could leave tasks stuck.
+- Worker now accepts `search_query` for CRUD query fields.
+- Monitor CRUD normalization no longer inherits smoke content/path, preserves `body_text`, catches executor exceptions into terminal failed results, and normalizes leading memo search verbs such as `搜尋`.
+- Existing A2 pending task was recovered to terminal state; remote `crud_task:v1:pending:*` count is `0`.
+- Worker deployed version: `c9e33b29-f7c6-4dd6-930c-040c5b7dc6cf`.
+- Monitor launchd runner is running and heartbeat is `ready`.
+- Validation passed: Worker tests, monitor tests, `/health`, invalid-signature `401`, remote pending queue empty, effective secret scan `0`.
+- Evidence: `FIX_EVIDENCE_MEMO_SEARCH_MAPPING_PENDING_CLEANUP.md`.
+
+Next: TEST can rerun Memo A2 search from a fresh Memo A1 create/search pair.
+
+## Memo Create Normalization and Memo Update Mapping - 2026-07-19
+
+Status: `READY_FOR_TEST`.
+
+- TEST confirmed fresh Memo A2 search PASS, then Memo A3 update failed because the task had empty query/new content previews and the memo content retained command syntax prefix `新增：`.
+- Worker and monitor now normalize `memo_create` content by stripping command prefixes such as `新增：`, `新增`, and `建立` when used as syntax.
+- Worker and monitor now parse memo update body text such as `把「原內容」改成「新內容」` into target query and new content.
+- Memo search still supports safe body-text fallback when explicit query is absent.
+- Worker deployed version: `b462fca6-fdeb-4942-9036-5af392a15387`.
+- Monitor launchd runner was reloaded and heartbeat is `ready`.
+- Validation passed: Worker tests, monitor tests, `/health`, invalid-signature `401`, remote CRUD pending queue empty.
+- Evidence: `FIX_EVIDENCE_MEMO_CREATE_UPDATE_MAPPING.md`.
+
+Next: TEST should rerun Memo CRUD from fresh A1 create, then A2 search and A3 update.
+
+## Memo Delete Target Matching and Confirmation - 2026-07-19
+
+Status: `READY_FOR_TEST`.
+
+- TEST confirmed A1 create, A2 search, A3 update, and A4 search PASS, but A5 delete returned `needs_clarification` instead of confirmation.
+- Root cause: `memo_delete` searched the full command text, so `刪除 <marker>` did not normalize to the marker/content target.
+- Worker and monitor now strip delete command prefixes such as `刪除`, `删除`, `刪掉`, and `移除` for memo delete query matching.
+- Exactly one delete match now returns terminal `needs_confirmation`, creates actor-scoped short-TTL confirmation state, and does not delete immediately.
+- Zero/multiple matches still return terminal clarification.
+- Worker deployed version: `e5a8e2f9-9d7b-4391-9dd7-0caf709e082e`.
+- Monitor launchd runner was reloaded and heartbeat is `ready`.
+- Validation passed: Worker tests, monitor tests, `/health`, invalid-signature `401`, remote CRUD pending queue empty.
+- Evidence: `FIX_EVIDENCE_MEMO_DELETE_CONFIRMATION.md`.
+
+Next: TEST can rerun Memo CRUD from fresh A1; fresh full rerun is preferred before A5 confirmation.
+
+## Memo Delete Confirmation Execution - 2026-07-19
+
+Status: `READY_FOR_TEST`.
+
+- TEST confirmed A5 delete request correctly asked for confirmation, but A6 confirmation left the delete task `confirmed=true/status=queued` without a pending index, so monitor could not execute.
+- Worker confirmation acceptance now requeues the original task, writes the pending index, changes old final state to `confirmation_accepted`, and records `crud_confirmation_requeued`.
+- Repeated confirmation does not requeue again.
+- Monitor confirmed delete path was covered by tests and removes only the unique `_03` memo JSON target.
+- Known A6 task was safely recovered after deploy; task/result/final are `completed`, pending key is absent, and runner drained one task.
+- Worker deployed version: `edb6529f-2fec-4c1a-81ee-8bc878eb3009`.
+- Monitor launchd runner was reloaded and heartbeat is `ready`.
+- Evidence: `FIX_EVIDENCE_MEMO_DELETE_CONFIRMATION_EXECUTION.md`.
+
+Next: TEST can rerun Memo CRUD from fresh A1 or recheck A6 evidence; fresh full rerun is preferred.
+
+## Memo Confirmation Handler Path - 2026-07-19
+
+Status: `READY_FOR_TEST`.
+
+- TEST fresh M3801 A6 confirmation reached line/signature/admin/idempotency, but `crud_confirmation_reply_completed` did not appear.
+- Original delete task was already `confirmed=true/status=queued`, yet pending index was absent and confirmation record stayed pending.
+- Worker now handles CRUD confirmation before Codex approval and before n8n routing.
+- Confirmation text accepts safe plain variants such as `確認。` and `確認！`.
+- Valid confirmation writes pending index, marks final state `confirmation_accepted`, consumes the confirmation, and records `crud_confirmation_requeued`.
+- Known M3801 delete task was recovered to `completed`; pending queue is empty.
+- Worker deployed version: `1208b460-c0eb-45dd-bbb5-a8939ced78de`.
+- Evidence: `FIX_EVIDENCE_MEMO_CONFIRMATION_HANDLER_PATH.md`.
+
+Next: TEST can rerun fresh Memo A1-A6.
+
+## Memo Confirmation Fresh Path - 2026-07-19
+
+Status: `READY_FOR_TEST`.
+
+- TEST fresh M3901 A6 still reached line/signature/admin/idempotency but did not emit `crud_confirmation_requeued` or `crud_confirmation_reply_completed`.
+- Worker now persists an awaited `crud_confirmation_check_started` stage before actor-scoped confirmation lookup and records no-pending/requeued/reply-completed outcomes with no-secret fields.
+- Plain confirmation text is handled before n8n routing; safe variants such as `確認。` are accepted.
+- M3901 was safely recovered: the confirmed queued delete task was requeued, monitor completed it, final push evidence is present, and all pending queues are empty.
+- Worker deployed version: `4951b808-48a6-4317-a6f3-4d4055ddcce8`.
+- Monitor launchd runner remained `running`; heartbeat is `ready`.
+- Validation passed: Worker tests, monitor tests, `/health`, invalid-signature `401`, remote pending queues empty, secret scan effective hit count `0`.
+- Evidence: `FIX_EVIDENCE_MEMO_CONFIRMATION_FRESH_PATH.md`.
+
+Next: TEST can rerun fresh Memo A6 or a fresh Memo A1-A6 sequence.
+
+## Memo Update Natural Parser - 2026-07-19
+
+Status: `READY_FOR_TEST`.
+
+- TEST fresh M4001 A3 failed because `memo_update` treated `把 <marker> 的內容改成 <new text>` as the full query and could not match the existing memo marker.
+- Worker and monitor now parse natural unquoted update forms into `query=<marker>` and `new_content=<new text>`.
+- Supported forms include `備忘錄 把 <marker> 的內容改成 <new text>`, `修改備忘錄：把 <marker> 的內容改成 <new text>`, and `把 <marker> 的備忘錄改成 <new text>`.
+- Broad n8n query text no longer overrides a successful natural update parse.
+- Worker deployed version: `d0084e7a-e209-4eb7-86ca-76e15222cec9`.
+- Monitor launchd runner was reloaded and heartbeat is `ready`.
+- Validation passed: Worker tests, monitor tests, `/health`, invalid-signature `401`, remote pending queues empty, secret scan effective hit count `0`.
+- Evidence: `FIX_EVIDENCE_MEMO_UPDATE_NATURAL_PARSER.md`.
+
+Next: TEST should rerun fresh Memo A1-A8.
+
+## Memo Update Marker Searchability - 2026-07-19
+
+Status: `READY_FOR_TEST`.
+
+- TEST fresh M4101 A3 completed with parsed `query=<marker>` and updated content, but A4 search by the original marker returned no memo.
+- Root cause: memo update replaced `memo.content`, while search matched only current content; the original marker was dropped from searchable state.
+- Monitor memo JSON now includes safe `search_keys`.
+- `memo_create` seeds marker search keys from content; `memo_update` preserves the original target marker/query in `search_keys`.
+- Search remains narrow: current content contains query or exact search key match; no broad fuzzy search was added.
+- Worker deploy not required; current Worker version remains `d0084e7a-e209-4eb7-86ca-76e15222cec9`.
+- Monitor launchd runner was reloaded and heartbeat is `ready`.
+- Validation passed: Worker tests, monitor tests, `/health`, invalid-signature `401`, remote pending queues empty, secret scan effective hit count `0`.
+- Evidence: `FIX_EVIDENCE_MEMO_UPDATE_MARKER_SEARCHABILITY.md`.
+
+Next: TEST should rerun fresh Memo A1-A8.
+
+## Memo Confirmation Post-Check Requeue - 2026-07-19
+
+Status: `READY_FOR_TEST`.
+
+- TEST fresh M4201 A6 reached `crud_confirmation_check_started` but did not emit `crud_confirmation_requeued` or `crud_confirmation_reply_completed`.
+- Worker now emits no-secret durable stages for each post-check branch and failure point after confirmation lookup.
+- Valid confirmation writes task/final/confirmation state before writing the pending index, avoiding a race where monitor completion could be overwritten by `confirmation_accepted`.
+- KV writes in the valid confirmation path now use a small retry wrapper.
+- M4201 was safely recovered after deploy: task/result/final are `completed`, confirmation is `used`, and remote pending queues are empty.
+- Worker deployed version: `3c8acdcc-83af-459b-b701-695e100c574a`.
+- Validation passed: Worker tests, monitor tests, `/health`, invalid-signature `401`, remote pending queues empty, secret scan effective hit count `0`.
+- Evidence: `FIX_EVIDENCE_MEMO_CONFIRMATION_POST_CHECK_REQUEUE.md`.
+
+Next: TEST should rerun fresh Memo A1-A8.

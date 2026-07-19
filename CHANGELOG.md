@@ -1,7 +1,33 @@
 # CHANGELOG
 
+## 2026-07-19
+
+- Performed daily closeout for `菲比 LINE 智能助理_03` on branch `gate/codex-default-delegation`.
+- Recorded that the Memo/Calendar Basic CRUD Gate is not PASS: latest fresh live memo run reached M4401 A6 confirmation wait, but the run was stopped before a terminal fresh-live A6 result.
+- Confirmed latest fresh live Memo status for closeout: A1 create PASS, A2 search PASS, A3 update PASS, A4 search-after-update PASS, A5 delete-needs-confirmation PASS, A6 BLOCKED/INCOMPLETE, A7/A8 NOT_RUN.
+- Recorded Calendar CRUD and final regression as NOT_RUN because the gate stopped before Memo A6 terminal evidence.
+- Preserved next handoff as `PLine｜TEST｜測試與驗收`, starting from fresh Memo A6 confirmation verification before Calendar CRUD.
+- Added `_03` Worker `/health` confirmation handler marker `post-check-requeue-v2` and post-check stage inventory for live bundle attribution.
+- Added protected TEST-only `/test/crud-confirmation/selfcheck` to exercise the CRUD confirmation handler without LINE push or n8n.
+- Kept confirmation pending-index write last and preserved A1-A5 Memo CRUD behavior.
+- Deployed Worker version `294d56fa-f925-4db1-9f79-a10d4e9c4382`.
+- Recovered M4301 delete confirmation as a bug recovery: task completed, confirmation record became `used`, and remote pending queue drained to empty.
+- Added no-secret evidence file `FIX_EVIDENCE_MEMO_CONFIRMATION_POST_CHECK.md`.
+
 ## 2026-07-18
 
+- Aligned `_03` TEST `N8N_SHARED_SECRET` by generating a new shared secret and setting it to Cloudflare Worker `pline-v3-test-line-gateway` plus a new n8n Header Auth credential on workflow `kcMcBQos5cxsnWU1`.
+- Published n8n versions `PLine03 shared-secret header auth alignment` and `PLine03 header-auth primary guard`.
+- Updated Normalize Input guard so Webhook Header Auth is the primary production guard while `$vars.N8N_SHARED_SECRET` remains an optional compare when n8n variables are available.
+- Added protected Worker endpoint `/test/n8n-contract/selfcheck` for no-secret Worker-origin n8n contract verification.
+- Deployed Worker version `62655f93-ca5d-4ace-a67e-36ddf47709a0`.
+- Verified no-header and dummy n8n requests reject, Worker-origin request preserves `request_id`, and memo/calendar contracts still return normal no-secret responses.
+- Added DOC-only design for `PLINE03 MEMO AND CALENDAR BASIC CRUD PASS`.
+- Defined fixed LINE prefixes `備忘錄` and `行事曆` with deterministic first-word routing.
+- Documented memo actions `memo_create`, `memo_update`, `memo_delete`, and `memo_search`.
+- Documented calendar actions `calendar_create`, `calendar_update`, `calendar_delete`, and `calendar_search`.
+- Added confirmation, actor-fingerprint, exactly-once, natural reply, and no-secret/no-raw-ID boundaries for the Memo/Calendar Basic CRUD Gate.
+- Kept this update documentation-only; no n8n, Cloudflare, LINE, Google Calendar, Dropbox file, Git commit, or Git push operation was performed.
 - Created clean-room document baseline for `菲比 LINE 智能助理_03`.
 - Defined the minimal dual-path scope.
 - Added initial architecture, test plan, security boundary, environment example, and ignore rules.
@@ -367,6 +393,26 @@
 - Verified four production synthetic idea probes returned distinct content-aware `reply_source=ai_generated` replies with request id preserved and `saved_record=1`.
 - Added evidence file `N8N_EVIDENCE_IDEA_CREATE_NATURAL_REPLY.md`.
 - Next handoff: TEST reruns live LINE idea_create markers T3101/T3102 and confirms natural final text plus Dropbox/final PASS.
+
+## 2026-07-18 - N8N Memo / Calendar Basic CRUD Contract Draft
+
+- Updated local workflow artifact with memo/calendar CRUD domain contract and confirmation object schema.
+- Added TEST Calendar-only boundary, Asia/Taipei timezone, and no event-id/no-secret reply rules.
+- Verified local synthetic contract cases for memo create/search/update/delete-confirm, calendar create/search/update/delete-confirm, unsupported domain, request id preservation, and safe reply text.
+- n8n production publish blocked because the available UI control could not reliably replace the long `Structured Output` CodeMirror node content.
+- Did not publish a partial n8n draft and did not run LINE live tests.
+- Added evidence file `N8N_EVIDENCE_MEMO_CALENDAR_BASIC_CRUD_CONTRACT.md`.
+
+### Follow-up
+
+- Retried the publish path after orchestrator correction using n8n API/REST first: official API returned HTTP `401` requiring an API key, and REST workflow path returned HTTP `401 Unauthorized`.
+- Shortened the local `Structured Output` contract to make browser/UI paste safer and repaired Normalize marker escaping.
+- Re-ran local JSON parse and memo/calendar synthetic contract tests: PASS.
+- After user restored n8n login, confirmed workflow `kcMcBQos5cxsnWU1` at the correct browser URL.
+- Tried n8n `Import from file`; it appended duplicate nodes instead of replacing the workflow, so the import was undone and not published.
+- Updated existing nodes directly and published version `N8N memo calendar CRUD pronoun guard`; UI status returned `Published`.
+- Production self-check returned memo/calendar contract fields with request id preserved for `memo_create` and `calendar_delete`; no LINE live test was run.
+
 ## 2026-07-18 - Codex Default Delegation Gateway
 
 - Added a monitor-side `CodexGateway` and `CodexExecHostAdapter` using official `codex exec --json` JSONL events.
@@ -425,3 +471,69 @@
 - Fixed live runner context read by passing the same KV adapter from `claimOnce()` into `runTask()`.
 - Added invalid-context reason split: existing malformed latest-created-file context now fails as `last_created_file_context_invalid`.
 - Verified remote B context key points to the current T3401 runtime text file and content hash.
+
+## 2026-07-18 - Memo/Calendar Basic CRUD Worker + Monitor
+
+- Added deterministic Worker prefix routing for `備忘錄` and `行事曆`.
+- Added Worker CRUD contract validation, `crud_task:v1` enqueue, confirmation reply handling, and `/test/crud-finalize`.
+- Added monitor support for `crud_task`, including memo CRUD in the fixed `_03` Dropbox directory and a local TEST Calendar adapter.
+- Added unit coverage for prefix routing, CRUD enqueue/finalize exactly-once, memo schema/write/search, calendar TEST adapter, and CRUD queue claim.
+- Deployed Worker version `e688338d-ae5d-4c25-b1d9-9ed387de522a` and reloaded monitor runner.
+- Updated local n8n artifact to reject missing expected shared secret; live production dummy-header probe still needs N8N-side correction.
+
+## 2026-07-18 - N8N Strict Shared-Secret Guard Follow-up
+
+- Published workflow `kcMcBQos5cxsnWU1` version `N8N regex-free strict shared-secret guard`.
+- Replaced Normalize Input guard with a regex-free strict fail-closed version.
+- Production no-header and dummy-header probes no longer return a normal contract.
+- Latest n8n execution reason is `missing_expected_n8n_shared_secret`, so real Worker-origin pass is blocked until n8n expected secret variable/credential is aligned with the Worker secret.
+- Worker `/health` confirms `N8N_SHARED_SECRET=true` and production target `/webhook/pline-v3-test-ai-agent`.
+
+## 2026-07-19
+
+- Repaired memo_search task mapping by accepting n8n `search_query` into Worker CRUD task `body.query`.
+- Removed legacy smoke-test fallback content/path from monitor CRUD task normalization.
+- Preserved CRUD `body_text` through monitor normalization.
+- Added monitor executor exception handling so claimed CRUD tasks become terminal failed results with finalizer/pending cleanup instead of staying claimed.
+- Added memo search leading-verb normalization for terms such as `搜尋`.
+- Recovered the live A2 memo_search pending task to terminal state and confirmed remote CRUD pending queue is empty.
+- Deployed Worker version `c9e33b29-f7c6-4dd6-930c-040c5b7dc6cf` and reloaded the monitor runner.
+- Added no-secret evidence file `FIX_EVIDENCE_MEMO_SEARCH_MAPPING_PENDING_CLEANUP.md`.
+- Repaired memo_create normalization so command prefixes such as `新增：` and `建立` are not stored as memo content.
+- Repaired memo_update mapping so quoted body text like `把「原內容」改成「新內容」` produces target query and new content even when n8n omits explicit fields.
+- Added Worker and monitor focused tests for normalized create, quoted update, successful update, no-match clarification, search regression, and pending cleanup.
+- Deployed Worker version `b462fca6-fdeb-4942-9036-5af392a15387` and reloaded the monitor runner.
+- Added no-secret evidence file `FIX_EVIDENCE_MEMO_CREATE_UPDATE_MAPPING.md`.
+- Repaired memo_delete target matching so command text such as `刪除 M3601...` normalizes to the actual target marker/content.
+- Added focused tests for delete mapping, unique delete confirmation generation, actor-scoped confirmation state, safe confirmation records, and pending cleanup.
+- Deployed Worker version `e5a8e2f9-9d7b-4391-9dd7-0caf709e082e` and reloaded the monitor runner.
+- Added no-secret evidence file `FIX_EVIDENCE_MEMO_DELETE_CONFIRMATION.md`.
+- Repaired memo delete confirmation execution: valid confirmation now requeues the original task, clears the old confirmation-final lock by writing `confirmation_accepted`, and records `crud_confirmation_requeued`.
+- Added focused tests for actor-scoped confirmation lookup, exactly-once repeated confirmation, confirmed delete execution, pending cleanup, and A5 no-direct-delete regression.
+- Recovered the known A6 confirmed queued delete task; it completed and the pending index was removed.
+- Deployed Worker version `edb6529f-2fec-4c1a-81ee-8bc878eb3009` and reloaded the monitor runner.
+- Added no-secret evidence file `FIX_EVIDENCE_MEMO_DELETE_CONFIRMATION_EXECUTION.md`.
+- Repaired confirmation handler path so plain CRUD confirmation replies are handled before Codex approval and before n8n routing.
+- Accepted safe `確認` variants with punctuation and delete wording.
+- Added webhook-level confirmation coverage proving no-prefix `確認。` writes `crud_confirmation_reply_completed` and does not start n8n.
+- Recovered the known M3801 delete task to completed.
+- Deployed Worker version `1208b460-c0eb-45dd-bbb5-a8939ced78de`.
+- Added no-secret evidence file `FIX_EVIDENCE_MEMO_CONFIRMATION_HANDLER_PATH.md`.
+- Strengthened the fresh CRUD confirmation path with awaited no-secret check/no-pending/requeued/reply-completed evidence stages.
+- Recovered M3901 confirmed queued delete task to completed; monitor processed the restored pending index and all remote pending queues are empty.
+- Deployed Worker version `4951b808-48a6-4317-a6f3-4d4055ddcce8`.
+- Added no-secret evidence file `FIX_EVIDENCE_MEMO_CONFIRMATION_FRESH_PATH.md`.
+- Repaired memo_update natural parser for unquoted forms such as `把 <marker> 的內容改成 <new text>`.
+- Worker and monitor now prefer parsed update query/new content over broad n8n query text when the body text is parseable.
+- Deployed Worker version `d0084e7a-e209-4eb7-86ca-76e15222cec9` and reloaded monitor runner.
+- Added no-secret evidence file `FIX_EVIDENCE_MEMO_UPDATE_NATURAL_PARSER.md`.
+- Repaired memo_update marker searchability by adding safe memo `search_keys` and preserving the target marker/query after content replacement.
+- Search now matches current memo content or exact preserved search keys without broad fuzzy matching.
+- Worker deploy was not required; monitor runner was reloaded.
+- Added no-secret evidence file `FIX_EVIDENCE_MEMO_UPDATE_MARKER_SEARCHABILITY.md`.
+- Repaired CRUD confirmation post-check requeue observability and write ordering.
+- Added no-secret stages for confirmation lookup, invalid/expired/missing branches, write failures, pending writes, and handler failures.
+- Valid confirmation now writes task/final/confirmation state before pending index to avoid monitor/final race.
+- Recovered M4201 delete confirmation to completed after deploy.
+- Deployed Worker version `3c8acdcc-83af-459b-b701-695e100c574a`.
+- Added no-secret evidence file `FIX_EVIDENCE_MEMO_CONFIRMATION_POST_CHECK_REQUEUE.md`.

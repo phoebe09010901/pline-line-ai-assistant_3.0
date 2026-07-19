@@ -7,6 +7,8 @@ import {
   DROPBOX_IDEA_DIR,
   CODEX_DELEGATE_ACTION,
   CODEX_LAST_CREATED_FILE_KEY,
+  CRUD_ACTION,
+  CRUD_TASK_PREFIX,
   FIXED_ACTION,
   IDEA_TASK_PREFIX,
   SAVE_IDEA_ACTION,
@@ -25,7 +27,9 @@ import {
   notifyIdeaFinalizer,
   runner,
   runTask,
+  runCrudTask,
   saveIdeaJson,
+  validateMemoJson,
   validateIdeaJson,
   writeRunnerHeartbeat,
 } from "../src/monitor.js";
@@ -51,8 +55,8 @@ const ready = await health({ CODEX_BIN: fakeCodex, PATH: "" });
 assert.equal(ready.status, "ready");
 assert.equal(ready.codex_bin.path, fakeCodex);
 assert.equal(ready.task_prefix, "codex_task:v1");
-assert.deepEqual(ready.supported_actions, ["codex_delegate", "create_smoke_file", "save_idea_json"]);
-assert.deepEqual(ready.pending_prefixes, ["codex_task:v1:pending:", "idea_json:v1:pending:"]);
+assert.deepEqual(ready.supported_actions, ["codex_delegate", "create_smoke_file", "save_idea_json", "crud_task"]);
+assert.deepEqual(ready.pending_prefixes, ["codex_task:v1:pending:", "idea_json:v1:pending:", "crud_task:v1:pending:"]);
 
 assert.deepEqual(normalizeTask({}), {
   task_id: "pline-v3-test-smoke",
@@ -73,6 +77,14 @@ assert.deepEqual(normalizeTask({}), {
   final_reply_text: "",
   line_user_ref: "",
   approval: null,
+  domain: "",
+  operation: "",
+  body_text: "",
+  body: null,
+  actor_fingerprint: "",
+  line_event_key: "",
+  confirmed: false,
+  confirmation_id: "",
 });
 
 assert.equal((await runTask({ action: "other" }, { CODEX_BIN: fakeCodex, PATH: "" })).reason, "unsupported_action");
@@ -703,6 +715,390 @@ const duplicateIdea = await saveIdeaJson({
 assert.equal(duplicateIdea.ok, true);
 assert.equal(duplicateIdea.status, "duplicate");
 assert.equal(duplicateIdea.file_name, savedIdea.file_name);
+
+const memoContent = `備忘錄 CRUD unit ${uniqueSuffix}`;
+const memoResult = await runCrudTask({
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_create",
+  body: { content: memoContent },
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"d".repeat(54)}${uniqueSuffix}`,
+  task_id: `memo-unit-${uniqueSuffix}`,
+  request_id: `pline-v3-memo-unit-${uniqueSuffix}`,
+});
+assert.equal(memoResult.ok, true);
+assert.equal(memoResult.status, "completed");
+assert.equal(memoResult.file_name.startsWith("memo-"), true);
+const memoJson = JSON.parse(await readFile(join(DROPBOX_IDEA_DIR, memoResult.file_name), "utf8"));
+assert.equal(validateMemoJson(memoJson).ok, true);
+assert.equal(JSON.stringify(memoJson).includes("U_SHOULD_NOT_STORE"), false);
+const memoSearchResult = await runCrudTask({
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_search",
+  body: { query: memoContent },
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"e".repeat(54)}${uniqueSuffix}`,
+  task_id: `memo-search-${uniqueSuffix}`,
+  request_id: `pline-v3-memo-search-${uniqueSuffix}`,
+});
+assert.equal(memoSearchResult.ok, true);
+assert.equal(memoSearchResult.status, "completed");
+assert.equal(memoSearchResult.reply_text.includes(memoContent), true);
+
+const prefixedMemoContent = `M3501 normalized memo ${uniqueSuffix}`;
+const prefixedMemoResult = await runCrudTask({
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_create",
+  body: { content: `新增：${prefixedMemoContent}` },
+  body_text: `新增：${prefixedMemoContent}`,
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"a".repeat(53)}1${uniqueSuffix}`,
+  task_id: `memo-prefixed-${uniqueSuffix}`,
+  request_id: `pline-v3-memo-prefixed-${uniqueSuffix}`,
+});
+assert.equal(prefixedMemoResult.ok, true);
+assert.equal(prefixedMemoResult.status, "completed");
+const prefixedMemoJson = JSON.parse(await readFile(join(DROPBOX_IDEA_DIR, prefixedMemoResult.file_name), "utf8"));
+assert.equal(prefixedMemoJson.content, prefixedMemoContent);
+assert.equal(prefixedMemoJson.content.includes("新增"), false);
+const prefixedMemoSearch = await runCrudTask({
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_search",
+  body: {},
+  body_text: `搜尋 ${prefixedMemoContent}`,
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"a".repeat(53)}2${uniqueSuffix}`,
+  task_id: `memo-prefixed-search-${uniqueSuffix}`,
+  request_id: `pline-v3-memo-prefixed-search-${uniqueSuffix}`,
+});
+assert.equal(prefixedMemoSearch.ok, true);
+assert.equal(prefixedMemoSearch.status, "completed");
+assert.equal(prefixedMemoSearch.reply_text.includes(prefixedMemoContent), true);
+
+const updatedMemoContent = `M3501 updated memo ${uniqueSuffix}`;
+const updateMemoResult = await runCrudTask({
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_update",
+  body: {},
+  body_text: `把「${prefixedMemoContent}」改成「${updatedMemoContent}」`,
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"a".repeat(53)}3${uniqueSuffix}`,
+  task_id: `memo-update-${uniqueSuffix}`,
+  request_id: `pline-v3-memo-update-${uniqueSuffix}`,
+});
+assert.equal(updateMemoResult.ok, true);
+assert.equal(updateMemoResult.status, "completed");
+assert.equal(updateMemoResult.reply_text, "備忘錄已更新好了。");
+const updatedMemoJson = JSON.parse(await readFile(join(DROPBOX_IDEA_DIR, prefixedMemoResult.file_name), "utf8"));
+assert.equal(updatedMemoJson.content, updatedMemoContent);
+assert.equal(JSON.stringify(updatedMemoJson).includes("U_SHOULD_NOT_STORE"), false);
+
+const naturalUpdateOriginal = `M4001-${uniqueSuffix} 我今天要喝 1500cc 的水`;
+const naturalUpdateContent = `我今天要喝 1800cc 的水 ${uniqueSuffix}`;
+const naturalUpdateCreate = await runCrudTask({
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_create",
+  body: { content: naturalUpdateOriginal },
+  body_text: `新增：${naturalUpdateOriginal}`,
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"a".repeat(53)}6${uniqueSuffix}`,
+  task_id: `memo-natural-update-create-${uniqueSuffix}`,
+  request_id: `pline-v3-memo-natural-update-create-${uniqueSuffix}`,
+});
+assert.equal(naturalUpdateCreate.ok, true);
+assert.equal(naturalUpdateCreate.status, "completed");
+const naturalUpdateResult = await runCrudTask({
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_update",
+  body: {},
+  body_text: `把 M4001-${uniqueSuffix} 的內容改成 ${naturalUpdateContent}`,
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"a".repeat(53)}7${uniqueSuffix}`,
+  task_id: `memo-natural-update-${uniqueSuffix}`,
+  request_id: `pline-v3-memo-natural-update-${uniqueSuffix}`,
+});
+assert.equal(naturalUpdateResult.ok, true);
+assert.equal(naturalUpdateResult.status, "completed");
+assert.equal(naturalUpdateResult.reply_text, "備忘錄已更新好了。");
+const naturalUpdateJson = JSON.parse(await readFile(join(DROPBOX_IDEA_DIR, naturalUpdateCreate.file_name), "utf8"));
+assert.equal(naturalUpdateJson.content, naturalUpdateContent);
+assert.equal(naturalUpdateJson.content.includes("把"), false);
+assert.equal(naturalUpdateJson.content.includes("的內容改成"), false);
+assert.equal(naturalUpdateJson.search_keys.includes(`M4001-${uniqueSuffix}`), true);
+const naturalUpdateSearch = await runCrudTask({
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_search",
+  body: {},
+  body_text: `搜尋 M4001-${uniqueSuffix}`,
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"a".repeat(53)}8${uniqueSuffix}`,
+  task_id: `memo-natural-update-search-${uniqueSuffix}`,
+  request_id: `pline-v3-memo-natural-update-search-${uniqueSuffix}`,
+});
+assert.equal(naturalUpdateSearch.ok, true);
+assert.equal(naturalUpdateSearch.status, "completed");
+assert.equal(naturalUpdateSearch.reply_text.includes("1800cc"), true);
+assert.equal(naturalUpdateSearch.reply_text.includes("1500cc"), false);
+assert.equal(naturalUpdateSearch.reply_text.includes("新增："), false);
+
+const deleteConfirmKv = createMemoryKv();
+const deleteConfirm = await runCrudTask({
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_delete",
+  body: {},
+  body_text: `刪除 ${updatedMemoContent}`,
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"a".repeat(53)}5${uniqueSuffix}`,
+  task_id: `memo-delete-confirm-${uniqueSuffix}`,
+  request_id: `pline-v3-memo-delete-confirm-${uniqueSuffix}`,
+}, {}, { kv: deleteConfirmKv });
+assert.equal(deleteConfirm.ok, true);
+assert.equal(deleteConfirm.status, "needs_confirmation");
+assert.equal(deleteConfirm.reply_text.includes("要刪除"), true);
+assert.equal(deleteConfirm.reply_text.includes("確認"), true);
+assert.match(deleteConfirm.confirmation_id, /^confirm-[a-f0-9]{16}$/);
+const confirmationRecord = JSON.parse(await deleteConfirmKv.get(`${CRUD_TASK_PREFIX}:confirmation:${deleteConfirm.confirmation_id}`));
+assert.equal(confirmationRecord.actor_fingerprint, "a".repeat(64));
+assert.equal(confirmationRecord.status, "pending");
+assert.equal(confirmationRecord.operation, "memo_delete");
+assert.equal(JSON.stringify(confirmationRecord).includes("U_SHOULD_NOT_STORE"), false);
+assert.equal(JSON.stringify(confirmationRecord).includes("/Users/"), false);
+assert.equal(JSON.stringify(confirmationRecord).includes("Dropbox"), false);
+assert.equal(await deleteConfirmKv.get(`${CRUD_TASK_PREFIX}:confirmation_actor:${"a".repeat(64)}`), deleteConfirm.confirmation_id);
+
+const noMatchUpdate = await runCrudTask({
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_update",
+  body: {},
+  body_text: `把「M3501 not found ${uniqueSuffix}」改成「不應該寫入」`,
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"a".repeat(53)}4${uniqueSuffix}`,
+  task_id: `memo-update-no-match-${uniqueSuffix}`,
+  request_id: `pline-v3-memo-update-no-match-${uniqueSuffix}`,
+});
+assert.equal(noMatchUpdate.ok, true);
+assert.equal(noMatchUpdate.status, "needs_clarification");
+assert.equal(noMatchUpdate.reason, "memo_target_not_found");
+
+const calendarResult = await runCrudTask({
+  action: CRUD_ACTION,
+  domain: "calendar",
+  operation: "calendar_create",
+  body: { title: `Calendar CRUD unit ${uniqueSuffix}`, start: "2026-07-18T18:00:00+08:00", end: "2026-07-18T18:30:00+08:00" },
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"f".repeat(54)}${uniqueSuffix}`,
+  task_id: `calendar-unit-${uniqueSuffix}`,
+  request_id: `pline-v3-calendar-unit-${uniqueSuffix}`,
+});
+assert.equal(calendarResult.ok, true);
+assert.equal(calendarResult.status, "completed");
+const calendarSearch = await runCrudTask({
+  action: CRUD_ACTION,
+  domain: "calendar",
+  operation: "calendar_search",
+  body: { query: `Calendar CRUD unit ${uniqueSuffix}` },
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"f".repeat(54)}${uniqueSuffix}`,
+  task_id: `calendar-search-${uniqueSuffix}`,
+  request_id: `pline-v3-calendar-search-${uniqueSuffix}`,
+});
+assert.equal(calendarSearch.ok, true);
+assert.equal(calendarSearch.reply_text.includes(`Calendar CRUD unit ${uniqueSuffix}`), true);
+
+const crudKv = createMemoryKv();
+await crudKv.put(`${CRUD_TASK_PREFIX}:task:memo-queue-${uniqueSuffix}`, JSON.stringify({
+  schema: "pline-v3-test-crud-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: `memo-queue-${uniqueSuffix}`,
+  task_type: "crud_task",
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_create",
+  body: { content: `queued memo ${uniqueSuffix}` },
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"a".repeat(54)}${uniqueSuffix}`,
+  request_id: `pline-v3-memo-queue-${uniqueSuffix}`,
+  marker: "T4002-20260718010102",
+  finalize_token: "test-finalize-token",
+  created_at: "2026-07-18T08:00:01.000Z",
+}));
+await crudKv.put(`${CRUD_TASK_PREFIX}:pending:memo-queue-${uniqueSuffix}`, `${CRUD_TASK_PREFIX}:task:memo-queue-${uniqueSuffix}`);
+const claimedCrud = await claimOnce({ kv: crudKv, env: { CODEX_BIN: fakeCodex, PATH: "", CRUD_FINALIZE_DISABLED: "1" } });
+assert.equal(claimedCrud.ok, true);
+assert.equal(claimedCrud.claimed, true);
+assert.equal(claimedCrud.action, CRUD_ACTION);
+const completedCrudTask = JSON.parse(await crudKv.get(`${CRUD_TASK_PREFIX}:task:memo-queue-${uniqueSuffix}`));
+assert.equal(completedCrudTask.status, "completed");
+assert.equal(await crudKv.get(`${CRUD_TASK_PREFIX}:pending:memo-queue-${uniqueSuffix}`), "");
+
+await crudKv.put(`${CRUD_TASK_PREFIX}:task:memo-search-queue-${uniqueSuffix}`, JSON.stringify({
+  schema: "pline-v3-test-crud-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: `memo-search-queue-${uniqueSuffix}`,
+  task_type: "crud_task",
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_search",
+  body: { search_query: `搜尋 ${memoContent}` },
+  body_text: `搜尋 ${memoContent}`,
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"b".repeat(54)}${uniqueSuffix}`,
+  request_id: `pline-v3-memo-search-queue-${uniqueSuffix}`,
+  marker: "T4004-20260719010101",
+  finalize_token: "test-finalize-token",
+  created_at: "2026-07-19T08:00:01.000Z",
+}));
+await crudKv.put(`${CRUD_TASK_PREFIX}:pending:memo-search-queue-${uniqueSuffix}`, `${CRUD_TASK_PREFIX}:task:memo-search-queue-${uniqueSuffix}`);
+const claimedCrudSearch = await claimOnce({ kv: crudKv, env: { CODEX_BIN: fakeCodex, PATH: "", CRUD_FINALIZE_DISABLED: "1" } });
+assert.equal(claimedCrudSearch.ok, true);
+assert.equal(claimedCrudSearch.claimed, true);
+assert.equal(claimedCrudSearch.action, CRUD_ACTION);
+const completedCrudSearchTask = JSON.parse(await crudKv.get(`${CRUD_TASK_PREFIX}:task:memo-search-queue-${uniqueSuffix}`));
+assert.equal(completedCrudSearchTask.status, "completed");
+assert.equal(completedCrudSearchTask.final_reply_text.includes(memoContent), true);
+assert.equal(JSON.stringify(completedCrudSearchTask).includes("Codex 任務測試成功"), false);
+assert.equal(await crudKv.get(`${CRUD_TASK_PREFIX}:pending:memo-search-queue-${uniqueSuffix}`), "");
+
+await crudKv.put(`${CRUD_TASK_PREFIX}:task:memo-update-queue-${uniqueSuffix}`, JSON.stringify({
+  schema: "pline-v3-test-crud-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: `memo-update-queue-${uniqueSuffix}`,
+  task_type: "crud_task",
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_update",
+  body: {},
+  body_text: `把「${updatedMemoContent}」改成「M3501 queue updated memo ${uniqueSuffix}」`,
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"b".repeat(53)}3${uniqueSuffix}`,
+  request_id: `pline-v3-memo-update-queue-${uniqueSuffix}`,
+  marker: "T4008-20260719010101",
+  finalize_token: "test-finalize-token",
+  created_at: "2026-07-19T08:00:03.000Z",
+}));
+await crudKv.put(`${CRUD_TASK_PREFIX}:pending:memo-update-queue-${uniqueSuffix}`, `${CRUD_TASK_PREFIX}:task:memo-update-queue-${uniqueSuffix}`);
+const claimedCrudUpdate = await claimOnce({ kv: crudKv, env: { CODEX_BIN: fakeCodex, PATH: "", CRUD_FINALIZE_DISABLED: "1" } });
+assert.equal(claimedCrudUpdate.ok, true);
+assert.equal(claimedCrudUpdate.claimed, true);
+const completedCrudUpdateTask = JSON.parse(await crudKv.get(`${CRUD_TASK_PREFIX}:task:memo-update-queue-${uniqueSuffix}`));
+assert.equal(completedCrudUpdateTask.status, "completed");
+assert.equal(completedCrudUpdateTask.final_reply_text, "備忘錄已更新好了。");
+assert.equal(await crudKv.get(`${CRUD_TASK_PREFIX}:pending:memo-update-queue-${uniqueSuffix}`), "");
+
+await crudKv.put(`${CRUD_TASK_PREFIX}:task:memo-delete-queue-${uniqueSuffix}`, JSON.stringify({
+  schema: "pline-v3-test-crud-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: `memo-delete-queue-${uniqueSuffix}`,
+  task_type: "crud_task",
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_delete",
+  body: {},
+  body_text: `刪除 M3501 queue updated memo ${uniqueSuffix}`,
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"b".repeat(53)}5${uniqueSuffix}`,
+  request_id: `pline-v3-memo-delete-queue-${uniqueSuffix}`,
+  marker: "T4011-20260719010101",
+  finalize_token: "test-finalize-token",
+  created_at: "2026-07-19T08:00:05.000Z",
+}));
+await crudKv.put(`${CRUD_TASK_PREFIX}:pending:memo-delete-queue-${uniqueSuffix}`, `${CRUD_TASK_PREFIX}:task:memo-delete-queue-${uniqueSuffix}`);
+const claimedCrudDelete = await claimOnce({ kv: crudKv, env: { CODEX_BIN: fakeCodex, PATH: "", CRUD_FINALIZE_DISABLED: "1" } });
+assert.equal(claimedCrudDelete.ok, true);
+assert.equal(claimedCrudDelete.claimed, true);
+const deleteTask = JSON.parse(await crudKv.get(`${CRUD_TASK_PREFIX}:task:memo-delete-queue-${uniqueSuffix}`));
+assert.equal(deleteTask.status, "needs_confirmation");
+assert.equal(deleteTask.final_reply_text.includes("要刪除"), true);
+assert.equal(deleteTask.final_reply_text.includes("確認"), true);
+assert.match(deleteTask.confirmation_id, /^confirm-[a-f0-9]{16}$/);
+assert.equal(await crudKv.get(`${CRUD_TASK_PREFIX}:pending:memo-delete-queue-${uniqueSuffix}`), "");
+const queuedConfirmation = JSON.parse(await crudKv.get(`${CRUD_TASK_PREFIX}:confirmation:${deleteTask.confirmation_id}`));
+assert.equal(queuedConfirmation.actor_fingerprint, "a".repeat(64));
+assert.equal(queuedConfirmation.operation, "memo_delete");
+assert.equal(JSON.stringify(queuedConfirmation).includes("/Users/"), false);
+
+await crudKv.put(`${CRUD_TASK_PREFIX}:task:memo-delete-queue-${uniqueSuffix}`, JSON.stringify({
+  ...deleteTask,
+  status: "queued",
+  confirmed: true,
+}));
+await crudKv.put(`${CRUD_TASK_PREFIX}:pending:memo-delete-queue-${uniqueSuffix}`, `${CRUD_TASK_PREFIX}:task:memo-delete-queue-${uniqueSuffix}`);
+const confirmedCrudDelete = await claimOnce({ kv: crudKv, env: { CODEX_BIN: fakeCodex, PATH: "", CRUD_FINALIZE_DISABLED: "1" } });
+assert.equal(confirmedCrudDelete.ok, true);
+assert.equal(confirmedCrudDelete.claimed, true);
+const completedDeleteTask = JSON.parse(await crudKv.get(`${CRUD_TASK_PREFIX}:task:memo-delete-queue-${uniqueSuffix}`));
+assert.equal(completedDeleteTask.status, "completed");
+assert.equal(completedDeleteTask.final_reply_text, "備忘錄已刪除了。");
+assert.equal(await crudKv.get(`${CRUD_TASK_PREFIX}:pending:memo-delete-queue-${uniqueSuffix}`), "");
+await assert.rejects(() => access(join(DROPBOX_IDEA_DIR, completedDeleteTask.file_name), constants.F_OK));
+
+await crudKv.put(`${CRUD_TASK_PREFIX}:task:memo-update-no-match-queue-${uniqueSuffix}`, JSON.stringify({
+  schema: "pline-v3-test-crud-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: `memo-update-no-match-queue-${uniqueSuffix}`,
+  task_type: "crud_task",
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_update",
+  body: {},
+  body_text: `把「M3501 missing queued ${uniqueSuffix}」改成「不應該寫入」`,
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"b".repeat(53)}4${uniqueSuffix}`,
+  request_id: `pline-v3-memo-update-no-match-queue-${uniqueSuffix}`,
+  marker: "T4009-20260719010101",
+  finalize_token: "test-finalize-token",
+  created_at: "2026-07-19T08:00:04.000Z",
+}));
+await crudKv.put(`${CRUD_TASK_PREFIX}:pending:memo-update-no-match-queue-${uniqueSuffix}`, `${CRUD_TASK_PREFIX}:task:memo-update-no-match-queue-${uniqueSuffix}`);
+const claimedCrudUpdateNoMatch = await claimOnce({ kv: crudKv, env: { CODEX_BIN: fakeCodex, PATH: "", CRUD_FINALIZE_DISABLED: "1" } });
+assert.equal(claimedCrudUpdateNoMatch.ok, true);
+assert.equal(claimedCrudUpdateNoMatch.claimed, true);
+const noMatchUpdateTask = JSON.parse(await crudKv.get(`${CRUD_TASK_PREFIX}:task:memo-update-no-match-queue-${uniqueSuffix}`));
+assert.equal(noMatchUpdateTask.status, "needs_clarification");
+assert.equal(noMatchUpdateTask.final_reply_text, "沒有找到明確符合的備忘錄，請再描述一下。");
+assert.equal(await crudKv.get(`${CRUD_TASK_PREFIX}:pending:memo-update-no-match-queue-${uniqueSuffix}`), "");
+
+await crudKv.put(`${CRUD_TASK_PREFIX}:task:memo-search-empty-${uniqueSuffix}`, JSON.stringify({
+  schema: "pline-v3-test-crud-task/v1",
+  status: "queued",
+  monitor: "pline-v3-test-codex-monitor",
+  task_id: `memo-search-empty-${uniqueSuffix}`,
+  task_type: "crud_task",
+  action: CRUD_ACTION,
+  domain: "memo",
+  operation: "memo_search",
+  body: {},
+  body_text: "",
+  actor_fingerprint: "a".repeat(64),
+  line_event_key: `${"c".repeat(54)}${uniqueSuffix}`,
+  request_id: `pline-v3-memo-search-empty-${uniqueSuffix}`,
+  marker: "T4005-20260719010101",
+  finalize_token: "test-finalize-token",
+  created_at: "2026-07-19T08:00:02.000Z",
+}));
+await crudKv.put(`${CRUD_TASK_PREFIX}:pending:memo-search-empty-${uniqueSuffix}`, `${CRUD_TASK_PREFIX}:task:memo-search-empty-${uniqueSuffix}`);
+const claimedCrudEmptySearch = await claimOnce({ kv: crudKv, env: { CODEX_BIN: fakeCodex, PATH: "", CRUD_FINALIZE_DISABLED: "1" } });
+assert.equal(claimedCrudEmptySearch.ok, true);
+assert.equal(claimedCrudEmptySearch.claimed, true);
+const emptySearchTask = JSON.parse(await crudKv.get(`${CRUD_TASK_PREFIX}:task:memo-search-empty-${uniqueSuffix}`));
+assert.equal(emptySearchTask.status, "needs_clarification");
+assert.equal(emptySearchTask.final_reply_text, "請再補充一下要處理哪一筆備忘錄。");
+assert.equal(await crudKv.get(`${CRUD_TASK_PREFIX}:pending:memo-search-empty-${uniqueSuffix}`), "");
 
 const ideaKv = createMemoryKv();
 const syntheticIdea = await createSyntheticIdeaTask({

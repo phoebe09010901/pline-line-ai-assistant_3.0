@@ -6,6 +6,9 @@ const N8N_WEBHOOK_URL = "https://n8nphy.app.n8n.cloud/webhook/pline-v3-test-ai-a
 const N8N_SHARED_SECRET_HEADER = "x-pline-v3-shared-secret";
 const EVIDENCE_SELFTEST_SECRET_HEADER = "x-pline-v3-selftest-secret";
 const ACCEPTED_N8N_INTENTS = ["idea_create", "google_calendar_direct", "codex_delegate"];
+const ACCEPTED_CRUD_DOMAINS = ["memo", "calendar"];
+const ACCEPTED_MEMO_OPERATIONS = ["memo_create", "memo_update", "memo_delete", "memo_search"];
+const ACCEPTED_CALENDAR_OPERATIONS = ["calendar_create", "calendar_update", "calendar_delete", "calendar_search"];
 const GATE_TEST_INTENTS = ["idea_create", "codex_delegate"];
 const ADMIN_BOOTSTRAP_SENTINEL = "CAPTURE_CURRENT_03_EVENT";
 const ADMIN_BOOTSTRAP_PHRASE = "PLine03 admin bootstrap";
@@ -21,6 +24,9 @@ const CODEX_MONITOR_NAME = "pline-v3-test-codex-monitor";
 const CODEX_TASK_ACTION = "codex_delegate";
 const CODEX_LEGACY_SMOKE_ACTION = "create_smoke_file";
 const IDEA_TASK_ACTION = "save_idea_json";
+const CRUD_TASK_PREFIX = "crud_task:v1";
+const CRUD_TASK_ACTION = "crud_task";
+const CRUD_CONFIRMATION_HANDLER_VERSION = "post-check-requeue-v2";
 const CODEX_TASK_PROJECT = "菲比 LINE 智能助理_03";
 const CODEX_TASK_PROJECT_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03";
 const CODEX_TASK_SMOKE_FILE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt";
@@ -33,11 +39,16 @@ const CODEX_FAILED_REPLY_TEXT = "這次沒有順利完成，我先停在安全�
 const CODEX_CAPABILITY_NOT_ENABLED_REPLY_TEXT = "這類操作目前還沒開放，我先不假裝已經執行。等下一階段授權後再處理。";
 const CODEX_APPROVAL_REPLY_PREFIX = "這件事需要妳確認後我才會繼續。請回覆：確認";
 const CODEX_APPROVAL_ACCEPTED_REPLY_TEXT = "收到確認，我會繼續處理。";
+const CRUD_CONFIRMATION_ACCEPTED_REPLY_TEXT = "收到確認，我會繼續處理。";
+const CRUD_NO_PENDING_CONFIRMATION_REPLY_TEXT = "目前沒有待確認的動作。";
 const N8N_CONTRACT_FAILED_REPLY_TEXT = "這次沒有順利接上處理流程，我先不假裝已經開始做。請稍後再試一次 🙏";
 const IDEA_SAVED_FALLBACK_REPLY_TEXT = "已經幫妳記下來了 💡";
 const IDEA_SAVE_FAILED_REPLY_TEXT = "這次沒有成功保存，我先不假裝記好了，請稍後再試一次 🙏";
 const IDEA_FINALIZE_PATH = "/test/idea-finalize";
 const CODEX_FINALIZE_PATH = "/test/codex-finalize";
+const CRUD_FINALIZE_PATH = "/test/crud-finalize";
+const N8N_CONTRACT_SELFCHECK_PATH = "/test/n8n-contract/selfcheck";
+const CRUD_CONFIRMATION_SELFCHECK_PATH = "/test/crud-confirmation/selfcheck";
 const EVIDENCE_PREFIX = "evidence:v1";
 const EVIDENCE_TTL_SECONDS = 172800;
 const WEBHOOK_ACCEPT_EVIDENCE_CHECKPOINT_TIMEOUT_MS = 1500;
@@ -62,12 +73,24 @@ export default {
       return handleEvidenceSelfcheck(request, env);
     }
 
+    if (request.method === "POST" && url.pathname === N8N_CONTRACT_SELFCHECK_PATH) {
+      return handleN8nContractSelfcheck(request, env);
+    }
+
+    if (request.method === "POST" && url.pathname === CRUD_CONFIRMATION_SELFCHECK_PATH) {
+      return handleCrudConfirmationSelfcheck(request, env);
+    }
+
     if (request.method === "POST" && url.pathname === IDEA_FINALIZE_PATH) {
       return handleIdeaFinalize(request, env);
     }
 
     if (request.method === "POST" && url.pathname === CODEX_FINALIZE_PATH) {
       return handleCodexFinalize(request, env);
+    }
+
+    if (request.method === "POST" && url.pathname === CRUD_FINALIZE_PATH) {
+      return handleCrudFinalize(request, env);
     }
 
     if (request.method === "POST" && url.pathname === "/line/webhook") {
@@ -164,6 +187,25 @@ export async function handleLineWebhook(request, env, ctx = {}) {
     request_id: normalized.request_id,
   });
 
+  const crudConfirmationReply = await handleCrudConfirmationReply(normalized, env);
+  if (crudConfirmationReply.handled) {
+    if (env.IDEMPOTENCY_KV) {
+      await env.IDEMPOTENCY_KV.put(normalized.line_event_id, normalized.request_id, { expirationTtl: 3600 });
+    }
+    await persistEvidenceStage(env, normalized, crudConfirmationReply.ok ? "crud_confirmation_reply_completed" : "crud_confirmation_reply_failed", {
+      status: crudConfirmationReply.status || (crudConfirmationReply.ok ? "confirmed" : "failed"),
+      reason: crudConfirmationReply.reason || "",
+      domain: crudConfirmationReply.domain || "",
+      operation: crudConfirmationReply.operation || "",
+    });
+    return jsonResponse({
+      status: crudConfirmationReply.ok ? "accepted" : "rejected",
+      request_id: normalized.request_id,
+      confirmation: crudConfirmationReply.ok ? "accepted" : "failed",
+      reason: crudConfirmationReply.reason || "",
+    }, crudConfirmationReply.ok ? 200 : 409);
+  }
+
   const approvalReply = await handleCodexApprovalReply(normalized, env);
   if (approvalReply.handled) {
     if (env.IDEMPOTENCY_KV) {
@@ -255,6 +297,7 @@ export function workerHealth(env = {}) {
       webhook_url: env.N8N_WEBHOOK_URL || N8N_WEBHOOK_URL,
       webhook_target: n8nWebhookAttribution(env.N8N_WEBHOOK_URL || N8N_WEBHOOK_URL),
       shared_secret_header: N8N_SHARED_SECRET_HEADER,
+      contract_selfcheck_path: N8N_CONTRACT_SELFCHECK_PATH,
     },
     line_reply_mode: LINE_REPLY_MODE,
     line_mark_as_read: {
@@ -270,6 +313,9 @@ export function workerHealth(env = {}) {
     },
     codex_task_final_mode: CODEX_TASK_FINAL_MODE,
     supported_intents: ACCEPTED_N8N_INTENTS,
+    supported_domains: ACCEPTED_CRUD_DOMAINS,
+    supported_memo_operations: ACCEPTED_MEMO_OPERATIONS,
+    supported_calendar_operations: ACCEPTED_CALENDAR_OPERATIONS,
     gate_test_intents: GATE_TEST_INTENTS,
     evidence: {
       persistence: "RUNTIME_KV",
@@ -291,10 +337,35 @@ export function workerHealth(env = {}) {
       path: CODEX_FINALIZE_PATH,
       mode: "task_token_exactly_once",
     },
+    crud_finalizer: {
+      path: CRUD_FINALIZE_PATH,
+      mode: "task_token_exactly_once",
+      confirmation_ttl_seconds: 600,
+    },
+    crud_confirmation_handler: {
+      version: CRUD_CONFIRMATION_HANDLER_VERSION,
+      check_stage: "crud_confirmation_check_started",
+      post_check_stages: [
+        "crud_confirmation_no_pending",
+        "crud_confirmation_pending_loaded",
+        "crud_confirmation_record_missing",
+        "crud_confirmation_actor_mismatch",
+        "crud_confirmation_not_pending",
+        "crud_confirmation_expired",
+        "crud_confirmation_task_missing",
+        "crud_confirmation_task_marked_confirmed",
+        "crud_confirmation_pending_written",
+        "crud_confirmation_requeued",
+        "crud_confirmation_handler_failed",
+      ],
+      pending_index_written_last: true,
+      n8n_bypass_for_confirmation_text: true,
+      live_selfcheck_path: CRUD_CONFIRMATION_SELFCHECK_PATH,
+    },
     codex_monitor: {
       name: CODEX_MONITOR_NAME,
-      task_prefixes: [CODEX_TASK_PREFIX, IDEA_TASK_PREFIX],
-      actions: [CODEX_TASK_ACTION, CODEX_LEGACY_SMOKE_ACTION, IDEA_TASK_ACTION],
+      task_prefixes: [CODEX_TASK_PREFIX, IDEA_TASK_PREFIX, CRUD_TASK_PREFIX],
+      actions: [CODEX_TASK_ACTION, CODEX_LEGACY_SMOKE_ACTION, IDEA_TASK_ACTION, CRUD_TASK_ACTION],
       project_path: CODEX_TASK_PROJECT_PATH,
       selected_interface: "codex_exec_json",
       original_user_text_delivery: true,
@@ -376,15 +447,32 @@ export async function checkIdempotency(idempotencyKv, eventId) {
 
 export function normalizeForN8n(event) {
   const lineEventId = event.webhookEventId || event.message?.id || crypto.randomUUID();
+  const messageText = event.message?.text || "";
+  const prefixRoute = prefixRouteFromMessage(messageText);
   return {
     request_id: `pline-v3-${lineEventId}`,
     line_event_id: lineEventId,
     reply_token: event.replyToken,
     user_id: event.source?.userId || "",
-    message_text: event.message?.text || "",
-    gate_marker: extractGateMarker(event.message?.text || ""),
+    message_text: messageText,
+    domain: prefixRoute.domain,
+    body_text: prefixRoute.body_text,
+    gate_marker: extractGateMarker(messageText),
     received_at: new Date().toISOString(),
   };
+}
+
+export function prefixRouteFromMessage(messageText = "") {
+  const text = String(messageText || "").trim();
+  for (const prefix of ["備忘錄", "行事曆"]) {
+    if (text === prefix || text.startsWith(`${prefix} `) || text.startsWith(`${prefix}　`) || text.startsWith(`${prefix}:`) || text.startsWith(`${prefix}：`)) {
+      return {
+        domain: prefix === "備忘錄" ? "memo" : "calendar",
+        body_text: text.slice(prefix.length).replace(/^[\s　:：]+/u, "").trim(),
+      };
+    }
+  }
+  return { domain: "", body_text: "" };
 }
 
 export async function processN8nInBackground(normalized, env) {
@@ -490,7 +578,46 @@ export async function processN8nInBackground(normalized, env) {
     }
   }
 
-  if (contractResult.body.intent === "idea_create") {
+  if (contractResult.body.domain === "memo" || contractResult.body.domain === "calendar") {
+    const enqueueResult = await enqueueCrudTask(env, normalized, contractResult.body);
+    await persistEvidenceStage(env, normalized, enqueueResult.ok ? "crud_task_enqueued" : "crud_task_enqueue_failed", {
+      domain: contractResult.body.domain,
+      action: CRUD_TASK_ACTION,
+      operation: contractResult.body.operation,
+      status: enqueueResult.duplicate ? "duplicate" : enqueueResult.ok ? "queued" : "failed",
+      reason: enqueueResult.ok ? "" : enqueueResult.reason,
+    });
+    logStage(enqueueResult.ok ? "crud_task_enqueued" : "crud_task_enqueue_failed", {
+      request_id: normalized.request_id,
+      domain: contractResult.body.domain,
+      operation: contractResult.body.operation,
+      status: enqueueResult.duplicate ? "duplicate" : enqueueResult.ok ? "queued" : "failed",
+    });
+    if (!enqueueResult.ok) {
+      const pushResult = await pushToLine(normalized.user_id, CRUD_FAILED_REPLY_TEXT(contractResult.body.domain), env);
+      await persistEvidenceStage(env, normalized, pushResult.ok ? "crud_task_delivery_failed_notice_completed" : "crud_task_delivery_failed_notice_failed", {
+        domain: contractResult.body.domain,
+        action: CRUD_TASK_ACTION,
+        operation: contractResult.body.operation,
+        status: "failed",
+        reason: pushResult.ok ? enqueueResult.reason : pushResult.reason,
+      });
+    } else if (enqueueResult.duplicate) {
+      await persistEvidenceStage(env, normalized, "crud_task_delivery_suppressed", {
+        domain: contractResult.body.domain,
+        action: CRUD_TASK_ACTION,
+        operation: contractResult.body.operation,
+        status: "duplicate",
+      });
+    } else {
+      await persistEvidenceStage(env, normalized, "crud_task_waiting_for_monitor", {
+        domain: contractResult.body.domain,
+        action: CRUD_TASK_ACTION,
+        operation: contractResult.body.operation,
+        status: "queued",
+      });
+    }
+  } else if (contractResult.body.intent === "idea_create") {
     const enqueueResult = await enqueueIdeaTask(env, normalized, contractResult.body);
     await persistEvidenceStage(env, normalized, enqueueResult.ok ? "idea_json_save_enqueued" : "idea_json_save_enqueue_failed", {
       intent: contractResult.body.intent,
@@ -758,6 +885,58 @@ export async function enqueueIdeaTask(env = {}, normalized = {}, body = {}) {
   return { ok: true, key, task_id: taskId, status: "pending" };
 }
 
+export async function enqueueCrudTask(env = {}, normalized = {}, body = {}) {
+  if (!env.RUNTIME_KV) {
+    return { ok: false, reason: "missing_RUNTIME_KV" };
+  }
+  if (!normalized?.request_id || !normalized.line_event_id) {
+    return { ok: false, reason: "missing_crud_task_identity" };
+  }
+  const domain = ACCEPTED_CRUD_DOMAINS.includes(body.domain) ? body.domain : "";
+  const operations = domain === "memo" ? ACCEPTED_MEMO_OPERATIONS : domain === "calendar" ? ACCEPTED_CALENDAR_OPERATIONS : [];
+  const operation = operations.includes(body.operation) ? body.operation : "";
+  if (!domain || !operation) {
+    return { ok: false, reason: "unsupported_crud_operation" };
+  }
+  const lineUserRef = await sealLineUserRef(normalized.user_id, env);
+  if (!lineUserRef.ok) return lineUserRef;
+  const actorFingerprint = await fingerprint(`line-actor:${normalized.user_id || "unknown"}`, env);
+  const lineEventKey = await fingerprint(`line-event:${normalized.line_event_id}`, env);
+  const taskId = `${domain}-${lineEventKey.slice(0, 24)}`;
+  const key = crudTaskKey(taskId);
+  const existingRaw = await env.RUNTIME_KV.get(key);
+  if (existingRaw) {
+    const existing = parseJsonSafely(existingRaw);
+    return {
+      ok: true,
+      duplicate: true,
+      key,
+      task_id: existing?.task_id || taskId,
+      status: existing?.status || "queued",
+    };
+  }
+  const task = sanitizeCrudTaskRecord({
+    status: "queued",
+    task_id: taskId,
+    request_id: normalized.request_id,
+    marker: normalized.gate_marker,
+    domain,
+    operation,
+    body,
+    body_text: normalized.body_text,
+    message_text: normalized.message_text,
+    actor_fingerprint: actorFingerprint,
+    line_event_key: lineEventKey,
+    line_user_ref: lineUserRef.value,
+    finalize_token: createFinalizeToken(),
+    confirmed: body.confirmed === true,
+    created_at: new Date().toISOString(),
+  });
+  await env.RUNTIME_KV.put(key, JSON.stringify(task), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await env.RUNTIME_KV.put(crudPendingKey(taskId), key, { expirationTtl: EVIDENCE_TTL_SECONDS });
+  return { ok: true, key, task_id: taskId, status: "queued" };
+}
+
 export async function callN8nWebhook(payload, env) {
   if (!env.N8N_WEBHOOK_URL) {
     return { ok: false, reason: "missing_N8N_WEBHOOK_URL", status: 503 };
@@ -856,6 +1035,29 @@ export function validateN8nContract(body, requestId) {
       response_request_id_present: Boolean(body?.request_id),
       worker_request_id_present: Boolean(body?.worker_request_id),
       canonical_request_id_present: Boolean(body?.canonicalRequestId),
+    };
+  }
+  const canonicalDomain = ACCEPTED_CRUD_DOMAINS.includes(body.domain) ? body.domain : "";
+  if (canonicalDomain) {
+    const operations = canonicalDomain === "memo" ? ACCEPTED_MEMO_OPERATIONS : ACCEPTED_CALENDAR_OPERATIONS;
+    if (!operations.includes(body.operation)) {
+      return { ok: false, reason: "unsupported_crud_operation" };
+    }
+    const allowedStatuses = ["ready", "needs_confirmation", "needs_clarification", "unsupported", "failed", "completed", "accepted"];
+    if (!allowedStatuses.includes(body.status)) {
+      return { ok: false, reason: "unsupported_crud_status" };
+    }
+    return {
+      ok: true,
+      body: {
+        ...body,
+        request_id: requestIdentity.value,
+        domain: canonicalDomain,
+        intent: body.intent || `${canonicalDomain}_crud`,
+        operation: body.operation,
+        tool_called: body.tool_called || body.operation,
+        reply_text: naturalCrudReplyText(body.reply_text, canonicalDomain, body.status),
+      },
     };
   }
   const canonicalIntent = body.intent === "codex_task" ? "codex_delegate" : body.intent;
@@ -1002,6 +1204,14 @@ function createFallbackCodexDelegateBody(normalized = {}) {
 }
 
 function contractEvidenceForLog(body) {
+  if (body.domain === "memo" || body.domain === "calendar") {
+    return {
+      tool_called: body.tool_called,
+      action: CRUD_TASK_ACTION,
+      domain: body.domain,
+      operation: body.operation,
+    };
+  }
   if (body.intent === "idea_create") {
     return {
       tool_called: body.tool_called,
@@ -1024,6 +1234,12 @@ export function normalizeReplyText(intent, replyText) {
     return replyText;
   }
   return SAFE_REPLY_TEXT[intent] || "";
+}
+
+function CRUD_FAILED_REPLY_TEXT(domain = "") {
+  return domain === "calendar"
+    ? "這次沒有順利處理行事曆，我先不假裝已完成 🙏"
+    : "這次沒有順利處理備忘錄，我先不假裝已完成 🙏";
 }
 
 export async function replyToLine(replyToken, replyText, env) {
@@ -1292,6 +1508,164 @@ export async function handleEvidenceSelfcheck(request, env = {}) {
   }, ok ? 200 : 500);
 }
 
+export async function handleCrudConfirmationSelfcheck(request, env = {}) {
+  const guard = authorizeEvidenceSelfcheck(request, env);
+  if (!guard.ok) {
+    return jsonResponse({ status: "rejected", reason: guard.reason }, guard.status);
+  }
+
+  const timestamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+  const marker = `T4310-${timestamp}`;
+  const requestId = `pline-v3-crud-confirm-selfcheck-${timestamp}`;
+  const taskId = `memo-confirm-selfcheck-${timestamp}`;
+  const confirmationId = `confirm-selfcheck-${timestamp}`;
+  const selfcheckUserId = `SELFTEST_CONFIRM_ACTOR_${timestamp}`;
+  const selfcheckEnv = {
+    ...env,
+    CRUD_CONFIRMATION_PUSH_DISABLED: "true",
+  };
+  const actorFingerprint = await fingerprint(`line-actor:${selfcheckUserId}`, selfcheckEnv);
+
+  const taskKey = crudTaskKey(taskId);
+  const confirmationKey = crudConfirmationKey(confirmationId);
+  const actorKey = crudConfirmationActorKey(actorFingerprint);
+  const pendingKey = crudPendingKey(taskId);
+  const finalKey = crudFinalKey(taskId);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+  await env.RUNTIME_KV.put(taskKey, JSON.stringify({
+    schema: "pline-v3-test-crud-task/v1",
+    status: "needs_confirmation",
+    monitor: CODEX_MONITOR_NAME,
+    task_id: taskId,
+    task_type: "crud_task",
+    action: CRUD_TASK_ACTION,
+    domain: "memo",
+    operation: "memo_delete",
+    body_text: "刪除 selfcheck memo",
+    body: { query: "selfcheck memo" },
+    actor_fingerprint: actorFingerprint,
+    line_event_key: "selfcheck-line-event-key",
+    request_id: `pline-v3-crud-confirm-selfcheck-delete-${timestamp}`,
+    marker,
+    line_user_ref: "selfcheck-line-user-ref",
+    finalize_token: `selfcheck-finalize-${timestamp}`,
+    final_reply_text: "要刪除這筆備忘錄嗎？請回覆「確認」。",
+    confirmation_id: confirmationId,
+    created_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await env.RUNTIME_KV.put(confirmationKey, JSON.stringify({
+    schema: "pline-v3-test-crud-confirmation/v1",
+    confirmation_id: confirmationId,
+    task_id: taskId,
+    actor_fingerprint: actorFingerprint,
+    domain: "memo",
+    operation: "memo_delete",
+    status: "pending",
+    details: { target_file_name: "selfcheck-memo.json", target_summary: "selfcheck memo" },
+    created_at: new Date().toISOString(),
+    expires_at: expiresAt,
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await env.RUNTIME_KV.put(actorKey, confirmationId, { expirationTtl: EVIDENCE_TTL_SECONDS });
+
+  const reply = await handleCrudConfirmationReply({
+    request_id: requestId,
+    gate_marker: marker,
+    message_text: "確認",
+    user_id: selfcheckUserId,
+  }, selfcheckEnv);
+  const evidence = await readEvidenceForRequest(env, requestId);
+  const stageNames = evidence.stages.map((stage) => stage.stage);
+  const task = parseJsonSafely(await env.RUNTIME_KV.get(taskKey));
+  const pendingValue = await env.RUNTIME_KV.get(pendingKey);
+  const confirmation = parseJsonSafely(await env.RUNTIME_KV.get(confirmationKey));
+
+  const ok = Boolean(
+    reply.handled
+    && reply.ok
+    && task?.confirmed === true
+    && task?.status === "queued"
+    && pendingValue === taskKey
+    && confirmation?.status === "used"
+    && stageNames.includes("crud_confirmation_check_started")
+    && stageNames.includes("crud_confirmation_pending_loaded")
+    && stageNames.includes("crud_confirmation_task_marked_confirmed")
+    && stageNames.includes("crud_confirmation_pending_written")
+    && stageNames.includes("crud_confirmation_requeued")
+  );
+
+  await deleteRuntimeKvBestEffort(env.RUNTIME_KV, [pendingKey, taskKey, confirmationKey, actorKey, finalKey]);
+
+  return jsonResponse({
+    status: ok ? "ok" : "failed",
+    worker: WORKER_NAME,
+    check: "crud_confirmation_live_path_selfcheck",
+    handler_version: CRUD_CONFIRMATION_HANDLER_VERSION,
+    request_id: requestId,
+    marker,
+    handled: Boolean(reply.handled),
+    reply_status: reply.status || "",
+    task_confirmed: task?.confirmed === true,
+    task_status: task?.status || "",
+    pending_written: pendingValue === taskKey,
+    confirmation_status: confirmation?.status || "",
+    stage_names: stageNames,
+    n8n_bypassed: !stageNames.includes("n8n_background_started"),
+  }, ok ? 200 : 500);
+}
+
+export async function handleN8nContractSelfcheck(request, env = {}) {
+  const provided = request.headers.get(N8N_SHARED_SECRET_HEADER) || "";
+  if (!env.N8N_SHARED_SECRET) {
+    return jsonResponse({ status: "rejected", reason: "missing_N8N_SHARED_SECRET" }, 503);
+  }
+  if (!provided || provided !== env.N8N_SHARED_SECRET) {
+    return jsonResponse({ status: "rejected", reason: "invalid_n8n_contract_selfcheck_secret" }, 401);
+  }
+
+  const timestamp = Date.now();
+  const requestId = `pline-v3-n8n-selfcheck-${timestamp}`;
+  const n8nTarget = n8nWebhookAttribution(env.N8N_WEBHOOK_URL || N8N_WEBHOOK_URL);
+  const result = await callN8nWebhook({
+    request_id: requestId,
+    worker_request_id: requestId,
+    domain: "memo",
+    body_text: "建立一筆 selfcheck 備忘錄",
+    message_text: "備忘錄 建立一筆 selfcheck 備忘錄",
+    original_user_text: "備忘錄 建立一筆 selfcheck 備忘錄",
+    actor_fingerprint: "selfcheck-actor-fingerprint",
+    line_event_key: "selfcheck-line-event-key",
+  }, env);
+
+  if (!result.ok) {
+    return jsonResponse({
+      status: "failed",
+      reason: result.reason,
+      worker: WORKER_NAME,
+      request_id: requestId,
+      n8n_target: n8nTarget,
+    }, result.status || 502);
+  }
+
+  const contract = validateN8nContract(result.body, requestId);
+  const identity = n8nResponseRequestIdentity(result.body);
+  return jsonResponse({
+    status: contract.ok ? "ok" : "failed",
+    reason: contract.ok ? "" : contract.reason,
+    worker: WORKER_NAME,
+    request_id: requestId,
+    response_request_id: identity.value || "",
+    request_id_preserved: contract.ok,
+    intent: result.body.intent || "",
+    domain: result.body.domain || "",
+    operation: result.body.operation || "",
+    tool_called: result.body.tool_called || "",
+    contract_status: result.body.status || "",
+    has_reply_text: Boolean(result.body.reply_text),
+    n8n_target: n8nTarget,
+  }, contract.ok ? 200 : 502);
+}
+
 export async function handleIdeaFinalize(request, env = {}) {
   if (!env.RUNTIME_KV) {
     return jsonResponse({ status: "rejected", reason: "missing_RUNTIME_KV" }, 503);
@@ -1435,6 +1809,65 @@ export async function handleCodexFinalize(request, env = {}) {
 
   const pushResult = await pushCodexFinalOnce(env, finalTask);
   return jsonResponse(pushResult, pushResult.ok ? 200 : 500);
+}
+
+export async function handleCrudFinalize(request, env = {}) {
+  if (!env.RUNTIME_KV) {
+    return jsonResponse({ status: "rejected", reason: "missing_RUNTIME_KV" }, 503);
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ status: "rejected", reason: "invalid_json" }, 400);
+  }
+
+  const taskId = sanitizeEvidenceId(body.task_id || "");
+  const requestId = sanitizeEvidenceId(body.request_id || "");
+  const providedToken = sanitizeEvidenceId(body.finalize_token || "");
+  const callbackStatus = sanitizeEvidenceId(body.status || "");
+  if (!taskId || !requestId || !providedToken) {
+    return jsonResponse({ status: "rejected", reason: "missing_finalize_identity" }, 400);
+  }
+
+  const taskRaw = await env.RUNTIME_KV.get(crudTaskKey(taskId));
+  const task = parseJsonSafely(taskRaw);
+  if (!task) {
+    return jsonResponse({ status: "rejected", reason: taskRaw ? "unreadable_crud_task" : "missing_crud_task" }, taskRaw ? 409 : 404);
+  }
+  if (task.action !== CRUD_TASK_ACTION || task.request_id !== requestId) {
+    return jsonResponse({ status: "rejected", reason: "finalize_task_mismatch" }, 409);
+  }
+  if (!task.finalize_token || !constantTimeEqual(task.finalize_token, providedToken)) {
+    return jsonResponse({ status: "rejected", reason: "invalid_finalize_token" }, 401);
+  }
+
+  if (callbackStatus === "duplicate") {
+    const suppressed = await suppressCrudFinalOnce(env, task, "duplicate_crud_task");
+    return jsonResponse(suppressed, suppressed.ok ? 200 : 500);
+  }
+  if (callbackStatus === "needs_confirmation" || task.status === "needs_confirmation") {
+    const notice = await pushCrudFinalOnce(env, task, "needs_confirmation", body.reply_text || task.final_reply_text || "", "confirmation_required");
+    return jsonResponse(notice, notice.ok ? 200 : 500);
+  }
+  if (callbackStatus === "needs_clarification" || task.status === "needs_clarification") {
+    const notice = await pushCrudFinalOnce(env, task, "needs_clarification", body.reply_text || task.final_reply_text || "", "clarification_required");
+    return jsonResponse(notice, notice.ok ? 200 : 500);
+  }
+  if (callbackStatus === "failed" || task.status === "failed") {
+    const failed = await pushCrudFinalOnce(env, task, "failed", body.reply_text || task.final_reply_text || "", body.reason || "monitor_task_failed");
+    return jsonResponse(failed, failed.ok ? 200 : 500);
+  }
+  if (callbackStatus !== "completed") {
+    return jsonResponse({ status: "rejected", reason: "unsupported_finalize_status" }, 400);
+  }
+  if (task.status !== "completed") {
+    return jsonResponse({ status: "rejected", reason: "crud_task_not_completed" }, 409);
+  }
+
+  const completed = await pushCrudFinalOnce(env, task, "completed", body.reply_text || task.final_reply_text || "", "");
+  return jsonResponse(completed, completed.ok ? 200 : 500);
 }
 
 export async function persistWebhookAcceptedEvidenceCheckpoint(env = {}, normalized = {}, details = {}) {
@@ -1993,6 +2426,342 @@ async function pushCodexFailureOnce(env = {}, task = {}, reason = "monitor_task_
   return { ok: true, status: "failure_notice_completed", pushed: true, request_id: task.request_id };
 }
 
+export async function handleCrudConfirmationReply(normalized = {}, env = {}) {
+  if (!isCrudConfirmationText(normalized.message_text || "")) {
+    return { handled: false };
+  }
+  if (!env.RUNTIME_KV) {
+    return { handled: true, ok: false, reason: "missing_RUNTIME_KV" };
+  }
+  const stage = async (name, details = {}) => {
+    try {
+      await persistEvidenceStage(env, normalized, name, details);
+    } catch {
+      // Confirmation handling must not fail because evidence persistence failed.
+    }
+  };
+
+  try {
+    const actorFingerprint = await fingerprint(`line-actor:${normalized.user_id || "unknown"}`, env);
+    const latestKey = crudConfirmationActorKey(actorFingerprint);
+    const confirmationId = sanitizeEvidenceId(await env.RUNTIME_KV.get(latestKey));
+    await stage("crud_confirmation_check_started", {
+      is_confirmation_text: true,
+      has_actor_fingerprint: Boolean(actorFingerprint),
+      pending_found: Boolean(confirmationId),
+      candidate_count: confirmationId ? 1 : 0,
+    });
+    if (!confirmationId) {
+      await stage("crud_confirmation_no_pending", {
+        status: "no_pending_confirmation",
+        pending_found: false,
+        candidate_count: 0,
+      });
+      await pushToLine(normalized.user_id, CRUD_NO_PENDING_CONFIRMATION_REPLY_TEXT, env);
+      return { handled: true, ok: true, status: "no_pending_confirmation" };
+    }
+
+    const confirmationKey = crudConfirmationKey(confirmationId);
+    const confirmation = parseJsonSafely(await env.RUNTIME_KV.get(confirmationKey));
+    if (!confirmation) {
+      await stage("crud_confirmation_record_missing", {
+        status: "no_pending_confirmation",
+        pending_found: true,
+        candidate_count: 1,
+      });
+      await pushToLine(normalized.user_id, CRUD_NO_PENDING_CONFIRMATION_REPLY_TEXT, env);
+      return { handled: true, ok: true, status: "no_pending_confirmation" };
+    }
+    if (confirmation.actor_fingerprint !== actorFingerprint) {
+      await stage("crud_confirmation_actor_mismatch", {
+        status: "no_pending_confirmation",
+        pending_found: true,
+        candidate_count: 1,
+      });
+      await pushToLine(normalized.user_id, CRUD_NO_PENDING_CONFIRMATION_REPLY_TEXT, env);
+      return { handled: true, ok: true, status: "no_pending_confirmation" };
+    }
+    if (confirmation.status !== "pending") {
+      await stage("crud_confirmation_not_pending", {
+        status: sanitizeEvidenceId(confirmation.status || "missing_status"),
+        pending_found: true,
+        candidate_count: 1,
+      });
+      await pushToLine(normalized.user_id, CRUD_NO_PENDING_CONFIRMATION_REPLY_TEXT, env);
+      return { handled: true, ok: true, status: "no_pending_confirmation" };
+    }
+
+    const expiresAtMs = Date.parse(confirmation.expires_at || "");
+    if (Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now()) {
+      const expiredWrite = await putRuntimeKvWithRetry(env.RUNTIME_KV, confirmationKey, JSON.stringify({ ...confirmation, status: "expired", updated_at: new Date().toISOString() }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+      await stage(expiredWrite.ok ? "crud_confirmation_expired" : "crud_confirmation_expire_write_failed", {
+        status: "expired_confirmation",
+        reason: expiredWrite.ok ? "" : expiredWrite.reason,
+        pending_found: true,
+        candidate_count: 1,
+      });
+      await pushToLine(normalized.user_id, "這個確認已經過期，請重新告訴我妳要處理哪一筆。", env);
+      return { handled: true, ok: true, status: "expired_confirmation" };
+    }
+
+    await stage("crud_confirmation_pending_loaded", {
+      status: "pending",
+      domain: confirmation.domain,
+      operation: confirmation.operation,
+      pending_found: true,
+      candidate_count: 1,
+    });
+
+    const taskRaw = await env.RUNTIME_KV.get(crudTaskKey(confirmation.task_id));
+    const task = parseJsonSafely(taskRaw);
+    if (!task) {
+      await stage("crud_confirmation_task_missing", {
+        status: "failed",
+        pending_found: true,
+        candidate_count: 1,
+      });
+      return { handled: true, ok: false, reason: "missing_confirmed_crud_task" };
+    }
+    if (task.status === "completed" || task.status === "failed") {
+      const usedWrite = await putRuntimeKvWithRetry(env.RUNTIME_KV, confirmationKey, JSON.stringify({ ...confirmation, status: "used", used: true, updated_at: new Date().toISOString() }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+      await stage(usedWrite.ok ? "crud_confirmation_already_terminal" : "crud_confirmation_consume_failed", {
+        status: "already_terminal",
+        reason: usedWrite.ok ? "" : usedWrite.reason,
+        domain: task.domain,
+        operation: task.operation,
+      });
+      return { handled: true, ok: true, status: "already_terminal", domain: task.domain, operation: task.operation };
+    }
+
+    const confirmedTask = {
+      ...task,
+      status: "queued",
+      confirmed: true,
+      confirmation_id: confirmationId,
+      confirmation_request_id: normalized.request_id,
+      updated_at: new Date().toISOString(),
+    };
+    const taskWrite = await putRuntimeKvWithRetry(env.RUNTIME_KV, crudTaskKey(task.task_id), JSON.stringify(confirmedTask), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    if (!taskWrite.ok) {
+      await stage("crud_confirmation_task_write_failed", {
+        status: "failed",
+        reason: taskWrite.reason,
+        domain: task.domain,
+        operation: task.operation,
+      });
+      return { handled: true, ok: false, status: "failed", reason: "crud_confirmation_task_write_failed", domain: task.domain, operation: task.operation };
+    }
+    await stage("crud_confirmation_task_marked_confirmed", {
+      status: "queued",
+      domain: task.domain,
+      operation: task.operation,
+    });
+
+    const finalWrite = await putRuntimeKvWithRetry(env.RUNTIME_KV, crudFinalKey(task.task_id), JSON.stringify({
+      schema: "pline-v3-test-crud-final/v1",
+      status: "confirmation_accepted",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      confirmation_request_id: normalized.request_id,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    if (!finalWrite.ok) {
+      await stage("crud_confirmation_final_state_write_failed", {
+        status: "failed",
+        reason: finalWrite.reason,
+        domain: task.domain,
+        operation: task.operation,
+      });
+      return { handled: true, ok: false, status: "failed", reason: "crud_confirmation_final_state_write_failed", domain: task.domain, operation: task.operation };
+    }
+
+    const confirmationWrite = await putRuntimeKvWithRetry(env.RUNTIME_KV, confirmationKey, JSON.stringify({ ...confirmation, status: "used", used: true, confirmed_at: new Date().toISOString() }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    if (!confirmationWrite.ok) {
+      await stage("crud_confirmation_consume_failed", {
+        status: "failed",
+        reason: confirmationWrite.reason,
+        domain: task.domain,
+        operation: task.operation,
+      });
+      return { handled: true, ok: false, status: "failed", reason: "crud_confirmation_consume_failed", domain: task.domain, operation: task.operation };
+    }
+
+    const pendingWrite = await putRuntimeKvWithRetry(env.RUNTIME_KV, crudPendingKey(task.task_id), crudTaskKey(task.task_id), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    if (!pendingWrite.ok) {
+      await stage("crud_confirmation_pending_write_failed", {
+        status: "failed",
+        reason: pendingWrite.reason,
+        domain: task.domain,
+        operation: task.operation,
+        pending_written: false,
+      });
+      return { handled: true, ok: false, status: "failed", reason: "crud_confirmation_pending_write_failed", domain: task.domain, operation: task.operation };
+    }
+    await stage("crud_confirmation_pending_written", {
+      status: "queued",
+      domain: task.domain,
+      operation: task.operation,
+      pending_written: true,
+    });
+
+    await stage("crud_confirmation_requeued", {
+      status: "queued",
+      domain: task.domain,
+      operation: task.operation,
+      pending_written: true,
+    });
+    await persistEvidenceStage(env, crudTaskEvidenceTarget(task), "crud_confirmation_accepted", {
+      action: CRUD_TASK_ACTION,
+      domain: task.domain,
+      operation: task.operation,
+      status: "queued",
+    });
+    await persistEvidenceStage(env, crudTaskEvidenceTarget(task), "crud_confirmation_requeued", {
+      action: CRUD_TASK_ACTION,
+      domain: task.domain,
+      operation: task.operation,
+      status: "queued",
+    });
+    let pushResult = { ok: true };
+    if (env.CRUD_CONFIRMATION_PUSH_DISABLED === "true") {
+      await stage("crud_confirmation_ack_push_skipped_selfcheck", {
+        status: "queued",
+        reason: "push_disabled_selfcheck",
+        domain: task.domain,
+        operation: task.operation,
+      });
+    } else {
+      pushResult = await pushToLine(normalized.user_id, CRUD_CONFIRMATION_ACCEPTED_REPLY_TEXT, env);
+    }
+    if (!pushResult.ok) {
+      await stage("crud_confirmation_ack_push_failed", {
+        status: "queued",
+        reason: pushResult.reason,
+        domain: task.domain,
+        operation: task.operation,
+      });
+    }
+    return { handled: true, ok: true, status: "confirmed", domain: task.domain, operation: task.operation };
+  } catch (error) {
+    await stage("crud_confirmation_handler_failed", {
+      status: "failed",
+      reason: error?.name || "Error",
+    });
+    return { handled: true, ok: false, status: "failed", reason: "crud_confirmation_handler_failed" };
+  }
+}
+
+function isCrudConfirmationText(value = "") {
+  const text = String(value || "")
+    .replace(/[！!。．.、，,]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text === "確認" || text === "確認刪除" || text === "確認刪掉" || text === "確認移除";
+}
+
+async function pushCrudFinalOnce(env = {}, task = {}, status = "completed", replyText = "", reason = "") {
+  const finalKey = crudFinalKey(task.task_id);
+  const existingRaw = await env.RUNTIME_KV.get(finalKey);
+  if (existingRaw) {
+    const existing = parseJsonSafely(existingRaw);
+    if (["completed", "sending", "failure_notice_completed", "needs_confirmation", "needs_clarification"].includes(existing?.status)) {
+      return {
+        ok: true,
+        status: existing.status === "completed" ? "already_completed" : existing.status,
+        pushed: false,
+        request_id: task.request_id,
+      };
+    }
+  }
+
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-crud-final/v1",
+    status: "sending",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    reason,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+
+  const userId = await openLineUserRef(task.line_user_ref, env);
+  if (!userId.ok) {
+    await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+      schema: "pline-v3-test-crud-final/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: userId.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
+  }
+
+  const finalText = naturalCrudReplyText(replyText || task.final_reply_text || "", task.domain, status);
+  const pushResult = await pushToLine(userId.value, finalText, env);
+  if (!pushResult.ok) {
+    await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+      schema: "pline-v3-test-crud-final/v1",
+      status: "failed",
+      task_id: task.task_id,
+      request_id: task.request_id,
+      reason: pushResult.reason,
+      updated_at: new Date().toISOString(),
+    }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    await persistEvidenceStage(env, crudTaskEvidenceTarget(task), "crud_task_final_push_failed", {
+      action: CRUD_TASK_ACTION,
+      domain: task.domain,
+      operation: task.operation,
+      status: "failed",
+      reason: pushResult.reason,
+    });
+    return { ok: false, status: "failed", reason: pushResult.reason, request_id: task.request_id };
+  }
+
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-crud-final/v1",
+    status: status === "completed" ? "completed" : status,
+    task_id: task.task_id,
+    request_id: task.request_id,
+    reason,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await persistEvidenceStage(env, crudTaskEvidenceTarget(task), "crud_task_final_push_completed", {
+    action: CRUD_TASK_ACTION,
+    domain: task.domain,
+    operation: task.operation,
+    status,
+    final_mode: "monitor_callback_exactly_once",
+  });
+  return { ok: true, status: status === "completed" ? "completed" : status, pushed: true, request_id: task.request_id };
+}
+
+async function suppressCrudFinalOnce(env = {}, task = {}, reason = "duplicate_crud_task") {
+  const finalKey = crudFinalKey(task.task_id);
+  const existingRaw = await env.RUNTIME_KV.get(finalKey);
+  if (existingRaw) {
+    const existing = parseJsonSafely(existingRaw);
+    if (existing?.status) {
+      return { ok: true, status: existing.status === "completed" ? "already_completed" : "suppressed", pushed: false, request_id: task.request_id };
+    }
+  }
+  await env.RUNTIME_KV.put(finalKey, JSON.stringify({
+    schema: "pline-v3-test-crud-final/v1",
+    status: "suppressed",
+    task_id: task.task_id,
+    request_id: task.request_id,
+    reason,
+    updated_at: new Date().toISOString(),
+  }), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await persistEvidenceStage(env, crudTaskEvidenceTarget(task), "crud_task_final_push_suppressed", {
+    action: CRUD_TASK_ACTION,
+    domain: task.domain,
+    operation: task.operation,
+    status: "duplicate",
+    reason,
+  });
+  return { ok: true, status: "suppressed", pushed: false, request_id: task.request_id };
+}
+
 function ideaTaskEvidenceTarget(task = {}) {
   return {
     request_id: task.request_id,
@@ -2001,6 +2770,13 @@ function ideaTaskEvidenceTarget(task = {}) {
 }
 
 function codexTaskEvidenceTarget(task = {}) {
+  return {
+    request_id: task.request_id,
+    gate_marker: task.marker || task.gate_marker || "",
+  };
+}
+
+function crudTaskEvidenceTarget(task = {}) {
   return {
     request_id: task.request_id,
     gate_marker: task.marker || task.gate_marker || "",
@@ -2221,6 +2997,7 @@ export function summarizeEvidenceStages(stages = []) {
       stage.stage === "line_push_final_completed"
       || stage.stage === "idea_json_final_push_completed"
       || stage.stage === "codex_task_final_push_completed"
+      || stage.stage === "crud_task_final_push_completed"
     ) summary.final_push = true;
     if (stage.intent) summary.intent = stage.intent;
     if (stage.tool_called) summary.tool_called = stage.tool_called;
@@ -2277,6 +3054,26 @@ function ideaPendingKey(taskId) {
 
 function ideaFinalKey(taskId) {
   return `${IDEA_TASK_PREFIX}:final:${sanitizeEvidenceId(taskId)}`;
+}
+
+function crudTaskKey(taskId) {
+  return `${CRUD_TASK_PREFIX}:task:${sanitizeEvidenceId(taskId)}`;
+}
+
+function crudPendingKey(taskId) {
+  return `${CRUD_TASK_PREFIX}:pending:${sanitizeEvidenceId(taskId)}`;
+}
+
+function crudFinalKey(taskId) {
+  return `${CRUD_TASK_PREFIX}:final:${sanitizeEvidenceId(taskId)}`;
+}
+
+function crudConfirmationKey(confirmationId) {
+  return `${CRUD_TASK_PREFIX}:confirmation:${sanitizeEvidenceId(confirmationId)}`;
+}
+
+function crudConfirmationActorKey(actorFingerprint) {
+  return `${CRUD_TASK_PREFIX}:confirmation_actor:${sanitizeEvidenceId(actorFingerprint)}`;
 }
 
 function sanitizeEvidenceId(value) {
@@ -2341,6 +3138,132 @@ function sanitizeIdeaTaskRecord(record) {
   };
 }
 
+function sanitizeCrudTaskRecord(record) {
+  const domain = ACCEPTED_CRUD_DOMAINS.includes(record.domain) ? record.domain : "";
+  const operations = domain === "memo" ? ACCEPTED_MEMO_OPERATIONS : domain === "calendar" ? ACCEPTED_CALENDAR_OPERATIONS : [];
+  const operation = operations.includes(record.operation) ? record.operation : "";
+  const body = sanitizeCrudBody(record.body || {}, domain, operation, record.body_text || "");
+  return {
+    schema: "pline-v3-test-crud-task/v1",
+    status: ["queued", "pending", "claimed", "completed", "failed", "needs_confirmation", "needs_clarification", "duplicate"].includes(record.status) ? record.status : "queued",
+    monitor: CODEX_MONITOR_NAME,
+    task_id: sanitizeEvidenceId(record.task_id),
+    task_type: "crud_task",
+    action: CRUD_TASK_ACTION,
+    domain,
+    operation,
+    body,
+    body_text: safeInstruction(record.body_text || body.content || body.query || ""),
+    actor_fingerprint: sanitizeEvidenceId(record.actor_fingerprint),
+    line_event_key: sanitizeEvidenceId(record.line_event_key),
+    request_id: sanitizeEvidenceId(record.request_id),
+    marker: sanitizeEvidenceId(record.marker || ""),
+    line_user_ref: String(record.line_user_ref || ""),
+    finalize_token: sanitizeEvidenceId(record.finalize_token || ""),
+    final_reply_text: naturalCrudReplyText(record.body?.reply_text || "", domain, record.body?.status || record.status),
+    confirmed: record.confirmed === true,
+    confirmation_id: sanitizeEvidenceId(record.confirmation_id || ""),
+    created_at: record.created_at,
+  };
+}
+
+function sanitizeCrudBody(body = {}, domain = "", operation = "", fallbackText = "") {
+  const normalizeText = (value = "") => String(value || "").trim().replace(/\s+/g, " ").slice(0, 1000);
+  const pickTextNoFallback = (...keys) => {
+    for (const key of keys) {
+      const value = normalizeText(body[key] || "");
+      if (value) return value;
+    }
+    return "";
+  };
+  const pickText = (...keys) => {
+    return pickTextNoFallback(...keys) || normalizeText(fallbackText || "");
+  };
+  if (domain === "memo") {
+    const memoCreateContent = normalizeMemoCreateContent(pickText("content", "memo_content", "body_text"));
+    const parsedUpdate = parseMemoUpdateText(pickTextNoFallback("body_text") || fallbackText || pickTextNoFallback("query", "search_query", "target", "target_hint"));
+    const rawMemoQuery = operation === "memo_update"
+      ? (parsedUpdate.query || pickTextNoFallback("query", "search_query", "target", "target_hint") || fallbackText)
+      : pickText("query", "search_query", "target", "target_hint", "body_text");
+    const memoQuery = normalizeMemoTargetText(rawMemoQuery, operation);
+    const memoNewContent = operation === "memo_update"
+      ? normalizeMemoCreateContent(pickTextNoFallback("new_content", "updated_content") || parsedUpdate.new_content)
+      : "";
+    return removeEmptyFields({
+      content: operation === "memo_create" ? memoCreateContent : "",
+      query: ["memo_search", "memo_update", "memo_delete"].includes(operation) ? memoQuery : "",
+      new_content: memoNewContent,
+      reply_text: naturalCrudReplyText(body.reply_text || "", domain, body.status || "ready"),
+    });
+  }
+  return removeEmptyFields({
+    title: pickText("title", "summary"),
+    query: ["calendar_search", "calendar_update", "calendar_delete"].includes(operation) ? pickText("query", "search_query", "target", "target_hint", "title", "body_text") : "",
+    start: String(body.start || "").slice(0, 80),
+    end: String(body.end || "").slice(0, 80),
+    all_day: body.all_day === true,
+    location: String(body.location || "").trim().slice(0, 200),
+    description: String(body.description || "").trim().slice(0, 500),
+    recurrence: String(body.recurrence || "").trim().slice(0, 120),
+    reminders: Array.isArray(body.reminders) ? body.reminders.slice(0, 3).map((item) => Number(item)).filter((item) => Number.isFinite(item) && item >= 0 && item <= 10080) : [],
+    reply_text: naturalCrudReplyText(body.reply_text || "", domain, body.status || "ready"),
+  });
+}
+
+function normalizeMemoCreateContent(value = "") {
+  let text = String(value || "").replace(/\s+/g, " ").trim();
+  const commandPrefixes = ["新增", "建立", "新增備忘錄", "建立備忘錄"];
+  for (const prefix of commandPrefixes) {
+    if (text === prefix) return "";
+    if (text.startsWith(`${prefix}：`) || text.startsWith(`${prefix}:`)) return text.slice(prefix.length + 1).trim();
+    if (text.startsWith(`${prefix} `)) return text.slice(prefix.length + 1).trim();
+  }
+  return text;
+}
+
+function normalizeMemoSearchText(value = "") {
+  let text = String(value || "").replace(/\s+/g, " ").trim();
+  for (const prefix of ["搜尋", "查詢", "查找", "尋找", "找一下", "找"]) {
+    if (text === prefix) return "";
+    if (text.startsWith(`${prefix}：`) || text.startsWith(`${prefix}:`)) return text.slice(prefix.length + 1).trim();
+    if (text.startsWith(`${prefix} `)) return text.slice(prefix.length + 1).trim();
+  }
+  return text;
+}
+
+function normalizeMemoTargetText(value = "", operation = "") {
+  let text = normalizeMemoSearchText(value);
+  if (operation === "memo_delete") {
+    for (const prefix of ["刪除", "删除", "刪掉", "移除"]) {
+      if (text === prefix) return "";
+      if (text.startsWith(`${prefix}：`) || text.startsWith(`${prefix}:`)) return text.slice(prefix.length + 1).trim();
+      if (text.startsWith(`${prefix} `)) return text.slice(prefix.length + 1).trim();
+    }
+  }
+  return text;
+}
+
+function parseMemoUpdateText(value = "") {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  const normalized = text
+    .replace(/^(?:修改備忘錄|更新備忘錄)[\s:：]+/u, "")
+    .trim();
+  const match = normalized.match(/^(?:把|將)\s*[「"]([^」"]{1,400})[」"]\s*(?:的內容|的備忘錄|備忘錄)?\s*改(?:成|為)\s*[「"]([^」"]{1,400})[」"]$/u)
+    || normalized.match(/^(?:把|將)\s+(.{1,400}?)\s*(?:的內容|的備忘錄|備忘錄)?\s*改(?:成|為)\s+(.{1,400})$/u);
+  if (!match) return { query: "", new_content: "" };
+  return {
+    query: normalizeMemoSearchText(stripMemoUpdatePart(match[1])),
+    new_content: normalizeMemoCreateContent(stripMemoUpdatePart(match[2])),
+  };
+}
+
+function stripMemoUpdatePart(value = "") {
+  return String(value || "")
+    .replace(/^[「"\s]+/u, "")
+    .replace(/[」"\s]+$/u, "")
+    .trim();
+}
+
 function sanitizeIdeaJson(idea) {
   return {
     schema_version: "1.0",
@@ -2368,6 +3291,31 @@ function naturalIdeaReplyText(replyText = "") {
     return IDEA_SAVED_FALLBACK_REPLY_TEXT;
   }
   return text;
+}
+
+function naturalCrudReplyText(replyText = "", domain = "", status = "completed") {
+  const text = String(replyText || "").replace(/\s+/g, " ").trim();
+  if (text && text.length <= 160 && !hasCrudFinalForbiddenText(text)) {
+    return text;
+  }
+  if (status === "failed") {
+    return domain === "calendar"
+      ? "這次沒有順利處理行事曆，我先不假裝已完成 🙏"
+      : "這次沒有順利處理備忘錄，我先不假裝已完成 🙏";
+  }
+  if (status === "needs_confirmation") {
+    return "這個動作需要妳先確認，請回覆「確認」。";
+  }
+  if (status === "needs_clarification") {
+    return domain === "calendar"
+      ? "請再補充一下要處理哪一筆行事曆。"
+      : "請再補充一下要處理哪一筆備忘錄。";
+  }
+  return domain === "calendar" ? "行事曆已處理完成了。" : "備忘錄已處理完成了。";
+}
+
+function hasCrudFinalForbiddenText(text = "") {
+  return /(?:_03|_02|\bTEST\b|n8n|worker|monitor|\bJSON\b|execution|queued|task_id|stack trace|runtime\/|\/Users\/|Dropbox|secret|token|raw User ID|webhook|cloudflare|Google Calendar event ID|event_id|工作流|本機絕對路徑)/i.test(String(text || ""));
 }
 
 function naturalCodexFinalText(replyText = "") {
@@ -2512,6 +3460,14 @@ function parseJsonSafely(raw) {
   }
 }
 
+function removeEmptyFields(record = {}) {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => {
+    if (value === undefined || value === null || value === "") return false;
+    if (Array.isArray(value) && value.length === 0) return false;
+    return true;
+  }));
+}
+
 function taipeiIsoString(date) {
   const formatter = new Intl.DateTimeFormat("sv-SE", {
     timeZone: "Asia/Taipei",
@@ -2528,6 +3484,34 @@ function taipeiIsoString(date) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function putRuntimeKvWithRetry(kv, key, value, options = {}) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await kv.put(key, value, options);
+      return { ok: true };
+    } catch (error) {
+      lastError = error;
+      await sleep(25 * (attempt + 1));
+    }
+  }
+  return { ok: false, reason: `kv_put_${lastError?.name || "Error"}` };
+}
+
+async function deleteRuntimeKvBestEffort(kv, keys = []) {
+  if (!kv?.delete) {
+    return { ok: false, reason: "kv_delete_unavailable" };
+  }
+  for (const key of keys) {
+    try {
+      await kv.delete(key);
+    } catch {
+      // Self-check cleanup must not hide the live-path verification result.
+    }
+  }
+  return { ok: true };
 }
 
 function sanitizeEvidenceRecord(record) {
@@ -2548,6 +3532,15 @@ function sanitizeEvidenceRecord(record) {
     "tool_called",
     "saved_record",
     "codex_task",
+    "domain",
+    "operation",
+    "needs_confirmation",
+    "needs_clarification",
+    "candidate_count",
+    "is_confirmation_text",
+    "has_actor_fingerprint",
+    "pending_found",
+    "pending_written",
     "action",
     "task_id_present",
     "monitor",

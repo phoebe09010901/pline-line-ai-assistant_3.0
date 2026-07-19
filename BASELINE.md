@@ -46,6 +46,36 @@ Excluded:
 
 This DOC baseline is accepted when all ten required files exist in the project root and describe only the minimal dual-path `_03` scope.
 
+## Memo / Calendar Basic CRUD Baseline Extension
+
+The current DOC Gate extends the accepted baseline with two fixed LINE entry prefixes:
+
+- `備忘錄`
+- `行事曆`
+
+Included in this document-only extension:
+
+- deterministic trim + first-word routing
+- memo CRUD action list
+- calendar CRUD action list
+- confirmation requirements
+- actor fingerprint and exactly-once confirmation boundary
+- fixed `_03` Dropbox memo directory
+- authorized TEST Calendar boundary
+- natural Traditional Chinese reply contract
+- no-secret, no raw LINE User ID, no full-payload documentation boundary
+
+Excluded from this document-only extension:
+
+- n8n workflow edits
+- Cloudflare Worker edits
+- LINE Developers or LINE app operation
+- Google Calendar live operation
+- Dropbox file creation or inspection
+- Git commit or push
+- Google Tasks
+- email, attachments, multi-agent, FORMAL, real-time wake, WebSocket, or broad regex routing
+
 ## Post-Baseline TEST Extension
 
 The accepted TEST project now includes a fixed Dropbox idea JSON save path for Path A. The extension keeps the same clean-room boundaries and uses only:

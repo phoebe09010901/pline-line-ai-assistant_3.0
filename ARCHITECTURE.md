@@ -4,6 +4,8 @@
 
 Create the smallest TEST-only bridge from LINE to n8n and Codex.
 
+Current DOC Gate adds fixed Memo and Calendar CRUD entry prefixes while keeping routing small and deterministic.
+
 ## Component Map
 
 ```text
@@ -146,9 +148,109 @@ Allowed fields only:
 
 Raw LINE User ID, secrets, signatures, and full webhook payloads are not stored.
 
+## Memo / Calendar Basic CRUD Architecture
+
+### Fixed Entry Router
+
+Worker trims the LINE text and reads only the first word:
+
+- `備忘錄` routes to memo.
+- `行事曆` routes to calendar.
+
+The first word is the only route selector. Worker must not infer the route with AI, broad regex, fixed sentence catalogs, or mixed memo/calendar heuristics.
+
+After the prefix is removed, the remaining user text is passed to n8n AI Agent for natural-language understanding inside the selected domain.
+
+### Memo Domain
+
+Allowed actions:
+
+- `memo_create`
+- `memo_update`
+- `memo_delete`
+- `memo_search`
+
+Storage boundary:
+
+```text
+/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03
+```
+
+Memo tools must use fixed JSON operations inside the `_03` Dropbox directory only. They must reject arbitrary shell commands, arbitrary paths, user-provided filenames, and scans outside the fixed directory.
+
+Memo update rules:
+
+- Exactly one match: may update.
+- Zero matches: ask a natural follow-up.
+- Multiple matches: show a safe candidate summary and ask for confirmation.
+
+Memo delete always requires confirmation.
+
+### Calendar Domain
+
+Allowed actions:
+
+- `calendar_create`
+- `calendar_update`
+- `calendar_delete`
+- `calendar_search`
+
+Calendar uses the current authorized Google Calendar TEST boundary. LINE-facing copy says only `行事曆`.
+
+Supported first-version fields:
+
+- title
+- date/time
+- all-day event
+- location
+- description
+- reminder
+- basic recurrence
+
+Calendar update rules:
+
+- Exactly one match: may update when the requested change is narrow.
+- Zero matches: ask a natural follow-up.
+- Multiple matches: show a safe candidate summary and ask for confirmation.
+- Broad recurring-event changes require confirmation.
+
+Calendar delete always requires confirmation. Google Calendar event IDs must never appear in LINE-visible replies.
+
+### Confirmation State
+
+Confirmation is required for:
+
+- `memo_delete`
+- `calendar_delete`
+- multi-candidate updates
+- broad recurring-event changes
+- any target the AI cannot identify uniquely
+
+Confirmation state must be:
+
+- scoped to the same actor fingerprint
+- short-lived
+- exactly-once
+- stored without raw LINE User ID
+- invalidated after completion, expiry, or mismatch
+
+### Natural Reply Contract
+
+LINE replies must be:
+
+- Traditional Chinese
+- natural
+- 1-3 sentences
+- truthful about the completed or pending action
+- free of implementation details
+
+Replies must not mention n8n, Worker, JSON, Dropbox, tool names, intent names, event IDs, Google event IDs, local file paths, secrets, raw LINE User IDs, full payloads, or internal task identifiers.
+
+Fast tasks should not send a fixed processing ACK. Webhook HTTP `200` remains the transport acknowledgement.
+
 ## Explicit Non-Goals
 
-No Google Calendar, accounting, email, attachments, multiple agents, FORMAL mode, real-time wake, WebSocket, complex queue, complex state machine, compatibility layer, or broad regex/if/else intent routing.
+No accounting, email, attachments, multiple agents, FORMAL mode, real-time wake, WebSocket, complex queue, complex state machine, compatibility layer, Google Tasks, or broad regex/if/else intent routing. Calendar support in this Gate is limited to the fixed `行事曆` TEST CRUD boundary above.
 
 ## TEST Status: Natural Final Without Visible ACK
 
@@ -195,3 +297,13 @@ The `_03` Codex path now separates routing from host execution:
 - Approval bridge state stays in task/KV records and uses a LINE confirmation code before requeueing high-risk tasks.
 
 Legacy `create_smoke_file` remains only for local monitor regression compatibility and is no longer the Worker router's general-task replacement.
+## Memo/Calendar CRUD Extension - 2026-07-18
+
+- LINE -> Worker keeps HTTP 200 behavior and no fixed visible ACK.
+- Worker applies deterministic prefix routing before n8n: `備忘錄` maps to memo domain, `行事曆` maps to calendar domain.
+- n8n returns a constrained CRUD contract; Worker enqueues `crud_task:v1`.
+- Monitor durable runner claims `crud_task:v1:pending:*`.
+- Memo executor writes fixed `_03` Dropbox `memo-*.json` records.
+- Calendar executor is a `_03` local TEST adapter until Google Calendar OAuth/TEST Calendar host credentials are explicitly wired.
+- Monitor calls Worker `/test/crud-finalize`; Worker performs LINE final push exactly once.
+- Confirmation is stored in KV by actor fingerprint and expires after a short TTL.

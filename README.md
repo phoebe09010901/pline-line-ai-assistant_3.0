@@ -36,9 +36,35 @@ with exactly:
 Codex 已打通
 ```
 
-## First Version Limits
+## Original First Version Limits
 
-This baseline does not include Google Calendar, accounting, email, attachments, multiple agents, FORMAL flows, real-time wake, WebSocket, complex queueing, complex state machines, compatibility layers, or broad regex/branch logic.
+Before the Memo/Calendar Basic CRUD Gate, the original baseline did not include calendar operations. The current Gate opens only the fixed TEST `行事曆` CRUD boundary described below. Accounting, email, attachments, multiple agents, FORMAL flows, real-time wake, WebSocket, complex queueing, complex state machines, compatibility layers, Google Tasks, and broad regex/branch logic remain out of scope.
+
+## Memo / Calendar Basic CRUD Gate
+
+Current DOC design extends the LINE entry surface from one idea phrase into two fixed safe prefixes:
+
+- `備忘錄`: route to memo CRUD.
+- `行事曆`: route to calendar CRUD.
+
+The Worker only trims the message and checks the first word. Natural-language interpretation after the prefix belongs to the n8n AI Agent. The router must not guess the entry by AI, must not use broad regex or large fixed phrase lists, must not save calendar requests as memo records, and must not create memo requests as calendar events.
+
+Memo first version:
+
+- Actions: `memo_create`, `memo_update`, `memo_delete`, `memo_search`
+- Storage boundary: JSON files under `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`
+- Delete requires confirmation.
+- Update may proceed only when there is exactly one match.
+- Zero or multiple matches require a natural follow-up or candidate summary.
+
+Calendar first version:
+
+- Actions: `calendar_create`, `calendar_update`, `calendar_delete`, `calendar_search`
+- Uses the currently authorized Google Calendar TEST boundary.
+- Supports events/tasks as calendar events, all-day events, time, location, description, reminders, and basic recurrence.
+- Does not connect Google Tasks.
+- Delete requires confirmation; update requires exactly one match or a natural follow-up.
+- LINE-visible text says only `行事曆` and must not expose Google Calendar event IDs.
 
 ## Planned Components
 

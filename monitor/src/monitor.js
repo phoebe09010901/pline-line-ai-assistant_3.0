@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,15 +27,21 @@ export const SMOKE_FILE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理
 export const SMOKE_FILE_CONTENT = "Codex 任務測試成功";
 export const FIXED_ACTION = "create_smoke_file";
 export const SAVE_IDEA_ACTION = "save_idea_json";
+export const CRUD_ACTION = "crud_task";
 export { CODEX_DELEGATE_ACTION };
 export const DROPBOX_IDEA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03";
+export const TEST_CALENDAR_STORE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/google-calendar-test/events.json";
 export const WORKER_BASE_URL = "https://pline-v3-test-line-gateway.phy4175.workers.dev";
 export const IDEA_FINALIZE_PATH = "/test/idea-finalize";
 export const CODEX_FINALIZE_PATH = "/test/codex-finalize";
+export const CRUD_FINALIZE_PATH = "/test/crud-finalize";
 export const TASK_PREFIX = "codex_task:v1";
 export const IDEA_TASK_PREFIX = "idea_json:v1";
+export const CRUD_TASK_PREFIX = "crud_task:v1";
 export const TASK_PENDING_PREFIX = `${TASK_PREFIX}:pending:`;
 export const IDEA_TASK_PENDING_PREFIX = `${IDEA_TASK_PREFIX}:pending:`;
+export const CRUD_TASK_PENDING_PREFIX = `${CRUD_TASK_PREFIX}:pending:`;
+export const CRUD_CONFIRMATION_TTL_MS = 10 * 60 * 1000;
 export const CODEX_LAST_CREATED_FILE_KEY = `${TASK_PREFIX}:context:last_created_file`;
 export const EVIDENCE_PREFIX = "evidence:v1";
 export const EVIDENCE_TTL_SECONDS = 172800;
@@ -85,12 +91,14 @@ export async function health(env = process.env) {
     codex_task_project_path: CODEX_TASK_PROJECT_PATH,
     smoke_file_path: SMOKE_FILE_PATH,
     smoke_file_content: SMOKE_FILE_CONTENT,
-    supported_actions: [CODEX_DELEGATE_ACTION, FIXED_ACTION, SAVE_IDEA_ACTION],
-    task_prefixes: [TASK_PREFIX, IDEA_TASK_PREFIX],
+    supported_actions: [CODEX_DELEGATE_ACTION, FIXED_ACTION, SAVE_IDEA_ACTION, CRUD_ACTION],
+    task_prefixes: [TASK_PREFIX, IDEA_TASK_PREFIX, CRUD_TASK_PREFIX],
     task_prefix: TASK_PREFIX,
     idea_task_prefix: IDEA_TASK_PREFIX,
-    pending_prefixes: [TASK_PENDING_PREFIX, IDEA_TASK_PENDING_PREFIX],
+    pending_prefixes: [TASK_PENDING_PREFIX, IDEA_TASK_PENDING_PREFIX, CRUD_TASK_PENDING_PREFIX],
     dropbox_idea_dir: DROPBOX_IDEA_DIR,
+    dropbox_memo_dir: DROPBOX_IDEA_DIR,
+    test_calendar_store_path: TEST_CALENDAR_STORE_PATH,
     evidence_prefix: EVIDENCE_PREFIX,
     runtime_kv_namespace_id: RUNTIME_KV_NAMESPACE_ID,
     runner: {
@@ -120,6 +128,9 @@ export async function runTask(task, env = process.env, options = {}) {
   const normalized = normalizeTask(task);
   if (normalized.action === SAVE_IDEA_ACTION) {
     return saveIdeaJson(normalized);
+  }
+  if (normalized.action === CRUD_ACTION) {
+    return runCrudTask(normalized, env, options);
   }
 
   if (normalized.action === CODEX_DELEGATE_ACTION) {
@@ -230,9 +241,10 @@ export async function runTask(task, env = process.env, options = {}) {
 export function normalizeTask(task = {}) {
   const action = task.action || FIXED_ACTION;
   const isCodexLikeAction = action === FIXED_ACTION || action === CODEX_DELEGATE_ACTION;
+  const isCrudAction = action === CRUD_ACTION;
   return {
     task_id: sanitizeId(task.task_id || "pline-v3-test-smoke"),
-    task_type: isCodexLikeAction ? "codex_task" : "",
+    task_type: isCodexLikeAction ? "codex_task" : isCrudAction ? "crud_task" : "",
     project: action === FIXED_ACTION ? sanitizeLabel(task.project || CODEX_TASK_PROJECT) : isCodexLikeAction ? sanitizeLabel(task.project || "菲比 LINE 智能助理_03") : sanitizeLabel(task.project || ""),
     project_path: action === FIXED_ACTION ? String(task.project_path || CODEX_TASK_PROJECT_PATH) : isCodexLikeAction ? String(task.project_path || PROJECT_ROOT) : String(task.project_path || ""),
     instruction: action === FIXED_ACTION ? String(task.instruction || "Create or overwrite the fixed smoke file with the fixed smoke content.") : String(task.instruction || task.original_user_text || ""),
@@ -241,14 +253,22 @@ export function normalizeTask(task = {}) {
     marker: sanitizeId(task.marker || ""),
     action,
     created_at: String(task.created_at || ""),
-    target_path: task.target_path || SMOKE_FILE_PATH,
+    target_path: isCodexLikeAction ? task.target_path || SMOKE_FILE_PATH : "",
     target_dir: task.target_dir || DROPBOX_IDEA_DIR,
-    content: task.content || SMOKE_FILE_CONTENT,
+    content: action === FIXED_ACTION ? task.content || SMOKE_FILE_CONTENT : String(task.content || ""),
     idea: task.idea || null,
     finalize_token: sanitizeId(task.finalize_token || ""),
     final_reply_text: String(task.final_reply_text || ""),
     line_user_ref: String(task.line_user_ref || ""),
     approval: task.approval || null,
+    domain: isCrudAction ? sanitizeId(task.domain || "") : "",
+    operation: isCrudAction ? sanitizeId(task.operation || "") : "",
+    body_text: isCrudAction ? String(task.body_text || "").replace(/\s+/g, " ").trim().slice(0, 1000) : "",
+    body: isCrudAction ? sanitizeCrudBody(task.body || {}, task.body_text || "", task.operation || "") : null,
+    actor_fingerprint: sanitizeId(task.actor_fingerprint || ""),
+    line_event_key: sanitizeId(task.line_event_key || ""),
+    confirmed: task.confirmed === true,
+    confirmation_id: sanitizeId(task.confirmation_id || ""),
   };
 }
 
@@ -261,7 +281,7 @@ export async function claimOnce(options = {}) {
   if (options.taskId || options.task_id) {
     keys.push({ name: taskKey(options.taskId || options.task_id, options.action || FIXED_ACTION) });
   } else {
-    for (const prefix of [TASK_PENDING_PREFIX, IDEA_TASK_PENDING_PREFIX]) {
+    for (const prefix of [TASK_PENDING_PREFIX, IDEA_TASK_PENDING_PREFIX, CRUD_TASK_PENDING_PREFIX]) {
       const pendingKeys = await kv.list(prefix);
       for (const pendingKey of pendingKeys) {
         keys.push({
@@ -271,7 +291,7 @@ export async function claimOnce(options = {}) {
       }
     }
     if (keys.length === 0 && options.legacyScan !== false) {
-      for (const prefix of [`${TASK_PREFIX}:task:`, `${IDEA_TASK_PREFIX}:task:`]) {
+      for (const prefix of [`${TASK_PREFIX}:task:`, `${IDEA_TASK_PREFIX}:task:`, `${CRUD_TASK_PREFIX}:task:`]) {
         keys.push(...await kv.list(prefix));
       }
     }
@@ -343,11 +363,21 @@ export async function claimOnce(options = {}) {
       });
     };
 
-    const execution = await runTask(task, env, {
-      ...options,
-      kv,
-      onCodexStarted: notifyProcessingStarted,
-    });
+    let execution;
+    try {
+      execution = await runTask(task, env, {
+        ...options,
+        kv,
+        onCodexStarted: notifyProcessingStarted,
+      });
+    } catch (error) {
+      execution = {
+        ok: false,
+        status: "failed",
+        reason: sanitizeId(error?.name || "task_execution_exception"),
+        reply_text: "這次沒有順利處理，我先不假裝已完成 🙏",
+      };
+    }
     if (execution.ok && execution.status === APPROVAL_STATUS) {
       const approvalRecord = {
         ...claimRecord,
@@ -419,6 +449,23 @@ export async function claimOnce(options = {}) {
           reason: callbackResult.ok ? "" : callbackResult.reason,
         });
       }
+      if (task.action === CRUD_ACTION) {
+        await kv.put(crudResultKey(task.task_id), JSON.stringify(crudResultRecord(task, {
+          ok: false,
+          status: "failed",
+          reason: execution.reason,
+          reply_text: execution.reply_text,
+        })));
+        const callbackResult = await notifyCrudFinalizer(task, "failed", env, execution.reason);
+        await writeEvidenceStage(kv, task, callbackResult.ok ? "crud_task_final_callback_completed" : "crud_task_final_callback_failed", {
+          monitor: MONITOR_NAME,
+          action: task.action,
+          domain: task.domain,
+          operation: task.operation,
+          status: "failed",
+          reason: callbackResult.ok ? "" : callbackResult.reason,
+        });
+      }
       await writeEvidenceStage(kv, task, "codex_execution_failed", {
         monitor: MONITOR_NAME,
         reason: execution.reason,
@@ -427,23 +474,29 @@ export async function claimOnce(options = {}) {
       return { ok: false, reason: execution.reason, task_id: task.task_id, request_id: task.request_id };
     }
 
-    const completedStatus = execution.status === "duplicate" ? "duplicate" : "completed";
+    const completedStatus = ["duplicate", "needs_confirmation", "needs_clarification", "failed"].includes(execution.status) ? execution.status : "completed";
     const completedAt = new Date().toISOString();
     if (task.action === CODEX_DELEGATE_ACTION && execution.codex_received && execution.codex_execution) {
       await notifyProcessingStarted();
     }
-    await writeEvidenceStage(kv, task, task.action === SAVE_IDEA_ACTION ? "idea_json_saved" : "codex_execution_completed", {
+    await writeEvidenceStage(kv, task, task.action === SAVE_IDEA_ACTION ? "idea_json_saved" : task.action === CRUD_ACTION ? "crud_task_executed" : "codex_execution_completed", {
       monitor: MONITOR_NAME,
       codex_execution: (task.action === FIXED_ACTION || task.action === CODEX_DELEGATE_ACTION) || undefined,
       saved: task.action === SAVE_IDEA_ACTION ? execution.status || "saved" : undefined,
       action: task.action,
+      domain: task.domain,
+      operation: task.operation,
     });
-    await writeEvidenceStage(kv, task, task.action === SAVE_IDEA_ACTION ? "idea_json_file_written" : task.action === CODEX_DELEGATE_ACTION ? "codex_task_result_received" : "smoke_file_written", {
+    await writeEvidenceStage(kv, task, task.action === SAVE_IDEA_ACTION ? "idea_json_file_written" : task.action === CRUD_ACTION ? "crud_task_result_received" : task.action === CODEX_DELEGATE_ACTION ? "codex_task_result_received" : "smoke_file_written", {
       monitor: MONITOR_NAME,
       file_written: task.action === SAVE_IDEA_ACTION || task.action === FIXED_ACTION,
       action: task.action,
       status: completedStatus,
       file_name: execution.file_name,
+      domain: task.domain,
+      operation: task.operation,
+      needs_confirmation: completedStatus === "needs_confirmation",
+      needs_clarification: completedStatus === "needs_clarification",
     });
     const completedTaskRecord = {
       ...claimRecord,
@@ -460,6 +513,8 @@ export async function claimOnce(options = {}) {
       codex_received: execution.codex_received,
       tool_event_count: execution.tool_event_count,
       result_file: execution.result_file,
+      final_reply_text: execution.reply_text || task.final_reply_text,
+      confirmation_id: execution.confirmation_id || task.confirmation_id,
     };
     await kv.put(taskKey(task.task_id, task.action), JSON.stringify(completedTaskRecord));
     warnings.push(await bestEffortDeletePendingIndex(kv, task, pendingKey(task.task_id, task.action), "completed_task_pending_index_cleanup"));
@@ -492,6 +547,29 @@ export async function claimOnce(options = {}) {
       await writeEvidenceStage(kv, task, callbackResult.ok ? "idea_json_final_callback_completed" : "idea_json_final_callback_failed", {
         monitor: MONITOR_NAME,
         action: task.action,
+        status: completedStatus,
+        reason: callbackResult.ok ? "" : callbackResult.reason,
+      });
+    }
+    if (task.action === CRUD_ACTION) {
+      const resultRecord = crudResultRecord(task, execution);
+      await kv.put(crudResultKey(task.task_id), JSON.stringify(resultRecord));
+      await writeEvidenceStage(kv, task, "crud_task_result_recorded", {
+        monitor: MONITOR_NAME,
+        action: task.action,
+        domain: task.domain,
+        operation: task.operation,
+        status: resultRecord.status,
+      });
+      const callbackResult = await notifyCrudFinalizer({
+        ...task,
+        final_reply_text: execution.reply_text || task.final_reply_text,
+      }, completedStatus, env, execution.reason || "");
+      await writeEvidenceStage(kv, task, callbackResult.ok ? "crud_task_final_callback_completed" : "crud_task_final_callback_failed", {
+        monitor: MONITOR_NAME,
+        action: task.action,
+        domain: task.domain,
+        operation: task.operation,
         status: completedStatus,
         reason: callbackResult.ok ? "" : callbackResult.reason,
       });
@@ -871,6 +949,160 @@ export async function saveIdeaJson(task = {}) {
   };
 }
 
+export async function runCrudTask(task = {}, env = process.env, options = {}) {
+  const normalized = normalizeTask(task);
+  if (normalized.action !== CRUD_ACTION) {
+    return { ok: false, reason: "unsupported_action" };
+  }
+  if (normalized.domain === "memo") {
+    return runMemoCrud(normalized, options);
+  }
+  if (normalized.domain === "calendar") {
+    return runCalendarCrud(normalized, options);
+  }
+  return { ok: false, reason: "unsupported_crud_domain" };
+}
+
+export async function runMemoCrud(task = {}, options = {}) {
+  await mkdir(DROPBOX_IDEA_DIR, { recursive: true });
+  const operation = task.operation;
+  if (operation === "memo_create") {
+    const content = normalizeMemoCreateContent(task.body?.content || task.body_text || "");
+    if (!content) return { ok: false, status: "failed", reason: "missing_memo_content", reply_text: "這次沒有順利處理備忘錄，我先不假裝已完成 🙏" };
+    const memo = normalizeMemoJson({
+      memo_id: `memo-${stableHash(`${task.line_event_key}:${content}`).slice(0, 16)}`,
+      content,
+      search_keys: memoSearchKeysFrom(content),
+      created_at: taipeiIsoString(new Date()),
+      updated_at: taipeiIsoString(new Date()),
+      actor_fingerprint: task.actor_fingerprint,
+      line_event_key: task.line_event_key,
+      status: "active",
+    });
+    const validation = validateMemoJson(memo);
+    if (!validation.ok) return { ok: false, status: "failed", reason: validation.reason };
+    const saved = await atomicWriteMemoJson(memo);
+    return {
+      ok: true,
+      status: saved.duplicate ? "duplicate" : "completed",
+      action: CRUD_ACTION,
+      file_name: saved.file_name,
+      mtime_ms: saved.mtime_ms,
+      mtime_iso: saved.mtime_iso,
+      reply_text: saved.duplicate ? "" : "備忘錄已新增好了。",
+    };
+  }
+
+  const query = normalizeMemoTargetQuery(task.body?.query || task.body_text || "", operation);
+  if (!query) return { ok: true, status: "needs_clarification", reason: "missing_memo_query", reply_text: "請再補充一下要處理哪一筆備忘錄。" };
+  const matches = await searchMemoFiles(query, task.actor_fingerprint);
+  if (operation === "memo_search") {
+    if (matches.length === 0) return { ok: true, status: "completed", reply_text: "目前沒有找到符合的備忘錄。" };
+    const summary = matches.slice(0, 3).map((item, index) => `${index + 1}. ${safeVisibleText(item.memo.content, 40)}`).join("\n");
+    return { ok: true, status: "completed", reply_text: `找到這些備忘錄：\n${summary}` };
+  }
+  if (matches.length === 0) return { ok: true, status: "needs_clarification", reason: "memo_target_not_found", reply_text: "沒有找到明確符合的備忘錄，請再描述一下。" };
+  if (matches.length > 1) return { ok: true, status: "needs_clarification", reason: "memo_multiple_candidates", reply_text: `找到 ${matches.length} 筆可能符合，請再補充一點關鍵字。` };
+
+  const match = matches[0];
+  if (operation === "memo_update") {
+    const parsedUpdate = parseMemoUpdateText(task.body_text || task.body?.query || "");
+    const newContent = normalizeMemoCreateContent(task.body?.new_content || parsedUpdate.new_content || "");
+    if (!newContent) return { ok: true, status: "needs_clarification", reason: "missing_memo_new_content", reply_text: "請告訴我要把這筆備忘錄改成什麼內容。" };
+    const updated = normalizeMemoJson({
+      ...match.memo,
+      content: newContent,
+      search_keys: mergeMemoSearchKeys(match.memo.search_keys, query, match.memo.content),
+      updated_at: taipeiIsoString(new Date()),
+      status: "active",
+    });
+    const saved = await overwriteJsonFile(match.path, updated);
+    return { ok: true, status: "completed", file_name: match.file_name, mtime_ms: saved.mtime_ms, mtime_iso: saved.mtime_iso, reply_text: "備忘錄已更新好了。" };
+  }
+  if (operation === "memo_delete") {
+    if (!task.confirmed) {
+      const confirmation = await createCrudConfirmation(task, options.kv, {
+        target_file_name: match.file_name,
+        target_summary: safeVisibleText(match.memo.content, 80),
+      });
+      return { ok: true, status: "needs_confirmation", confirmation_id: confirmation.confirmation_id, reply_text: `要刪除「${safeVisibleText(match.memo.content, 40)}」嗎？請回覆「確認」。` };
+    }
+    await unlink(match.path);
+    return { ok: true, status: "completed", file_name: match.file_name, reply_text: "備忘錄已刪除了。" };
+  }
+  return { ok: false, status: "failed", reason: "unsupported_memo_operation" };
+}
+
+export async function runCalendarCrud(task = {}, options = {}) {
+  const store = await readCalendarStore();
+  const operation = task.operation;
+  const now = taipeiIsoString(new Date());
+  if (operation === "calendar_create") {
+    const title = String(task.body?.title || task.body_text || "").trim();
+    const start = String(task.body?.start || "").trim();
+    if (!title || !start) {
+      return { ok: true, status: "needs_clarification", reason: "missing_calendar_required_fields", reply_text: "請補充行事曆標題和時間，我才不會猜錯。" };
+    }
+    const event = {
+      id: `cal-${stableHash(`${task.line_event_key}:${title}:${start}`).slice(0, 16)}`,
+      title,
+      start,
+      end: String(task.body?.end || ""),
+      all_day: task.body?.all_day === true,
+      location: String(task.body?.location || ""),
+      description: String(task.body?.description || ""),
+      recurrence: String(task.body?.recurrence || ""),
+      reminders: Array.isArray(task.body?.reminders) ? task.body.reminders : [],
+      actor_fingerprint: task.actor_fingerprint,
+      created_at: now,
+      updated_at: now,
+      status: "active",
+    };
+    if (!store.events.some((existing) => existing.id === event.id)) {
+      store.events.push(event);
+      await writeCalendarStore(store);
+    }
+    return { ok: true, status: "completed", reply_text: "行事曆已新增好了。" };
+  }
+
+  const query = String(task.body?.query || task.body?.title || task.body_text || "").trim();
+  if (!query) return { ok: true, status: "needs_clarification", reason: "missing_calendar_query", reply_text: "請再補充一下要找哪一筆行事曆。" };
+  const matches = store.events.filter((event) => event.status === "active" && event.actor_fingerprint === task.actor_fingerprint && event.title.includes(query));
+  if (operation === "calendar_search") {
+    if (matches.length === 0) return { ok: true, status: "completed", reply_text: "目前沒有找到符合的行事曆。" };
+    const summary = matches.slice(0, 3).map((event, index) => `${index + 1}. ${safeVisibleText(event.title, 40)}`).join("\n");
+    return { ok: true, status: "completed", reply_text: `找到這些行事曆：\n${summary}` };
+  }
+  if (matches.length === 0) return { ok: true, status: "needs_clarification", reason: "calendar_target_not_found", reply_text: "沒有找到明確符合的行事曆，請再描述一下。" };
+  if (matches.length > 1) return { ok: true, status: "needs_clarification", reason: "calendar_multiple_candidates", reply_text: `找到 ${matches.length} 筆可能符合，請再補充一點關鍵字。` };
+  const target = matches[0];
+  if (operation === "calendar_update") {
+    Object.assign(target, removeEmptyFields({
+      title: task.body?.title && task.body.title !== query ? task.body.title : "",
+      start: task.body?.start || "",
+      end: task.body?.end || "",
+      location: task.body?.location || "",
+      description: task.body?.description || "",
+      updated_at: now,
+    }));
+    await writeCalendarStore(store);
+    return { ok: true, status: "completed", reply_text: "行事曆已更新好了。" };
+  }
+  if (operation === "calendar_delete") {
+    if (!task.confirmed) {
+      const confirmation = await createCrudConfirmation(task, options.kv, {
+        target_summary: safeVisibleText(target.title, 80),
+      });
+      return { ok: true, status: "needs_confirmation", confirmation_id: confirmation.confirmation_id, reply_text: `要刪除「${safeVisibleText(target.title, 40)}」嗎？請回覆「確認」。` };
+    }
+    target.status = "deleted";
+    target.updated_at = now;
+    await writeCalendarStore(store);
+    return { ok: true, status: "completed", reply_text: "行事曆已刪除了。" };
+  }
+  return { ok: false, status: "failed", reason: "unsupported_calendar_operation" };
+}
+
 export async function notifyIdeaFinalizer(task = {}, status = "completed", env = process.env) {
   if (task.action !== SAVE_IDEA_ACTION) {
     return { ok: true, status: "skipped_non_idea_task" };
@@ -961,6 +1193,46 @@ export async function notifyCodexFinalizer(task = {}, status = "completed", env 
   };
 }
 
+export async function notifyCrudFinalizer(task = {}, status = "completed", env = process.env, reason = "") {
+  if (task.action !== CRUD_ACTION) {
+    return { ok: true, status: "skipped_non_crud_task" };
+  }
+  if (env.CRUD_FINALIZE_DISABLED === "1") {
+    return { ok: true, status: "disabled" };
+  }
+  if (!task.finalize_token) {
+    return { ok: false, reason: "missing_finalize_token" };
+  }
+  const baseUrl = String(env.WORKER_BASE_URL || WORKER_BASE_URL).replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}${CRUD_FINALIZE_PATH}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(removeEmptyFields({
+      task_id: task.task_id,
+      request_id: task.request_id,
+      action: CRUD_ACTION,
+      status,
+      reason,
+      finalize_token: task.finalize_token,
+      reply_text: task.final_reply_text || "",
+    })),
+  });
+  let body = {};
+  try {
+    body = await response.json();
+  } catch {
+    body = {};
+  }
+  if (!response.ok || body.status === "rejected") {
+    return {
+      ok: false,
+      reason: body.reason || `finalize_http_${response.status}`,
+      status: body.status || "failed",
+    };
+  }
+  return { ok: true, status: body.status || "ok", pushed: Boolean(body.pushed) };
+}
+
 export function codexResultRecord(task = {}, execution = {}) {
   if (!execution.ok) {
     return {
@@ -997,6 +1269,21 @@ export function codexResultRecord(task = {}, execution = {}) {
     }
   }
   return record;
+}
+
+export function crudResultRecord(task = {}, execution = {}) {
+  return {
+    task_id: task.task_id,
+    status: execution.status || (execution.ok ? "completed" : "failed"),
+    created_at: task.created_at || "",
+    domain: task.domain || "",
+    operation: task.operation || "",
+    summary: execution.ok ? "CRUD task completed." : "CRUD task did not complete.",
+    tests: execution.ok ? "PASS" : "FAIL",
+    changed_files: [],
+    commit: null,
+    error: execution.ok ? null : execution.reason || "unknown_error",
+  };
 }
 
 export function normalizeIdeaJson(idea = {}) {
@@ -1039,6 +1326,174 @@ export function validateIdeaJson(idea = {}) {
   if (idea.intent !== "idea_create") return { ok: false, reason: "invalid_intent" };
   if (idea.status !== "saved") return { ok: false, reason: "invalid_status" };
   return { ok: true };
+}
+
+export function normalizeMemoJson(memo = {}) {
+  return {
+    schema_version: "1.0",
+    memo_id: sanitizeId(memo.memo_id),
+    content: String(memo.content || "").trim(),
+    search_keys: normalizeMemoSearchKeys(memo.search_keys || memo.search_key || []),
+    created_at: String(memo.created_at || ""),
+    updated_at: String(memo.updated_at || ""),
+    source: "line",
+    actor_fingerprint: sanitizeId(memo.actor_fingerprint),
+    line_event_key: sanitizeId(memo.line_event_key),
+    status: memo.status === "deleted" ? "deleted" : "active",
+  };
+}
+
+export function validateMemoJson(memo = {}) {
+  const allowedKeys = ["schema_version", "memo_id", "content", "search_keys", "created_at", "updated_at", "source", "actor_fingerprint", "line_event_key", "status"];
+  if (JSON.stringify(Object.keys(memo).sort()) !== JSON.stringify([...allowedKeys].sort())) return { ok: false, reason: "invalid_memo_json_schema_keys" };
+  if (memo.schema_version !== "1.0") return { ok: false, reason: "invalid_schema_version" };
+  if (!/^memo-[A-Za-z0-9:_\-.]{8,80}$/.test(memo.memo_id)) return { ok: false, reason: "invalid_memo_id" };
+  if (memo.status === "active" && !memo.content) return { ok: false, reason: "invalid_content" };
+  if (!Array.isArray(memo.search_keys) || memo.search_keys.length > 12) return { ok: false, reason: "invalid_search_keys" };
+  if (memo.search_keys.some((key) => typeof key !== "string" || key.length > 120 || key.includes("/") || key.includes("\\"))) return { ok: false, reason: "invalid_search_key_value" };
+  if (!/^[a-f0-9]{16,64}$/.test(memo.actor_fingerprint)) return { ok: false, reason: "invalid_actor_fingerprint" };
+  if (!/^[a-f0-9]{16,64}$/.test(memo.line_event_key)) return { ok: false, reason: "invalid_line_event_key" };
+  if (memo.source !== "line") return { ok: false, reason: "invalid_source" };
+  return { ok: true };
+}
+
+async function atomicWriteMemoJson(memo = {}) {
+  const fileName = memoFileName(memo);
+  const finalPath = join(DROPBOX_IDEA_DIR, fileName);
+  if (!finalPath.startsWith(`${DROPBOX_IDEA_DIR}${sep}`)) return { ok: false, reason: "unsafe_target_path" };
+  if (await fileExists(finalPath)) {
+    const fileStat = await stat(finalPath);
+    return { ok: true, duplicate: true, file_name: fileName, mtime_ms: fileStat.mtimeMs, mtime_iso: fileStat.mtime.toISOString() };
+  }
+  const tempPath = join(DROPBOX_IDEA_DIR, `.${fileName}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    await writeFile(tempPath, `${JSON.stringify(memo, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    const parsed = JSON.parse(await readFile(tempPath, "utf8"));
+    const validation = validateMemoJson(parsed);
+    if (!validation.ok) {
+      await safeUnlink(tempPath);
+      return validation;
+    }
+    await rename(tempPath, finalPath);
+  } catch (error) {
+    await safeUnlink(tempPath);
+    return { ok: false, reason: "memo_json_write_failed", error_name: error?.name || "Error" };
+  }
+  const fileStat = await stat(finalPath);
+  return { ok: true, file_name: fileName, mtime_ms: fileStat.mtimeMs, mtime_iso: fileStat.mtime.toISOString() };
+}
+
+async function overwriteJsonFile(finalPath = "", body = {}) {
+  if (!finalPath.startsWith(`${DROPBOX_IDEA_DIR}${sep}`)) throw new Error("unsafe_target_path");
+  const tempPath = `${finalPath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(body, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  JSON.parse(await readFile(tempPath, "utf8"));
+  await rename(tempPath, finalPath);
+  const fileStat = await stat(finalPath);
+  return { ok: true, mtime_ms: fileStat.mtimeMs, mtime_iso: fileStat.mtime.toISOString() };
+}
+
+async function searchMemoFiles(query = "", actorFingerprint = "") {
+  const files = await safeReadDropboxFileNames();
+  const matches = [];
+  for (const fileName of files.filter((name) => /^memo-[A-Za-z0-9:_\-.]+\.json$/.test(name))) {
+    const path = join(DROPBOX_IDEA_DIR, fileName);
+    const memo = normalizeMemoJson(parseJsonSafely(await readFile(path, "utf8")) || {});
+    if (memo.status !== "active" || memo.actor_fingerprint !== actorFingerprint) continue;
+    if (memo.content.includes(query) || memo.search_keys.includes(query)) matches.push({ file_name: fileName, path, memo });
+  }
+  return matches;
+}
+
+function normalizeMemoSearchKeys(value = []) {
+  const values = Array.isArray(value) ? value : [value];
+  const safe = [];
+  for (const item of values) {
+    const key = String(item || "").replace(/\s+/g, " ").trim().slice(0, 120);
+    if (!key || key.includes("/") || key.includes("\\") || safe.includes(key)) continue;
+    safe.push(key);
+    if (safe.length >= 12) break;
+  }
+  return safe;
+}
+
+function mergeMemoSearchKeys(...sources) {
+  return normalizeMemoSearchKeys(sources.flatMap((source) => [
+    ...(Array.isArray(source) ? source : [source]),
+    ...memoSearchKeysFrom(source),
+  ]));
+}
+
+function memoSearchKeysFrom(value = "") {
+  const text = String(value || "");
+  const markers = text.match(/\bM\d{4}-\d{14}\b/g) || [];
+  return [...new Set(markers)];
+}
+
+async function safeReadDropboxFileNames() {
+  try {
+    await mkdir(DROPBOX_IDEA_DIR, { recursive: true });
+    return await readdir(DROPBOX_IDEA_DIR);
+  } catch {
+    return [];
+  }
+}
+
+async function readCalendarStore() {
+  try {
+    const parsed = parseJsonSafely(await readFile(TEST_CALENDAR_STORE_PATH, "utf8"));
+    if (parsed && Array.isArray(parsed.events)) return parsed;
+  } catch {
+    // Missing store starts as an empty TEST calendar.
+  }
+  return { schema: "pline-v3-test-calendar-store/v1", events: [] };
+}
+
+async function writeCalendarStore(store = {}) {
+  await mkdir(dirnameForFile(TEST_CALENDAR_STORE_PATH), { recursive: true });
+  const safeStore = {
+    schema: "pline-v3-test-calendar-store/v1",
+    events: Array.isArray(store.events) ? store.events.map((event) => ({
+      id: sanitizeId(event.id),
+      title: String(event.title || "").slice(0, 200),
+      start: String(event.start || "").slice(0, 80),
+      end: String(event.end || "").slice(0, 80),
+      all_day: event.all_day === true,
+      location: String(event.location || "").slice(0, 200),
+      description: String(event.description || "").slice(0, 500),
+      recurrence: String(event.recurrence || "").slice(0, 120),
+      reminders: Array.isArray(event.reminders) ? event.reminders.slice(0, 3) : [],
+      actor_fingerprint: sanitizeId(event.actor_fingerprint),
+      created_at: String(event.created_at || ""),
+      updated_at: String(event.updated_at || ""),
+      status: event.status === "deleted" ? "deleted" : "active",
+    })) : [],
+  };
+  await writeFile(TEST_CALENDAR_STORE_PATH, `${JSON.stringify(safeStore, null, 2)}\n`, "utf8");
+}
+
+async function createCrudConfirmation(task = {}, kv = null, details = {}) {
+  const confirmationId = `confirm-${stableHash(`${task.task_id}:${Date.now()}`).slice(0, 16)}`;
+  const record = {
+    schema: "pline-v3-test-crud-confirmation/v1",
+    confirmation_id: confirmationId,
+    task_id: task.task_id,
+    actor_fingerprint: task.actor_fingerprint,
+    domain: task.domain,
+    operation: task.operation,
+    status: "pending",
+    details: {
+      target_file_name: sanitizeId(details.target_file_name || ""),
+      target_summary: safeVisibleText(details.target_summary || "", 80),
+    },
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + CRUD_CONFIRMATION_TTL_MS).toISOString(),
+  };
+  if (kv) {
+    await kv.put(crudConfirmationKey(confirmationId), JSON.stringify(record));
+    await kv.put(crudConfirmationActorKey(task.actor_fingerprint), confirmationId);
+  }
+  return { ok: true, confirmation_id: confirmationId };
 }
 
 export async function writeEvidenceStage(kv, task, stage, details = {}) {
@@ -1109,12 +1564,12 @@ export function createWranglerKv(env = process.env) {
 }
 
 function taskKey(taskId, action = FIXED_ACTION) {
-  const prefix = action === SAVE_IDEA_ACTION ? IDEA_TASK_PREFIX : TASK_PREFIX;
+  const prefix = action === SAVE_IDEA_ACTION ? IDEA_TASK_PREFIX : action === CRUD_ACTION ? CRUD_TASK_PREFIX : TASK_PREFIX;
   return `${prefix}:task:${sanitizeId(taskId)}`;
 }
 
 function pendingKey(taskId, action = FIXED_ACTION) {
-  const prefix = action === SAVE_IDEA_ACTION ? IDEA_TASK_PREFIX : TASK_PREFIX;
+  const prefix = action === SAVE_IDEA_ACTION ? IDEA_TASK_PREFIX : action === CRUD_ACTION ? CRUD_TASK_PREFIX : TASK_PREFIX;
   return `${prefix}:pending:${sanitizeId(taskId)}`;
 }
 
@@ -1126,11 +1581,14 @@ function taskKeyFromPendingKey(key) {
   if (value.startsWith(IDEA_TASK_PENDING_PREFIX)) {
     return taskKey(value.slice(IDEA_TASK_PENDING_PREFIX.length), SAVE_IDEA_ACTION);
   }
+  if (value.startsWith(CRUD_TASK_PENDING_PREFIX)) {
+    return taskKey(value.slice(CRUD_TASK_PENDING_PREFIX.length), CRUD_ACTION);
+  }
   return value;
 }
 
 function isTerminalStatus(status = "") {
-  return ["completed", "duplicate", "failed", "unsupported", "cancelled"].includes(String(status || ""));
+  return ["completed", "duplicate", "failed", "unsupported", "cancelled", "needs_confirmation", "needs_clarification"].includes(String(status || ""));
 }
 
 async function bestEffortDeletePendingIndex(kv, task = null, pendingIndexKey = "", reason = "pending_index_cleanup", error = null) {
@@ -1167,7 +1625,7 @@ async function bestEffortDeletePendingIndex(kv, task = null, pendingIndexKey = "
 
 function sanitizePendingKey(value = "") {
   const key = String(value || "");
-  if (key.startsWith(TASK_PENDING_PREFIX) || key.startsWith(IDEA_TASK_PENDING_PREFIX)) {
+  if (key.startsWith(TASK_PENDING_PREFIX) || key.startsWith(IDEA_TASK_PENDING_PREFIX) || key.startsWith(CRUD_TASK_PENDING_PREFIX)) {
     return key.replace(/[^A-Za-z0-9:_\-.]/g, "").slice(0, 220);
   }
   return "";
@@ -1175,6 +1633,18 @@ function sanitizePendingKey(value = "") {
 
 function codexResultKey(taskId) {
   return `${TASK_PREFIX}:result:${sanitizeId(taskId)}`;
+}
+
+function crudResultKey(taskId) {
+  return `${CRUD_TASK_PREFIX}:result:${sanitizeId(taskId)}`;
+}
+
+function crudConfirmationKey(confirmationId) {
+  return `${CRUD_TASK_PREFIX}:confirmation:${sanitizeId(confirmationId)}`;
+}
+
+function crudConfirmationActorKey(actorFingerprint) {
+  return `${CRUD_TASK_PREFIX}:confirmation_actor:${sanitizeId(actorFingerprint)}`;
 }
 
 async function resolveRecentCreatedFileContextForTask(task = {}, kv = null) {
@@ -1342,6 +1812,114 @@ function parseJsonSafely(value = "") {
   }
 }
 
+function sanitizeCrudBody(body = {}, fallbackText = "", operation = "") {
+  const safe = {};
+  for (const key of ["content", "query", "search_query", "new_content", "title", "start", "end", "location", "description", "recurrence", "reply_text"]) {
+    if (body[key]) safe[key] = String(body[key]).replace(/\s+/g, " ").trim().slice(0, 1000);
+  }
+  const queryOperation = ["memo_search", "memo_update", "memo_delete", "calendar_search", "calendar_update", "calendar_delete"].includes(operation);
+  const memoUpdate = operation === "memo_update" ? parseMemoUpdateText(fallbackText || safe.query || safe.search_query || "") : { query: "", new_content: "" };
+  if (queryOperation && !safe.query && safe.search_query) safe.query = safe.search_query;
+  if (operation === "memo_update" && memoUpdate.query) safe.query = memoUpdate.query;
+  if (queryOperation && !safe.query && fallbackText) safe.query = String(fallbackText).replace(/\s+/g, " ").trim().slice(0, 1000);
+  if (operation === "memo_update" && !safe.new_content && memoUpdate.new_content) safe.new_content = memoUpdate.new_content;
+  if (operation === "memo_create" && safe.content) safe.content = normalizeMemoCreateContent(safe.content);
+  if (["memo_search", "memo_update", "memo_delete"].includes(operation) && safe.query) safe.query = normalizeMemoTargetQuery(safe.query, operation);
+  if (operation === "memo_update" && safe.new_content) safe.new_content = normalizeMemoCreateContent(safe.new_content);
+  delete safe.search_query;
+  if (body.all_day === true) safe.all_day = true;
+  if (Array.isArray(body.reminders)) safe.reminders = body.reminders.slice(0, 3).map((item) => Number(item)).filter(Number.isFinite);
+  return safe;
+}
+
+function memoFileName(memo = {}) {
+  const datePart = String(memo.created_at || "").replace(/[-:T+]/g, "").slice(0, 14) || "00000000000000";
+  return `memo-${datePart}-${sanitizeId(memo.memo_id).replace(/^memo-/, "").slice(0, 12)}.json`;
+}
+
+function stableHash(value = "") {
+  return createHash("sha256").update(String(value || "")).digest("hex");
+}
+
+function taipeiIsoString(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  return `${formatter.format(date).replace(" ", "T")}+08:00`;
+}
+
+function safeVisibleText(value = "", max = 60) {
+  return String(value || "")
+    .replace(/(?:_03|_02|\bTEST\b|n8n|Worker|monitor|JSON|execution|queued|task_id|runtime\/|\/Users\/|secret|token|raw User ID)/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
+}
+
+function normalizeMemoSearchQuery(value = "") {
+  let query = String(value || "").replace(/\s+/g, " ").trim();
+  for (const prefix of ["搜尋", "查詢", "查找", "尋找", "找一下", "找"]) {
+    if (query === prefix) return "";
+    if (query.startsWith(`${prefix}：`) || query.startsWith(`${prefix}:`)) {
+      return query.slice(prefix.length + 1).trim();
+    }
+    if (query.startsWith(`${prefix} `)) {
+      return query.slice(prefix.length + 1).trim();
+    }
+  }
+  return query;
+}
+
+function normalizeMemoTargetQuery(value = "", operation = "") {
+  let query = normalizeMemoSearchQuery(value);
+  if (operation === "memo_delete") {
+    for (const prefix of ["刪除", "删除", "刪掉", "移除"]) {
+      if (query === prefix) return "";
+      if (query.startsWith(`${prefix}：`) || query.startsWith(`${prefix}:`)) return query.slice(prefix.length + 1).trim();
+      if (query.startsWith(`${prefix} `)) return query.slice(prefix.length + 1).trim();
+    }
+  }
+  return query;
+}
+
+function normalizeMemoCreateContent(value = "") {
+  let text = String(value || "").replace(/\s+/g, " ").trim();
+  for (const prefix of ["新增備忘錄", "建立備忘錄", "新增", "建立"]) {
+    if (text === prefix) return "";
+    if (text.startsWith(`${prefix}：`) || text.startsWith(`${prefix}:`)) return text.slice(prefix.length + 1).trim();
+    if (text.startsWith(`${prefix} `)) return text.slice(prefix.length + 1).trim();
+  }
+  return text;
+}
+
+function parseMemoUpdateText(value = "") {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  const normalized = text
+    .replace(/^(?:修改備忘錄|更新備忘錄)[\s:：]+/u, "")
+    .trim();
+  const match = normalized.match(/^(?:把|將)\s*[「"]([^」"]{1,400})[」"]\s*(?:的內容|的備忘錄|備忘錄)?\s*改(?:成|為)\s*[「"]([^」"]{1,400})[」"]$/u)
+    || normalized.match(/^(?:把|將)\s+(.{1,400}?)\s*(?:的內容|的備忘錄|備忘錄)?\s*改(?:成|為)\s+(.{1,400})$/u);
+  if (!match) return { query: "", new_content: "" };
+  return {
+    query: normalizeMemoSearchQuery(stripMemoUpdatePart(match[1])),
+    new_content: normalizeMemoCreateContent(stripMemoUpdatePart(match[2])),
+  };
+}
+
+function stripMemoUpdatePart(value = "") {
+  return String(value || "")
+    .replace(/^[「"\s]+/u, "")
+    .replace(/[」"\s]+$/u, "")
+    .trim();
+}
+
 function approvalKey(code = "") {
   return `${TASK_PREFIX}:approval:${sanitizeId(code)}`;
 }
@@ -1363,6 +1941,10 @@ function sanitizeEvidenceRecord(record) {
     "saved",
     "file_name",
     "action",
+    "domain",
+    "operation",
+    "needs_confirmation",
+    "needs_clarification",
     "thread_id",
     "turn_id",
     "run_id",

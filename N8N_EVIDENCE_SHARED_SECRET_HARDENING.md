@@ -123,3 +123,60 @@ Hand off to TEST/FIX to verify:
   - natural final reply
 
 Computer Use minimal Gate remains paused until this hardening verification passes.
+
+## 2026-07-18 Strict Dummy-Reject Follow-up
+
+Target workflow remained `kcMcBQos5cxsnWU1`.
+
+Change published:
+
+```text
+N8N regex-free strict shared-secret guard
+```
+
+Guard repair point:
+
+- `Normalize Input` now fails closed before AI/tool execution.
+- It rejects when expected secret is missing.
+- It rejects when `x-pline-v3-shared-secret` is missing.
+- It rejects when the header is present but does not equal the expected secret.
+- The Normalize code was rewritten without regex literals to avoid CodeMirror/JSON escaping regressions.
+- No secret value was read, copied, printed, written, or inferred.
+
+Production direct probes after publish:
+
+```text
+no_header_http_status: 200
+no_header_normal_contract: false
+dummy_header_http_status: 200
+dummy_header_normal_contract: false
+```
+
+n8n execution evidence:
+
+```text
+latest_execution_reason: missing_expected_n8n_shared_secret
+unexpected_token_after_regex_free_publish: absent
+```
+
+Worker live health evidence:
+
+```text
+Worker required_env.N8N_SHARED_SECRET: true
+Worker n8n route: production /webhook/pline-v3-test-ai-agent
+Worker shared secret header name: x-pline-v3-shared-secret
+```
+
+Result:
+
+- no header: reject / no normal contract PASS.
+- dummy header: reject / no normal contract PASS.
+- real Worker-origin pass: BLOCKED, because n8n expected secret variable `N8N_SHARED_SECRET` is missing in `$vars`, so a real Worker request would fail closed until the n8n expected secret is aligned.
+
+Required handoff:
+
+- FIX/N8N must align n8n variable/credential `N8N_SHARED_SECRET` with the already-configured Worker secret without exposing the value.
+- After alignment, rerun:
+  - no header rejected
+  - dummy header rejected
+  - real Worker-origin request passes
