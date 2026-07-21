@@ -11,6 +11,19 @@
 - Accepted runtime references: Worker `56558dd5-7856-4a67-9a8f-e6a1e8e96358`; n8n workflow `kcMcBQos5cxsnWU1`, Published `a88e1361-c4fa-4f44-b79b-a0fe9c44e7c2`.
 - This entry is documentation-only. It does not modify program code, n8n, credentials, deployment state, or Calendar scope.
 
+## Daily Closeout - Memo Core - 2026-07-21
+
+- Marker: `MEMO_CORE_COMPLETED_20260721`.
+- Authoritative completed functions: Create, keyword Search, Search All with numbered content pages, Modify, single-position Delete, multi-position Delete, and range Delete.
+- Final live evidence is terminal and user-visible: Create/Search/Modify/Delete PASS; the isolated five-fixture batch sequence completed comma positions 2/4/5 and range positions 1–2 with active 0 / archive 5, 9/9 expected visible finals, Push 0, duplicate file/reply 0, and permanent delete 0.
+- Create/Modify/Delete success replies use natural Traditional Chinese and contain no `memo_id` or system fields. Search intentionally retains numbered selection context.
+- Archive contract remains collision-safe and revision-aware with no overwrite, active-absence verification, exact readback, exactly-once, and duplicate suppression.
+- Closeout regression: Worker/Memo 62 PASS; Dropbox revision 9/9; CRUD 39/39; Delete 18/18; Natural Reply 9/9; multi-position archive 19/19.
+- `刪除全部` remains unsupported. Calendar and other new Gates remain not started. Previous Page / specific-page navigation does not have a new fresh live PASS in this closeout.
+- The retired `worker/test/worker.test.mjs` generic CRUD/Calendar suite remains `NOT_APPLICABLE` and is excluded; prohibited `enqueueCrudTask` must not be restored.
+- The earlier failed test prefix `MBATCH-20260721221413-7874` remains active 5 / archive 0 and requires a separately authorized cleanup decision.
+- Closeout did not Publish, Deploy, send LINE, start Monitor, change credentials, or modify runtime logic.
+
 ## Worker Role
 
 This thread is `PLine03｜FIX｜Worker 與程式`.

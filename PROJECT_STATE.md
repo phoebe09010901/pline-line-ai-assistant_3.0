@@ -13,6 +13,20 @@
 - Verified runtime references: Worker deployment `56558dd5-7856-4a67-9a8f-e6a1e8e96358`; n8n Published version `a88e1361-c4fa-4f44-b79b-a0fe9c44e7c2` on workflow `kcMcBQos5cxsnWU1`.
 - Calendar work is not part of this milestone and has not started.
 
+## 2026-07-21 Daily Closeout — Memo Core
+
+- Closeout marker: `MEMO_CORE_COMPLETED_20260721`.
+- Actual completed scope: Memo Create, keyword Search, Search All with numbered content pages, Modify, single-position Delete, comma-list multi-position Delete, and range Delete.
+- Final user-visible acceptance: Create/Search/Modify/Delete and the isolated multi-position/range sequence passed on LINE; the final batch sequence showed 9/9 expected visible finals, Push attempt 0, duplicate file 0, duplicate reply 0, and permanent delete 0.
+- Create/Modify/Delete success replies are natural Traditional Chinese and hide `memo_id`, filenames, paths, JSON, and system fields. Search retains safe numbered context only for follow-up selection.
+- Delete remains archive-only: ACTIVE records move to `/Users/phoebe/Library/CloudStorage/Dropbox/菲比工作總倉庫/99_ARCHIVE_封存` after revision-aware update, active-absence verification, and terminal nine-field readback. No permanent-delete path is enabled.
+- Delivery and durability: Reply-first PASS; bounded durable ACK, idempotency, exactly-once, and duplicate safety PASS.
+- Final runtime evidence: Worker deployment `56558dd5-7856-4a67-9a8f-e6a1e8e96358`; n8n workflow `kcMcBQos5cxsnWU1`, Published `a88e1361-c4fa-4f44-b79b-a0fe9c44e7c2`.
+- Monitor closeout: LaunchAgent is unloaded; latest live Gate evidence reports `STOPPED / UNLOADED`.
+- Remaining and intentionally unavailable: `刪除全部`; Calendar; all new Gates; fresh live revalidation of Previous Page / specific-page navigation.
+- Retired test data note: the earlier failed prefix `MBATCH-20260721221413-7874` remains active 5 / archive 0 by prior fail-closed instruction and was not altered during closeout.
+- Closeout itself performed no LINE test, n8n Publish, Worker deploy, credential change, Monitor start, Calendar operation, or feature change.
+
 ## Project
 
 - Name: `菲比 LINE 智能助理_03`

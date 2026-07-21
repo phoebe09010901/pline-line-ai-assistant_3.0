@@ -4,6 +4,7 @@ const IDEMPOTENCY_KV_NAME = "pline-v3-test-idempotency";
 const D1_NAME = "pline-v3-test-db";
 const N8N_WEBHOOK_URL = "https://n8nphy.app.n8n.cloud/webhook/pline-v3-test-ai-agent";
 const N8N_SHARED_SECRET_HEADER = "x-pline-v3-shared-secret";
+const MEMO_CALLBACK_SECRET_HEADER = "x-pline-v3-memo-callback-secret";
 const EVIDENCE_SELFTEST_SECRET_HEADER = "x-pline-v3-selftest-secret";
 const ACCEPTED_N8N_INTENTS = ["idea_create", "codex_task", "clarify", "unsupported"];
 const GATE_TEST_INTENTS = ["idea_create", "codex_task"];
@@ -16,14 +17,23 @@ const SAFE_REPLY_TEXT = {
 };
 const LINE_REPLY_MODE = "no_visible_ack_background_n8n";
 const CODEX_TASK_FINAL_MODE = "monitor_callback_exactly_once";
+const LINE_FINAL_DELIVERY_VERSION = "line-reply-first-push-fallback-v1";
+const LINE_FINAL_DELIVERY_RETRY_VERSION = "line-final-delivery-429-retry-v1";
+const LINE_FINAL_DELIVERY_MAX_ATTEMPTS = 2;
+const LINE_FINAL_DELIVERY_DEFAULT_RETRY_AFTER_SECONDS = 60;
+const LINE_REPLY_ELIGIBILITY_WINDOW_MS = 55_000;
+const LINE_REPLY_TIMEOUT_MS = 1_800;
 const CODEX_TASK_PREFIX = "codex_task:v1";
 const IDEA_TASK_PREFIX = "idea_json:v1";
+const MONITOR_WAKE_KEY = "monitor:wake:v1";
+const MONITOR_WAKE_SCHEMA = "pline-v3-test-monitor-wake/v1";
 const CODEX_MONITOR_NAME = "pline-v3-test-codex-monitor";
 const CODEX_TASK_ACTION = "create_smoke_file";
 const IDEA_TASK_ACTION = "save_idea_json";
+const PROJECT_ROOT = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03";
 const CODEX_TASK_PROJECT = "PLine03 safe smoke";
-const CODEX_TASK_PROJECT_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke";
-const CODEX_TASK_SMOKE_FILE_PATH = "/Users/phoebe/Documents/菲比 LINE 智能助理_03/runtime/codex-task-smoke/codex_task_smoke_test.txt";
+const CODEX_TASK_PROJECT_PATH = `${PROJECT_ROOT}/runtime/codex-task-smoke`;
+const CODEX_TASK_SMOKE_FILE_PATH = `${CODEX_TASK_PROJECT_PATH}/codex_task_smoke_test.txt`;
 const CODEX_TASK_SMOKE_FILE_CONTENT = "Codex 任務測試成功";
 const CODEX_TASK_INSTRUCTION = "Create or overwrite the fixed smoke file with the fixed smoke content.";
 const DROPBOX_IDEA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03";
@@ -35,9 +45,76 @@ const IDEA_SAVED_FALLBACK_REPLY_TEXT = "已經幫妳記下來了 💡";
 const IDEA_SAVE_FAILED_REPLY_TEXT = "這次沒有成功保存，我先不假裝記好了，請稍後再試一次 🙏";
 const IDEA_FINALIZE_PATH = "/test/idea-finalize";
 const CODEX_FINALIZE_PATH = "/test/codex-finalize";
+const MEMO_FINALIZE_PATH = "/test/memo-finalize";
+const MEMO_FINALIZE_URL = "https://pline-v3-test-line-gateway.phy4175.workers.dev/test/memo-finalize";
+const MEMO_CREATE_COMMAND_PREFIX = "備忘錄：";
+const MEMO_CREATE_OPERATION = "memo_create";
+const MEMO_SEARCH_COMMAND_PREFIX = "備忘錄搜尋：";
+const MEMO_MODIFY_COMMAND_PREFIX = "備忘錄修改：";
+const MEMO_DELETE_COMMAND_PREFIX = "備忘錄刪除：";
+const MEMO_DELETE_SELECTION_ALL_COMMAND = "刪除全部";
+const MEMO_SEARCH_OPERATION = "memo_search";
+const MEMO_SEARCH_PAGE_OPERATION = "memo_search_page";
+const MEMO_MODIFY_OPERATION = "memo_modify";
+const MEMO_DELETE_OPERATION = "memo_delete";
+const MEMO_DETERMINISTIC_OPERATIONS = [
+  MEMO_CREATE_OPERATION,
+  MEMO_SEARCH_OPERATION,
+  MEMO_SEARCH_PAGE_OPERATION,
+  MEMO_MODIFY_OPERATION,
+  MEMO_DELETE_OPERATION,
+];
+const MEMO_ID_PATTERN = /^memo-[a-f0-9]{64}$/;
+const MEMO_CREATE_ACCEPTANCE_SCHEMA = "pline-v3-memo-create-acceptance/v1";
+const MEMO_CREATE_ACCEPTANCE_PREFIX = "memo_create:v1:acceptance";
+const MEMO_SEARCH_SELECTION_SCHEMA = "pline-v3-memo-search-selection/v2";
+const MEMO_SEARCH_SELECTION_PREFIX = "memo_search_selection:v1";
+export const MEMO_SEARCH_SELECTION_TTL_SECONDS = 600;
+export const MEMO_SEARCH_SELECTION_MAX_CANDIDATES = 100;
+export const MEMO_SEARCH_PAGE_SIZE = 10;
+export const MEMO_SEARCH_SELECTION_MAX_DELETE_ITEMS = 5;
+export const MEMO_SELECTION_WORKER_BATCH_REQUEST_LIMIT = 5;
+export const MEMO_SELECTION_LIVE_EXECUTION_AUTHORIZED_LIMIT = 1;
+const MEMO_CREATE_MAX_CONTENT_LENGTH = 4000;
+const MEMO_CREATE_EMPTY_REPLY_TEXT = "請在「備忘錄：」後面輸入要記錄的內容。";
+const MEMO_CREATE_TOO_LONG_REPLY_TEXT = "這筆備忘錄內容太長了，請縮短後再試一次。";
+const MEMO_CREATE_FAILED_REPLY_TEXT = "備忘錄目前尚未完成，請稍後再試一次。";
+const MEMO_SEARCH_EMPTY_REPLY_TEXT = "請在「備忘錄搜尋：」後面輸入關鍵字，或輸入「全部」。";
+const MEMO_MODIFY_FORMAT_REPLY_TEXT = "請使用「備忘錄修改：備忘錄編號｜新內容」的格式。";
+const MEMO_DELETE_FORMAT_REPLY_TEXT = "請使用完整的備忘錄編號，例如「備忘錄刪除：memo-…」。";
+const MEMO_DELETE_SELECTION_FORMAT_REPLY_TEXT = "請使用「刪除第 2 筆備忘錄」、「刪除第 2、4、5 筆備忘錄」或「刪除第 2 到第 5 筆備忘錄」。";
+const MEMO_DELETE_SELECTION_MISSING_REPLY_TEXT = "請先搜尋備忘錄，再依搜尋結果的序號選擇要刪除的項目。";
+const MEMO_DELETE_SELECTION_EXPIRED_REPLY_TEXT = "上次搜尋結果已過期，請重新搜尋後再選擇。";
+const MEMO_DELETE_SELECTION_RANGE_REPLY_TEXT = "選擇的備忘錄序號超出上次搜尋結果，請重新確認。";
+const MEMO_DELETE_SELECTION_TOO_LARGE_REPLY_TEXT = "一次最多可刪除 5 筆，請縮小序號範圍後再試一次。";
+const MEMO_SEARCH_SELECTION_FAILED_REPLY_TEXT = "搜尋結果目前無法建立可操作清單，請稍後重新搜尋。";
+const MEMO_SEARCH_RESULT_INCOMPLETE_REPLY_TEXT = "搜尋結果沒有完整載入，請縮小搜尋範圍後再試一次。";
+const MEMO_SEARCH_RESULT_LIMIT_REPLY_TEXT = "符合的備忘錄超過 100 筆，請加入關鍵字縮小搜尋範圍。";
+const MEMO_SEARCH_PAGE_MISSING_REPLY_TEXT = "請先搜尋備忘錄，再查看上一頁或下一頁。";
+const MEMO_SEARCH_PAGE_EXPIRED_REPLY_TEXT = "上次搜尋結果已過期，請重新搜尋後再翻頁。";
+const MEMO_SEARCH_PAGE_RANGE_REPLY_TEXT = "這個搜尋結果沒有該頁，請重新確認頁碼。";
+const MEMO_SEARCH_PAGE_FORMAT_REPLY_TEXT = "請輸入「查看下一頁」、「查看上一頁」或「查看第 N 頁」。";
+const MEMO_DELETE_ALL_UNSUPPORTED_REPLY_TEXT = "目前不支援刪除全部，請依搜尋結果輸入最多 5 個序號。";
+const MEMO_OPERATION_TOO_LONG_REPLY_TEXT = "這次輸入的內容太長了，請縮短後再試一次。";
+const MEMO_OPERATION_FAILED_REPLY_TEXT = "備忘錄操作目前尚未完成，請稍後再試一次。";
+const MEMO_SUCCESS_REPLY_MAX_LENGTH = 160;
+const MEMO_SUCCESS_REPLY_FALLBACK = Object.freeze({
+  [MEMO_CREATE_OPERATION]: "好，我幫妳記好了。",
+  [MEMO_MODIFY_OPERATION]: "好，我幫妳改好了。",
+  [MEMO_DELETE_OPERATION]: "好，我幫妳刪除了。",
+});
+const MEMO_SUCCESS_REPLY_FORBIDDEN_PATTERN = /(?:memo-[a-f0-9]{8,}|備忘錄(?:編號|id)|\.json\b|\/Users\/|\/菲比|Dropbox|Cloudflare|n8n|Worker|KV|webhook|payload|task_id|request_id|replyToken|credential|secret|token|system(?:\s+prompt)?|JSON|工程|節點|欄位|執行紀錄)/i;
+const MEMO_SUCCESS_REPLY_SIMPLIFIED_PATTERN = /[这帮条记删录个后里务为]/;
 const EVIDENCE_PREFIX = "evidence:v1";
 const EVIDENCE_TTL_SECONDS = 172800;
-const WEBHOOK_ACCEPT_EVIDENCE_CHECKPOINT_TIMEOUT_MS = 1500;
+export const LINE_WEBHOOK_ACK_BUDGET_MS = 2800;
+export const NORMAL_ACK_TARGET_MS = 1800;
+export const MEMO_ACK_RESPONSE_MARGIN_MS = 150;
+export const MEMO_ACK_PUT_RESERVE_MS = 500;
+const LINE_WEBHOOK_KV_GET_TIMEOUT_MS = 900;
+const LINE_WEBHOOK_KV_PUT_TIMEOUT_MS = 1500;
+const LINE_WEBHOOK_ACCEPTANCE_SCHEMA = "pline-v3-line-webhook-acceptance/v1";
+const LINE_WEBHOOK_ACCEPTANCE_TTL_SECONDS = 3600;
 const LINE_MARK_AS_READ_TIMEOUT_MS = 1500;
 const GATE_MARKER_PATTERN = /\bT\d{4}[A-Z]?-\d{14}\b/;
 const INTERNAL_REPLY_PATTERN = /(?:_03|TEST|n8n|worker|monitor|task|json|execution|webhook|cloudflare|測試|任務|工作流|執行)/i;
@@ -66,6 +143,10 @@ export default {
       return handleCodexFinalize(request, env);
     }
 
+    if (request.method === "POST" && url.pathname === MEMO_FINALIZE_PATH) {
+      return handleMemoFinalize(request, env);
+    }
+
     if (request.method === "POST" && url.pathname === "/line/webhook") {
       return handleLineWebhook(request, env, ctx);
     }
@@ -75,11 +156,17 @@ export default {
 };
 
 export async function handleLineWebhook(request, env, ctx = {}) {
+  const ackStartedAt = Date.now();
+  const correlationId = crypto.randomUUID();
+  const ackBudgetMs = boundedTestNumber(ctx?.__testAckBudgetMs, LINE_WEBHOOK_ACK_BUDGET_MS);
+  const kvGetTimeoutMs = boundedTestNumber(ctx?.__testKvGetTimeoutMs, LINE_WEBHOOK_KV_GET_TIMEOUT_MS);
+  const kvPutTimeoutMs = boundedTestNumber(ctx?.__testKvPutTimeoutMs, LINE_WEBHOOK_KV_PUT_TIMEOUT_MS);
   const rawBody = await request.text();
   const signature = request.headers.get("x-line-signature") || "";
   const signatureResult = await verifyLineSignature(rawBody, signature, env.LINE_CHANNEL_SECRET);
 
   if (!signatureResult.ok) {
+    logWebhookAckTiming(correlationId, "signature_rejected", ackStartedAt, signatureResult.status, signatureResult.reason);
     return jsonResponse({
       status: "rejected",
       reason: signatureResult.reason,
@@ -91,50 +178,45 @@ export async function handleLineWebhook(request, env, ctx = {}) {
   try {
     linePayload = JSON.parse(rawBody);
   } catch {
+    logWebhookAckTiming(correlationId, "json_rejected", ackStartedAt, 400, "invalid_json");
     return jsonResponse({ status: "rejected", reason: "invalid_json" }, 400);
   }
 
   const event = firstTextEvent(linePayload);
   if (!event) {
+    logWebhookAckTiming(correlationId, "empty_event_ack", ackStartedAt, 200, "none");
     return jsonResponse({ status: "accepted", reason: "no_text_event" }, 200);
   }
 
   const normalized = normalizeForN8n(event);
-  queueEvidenceStage(ctx, env, normalized, "line_event_received", {
-    marker: normalized.gate_marker,
-  });
-  logStage("line_event_received", {
-    request_id: normalized.request_id,
-    marker: normalized.gate_marker || undefined,
-  });
-  queueEvidenceStage(ctx, env, normalized, "signature_pass");
-  logStage("signature_pass", {
-    request_id: normalized.request_id,
-  });
-
-  const adminResult = await verifyAdmin(event, env);
+  const memoCommand = parseMemoDeterministicCommand(event.message?.text || "");
+  const adminResult = await runBoundedAckOperation(
+    () => verifyAdmin(event, env),
+    {
+      startedAt: ackStartedAt,
+      budgetMs: ackBudgetMs,
+      maxOperationMs: kvGetTimeoutMs,
+      ctx,
+      keepAlive: env.LINE_TEST_ADMIN_USER_IDS === ADMIN_BOOTSTRAP_SENTINEL,
+    },
+  );
   if (!adminResult.ok) {
-    queueEvidenceStage(ctx, env, normalized, "admin_failed", {
-      reason: adminResult.reason,
-      status: adminResult.status,
-    });
+    logWebhookAckTiming(correlationId, "admin_check_failed", ackStartedAt, 503, adminResult.error_class);
+    return durableAckUnavailableResponse("admin_check_unavailable");
+  }
+  const verifiedAdmin = adminResult.value;
+  if (!verifiedAdmin.ok) {
+    logWebhookAckTiming(correlationId, "admin_rejected", ackStartedAt, verifiedAdmin.status, verifiedAdmin.reason);
     return jsonResponse({
       status: "rejected",
-      reason: adminResult.reason,
+      reason: verifiedAdmin.reason,
       check: "admin",
-    }, adminResult.status);
+    }, verifiedAdmin.status);
   }
-  queueEvidenceStage(ctx, env, normalized, "admin_pass", {
-    bootstrap: Boolean(adminResult.bootstrapped),
-  });
-  logStage("admin_pass", {
-    request_id: normalized.request_id,
-    bootstrap: Boolean(adminResult.bootstrapped),
-  });
 
-  if (adminResult.bootstrapped) {
-    await replyToLine(normalized.reply_token, "已收到管理員確認訊息。", env);
-    queueEvidenceStage(ctx, env, normalized, "admin_bootstrap_captured");
+  if (verifiedAdmin.bootstrapped) {
+    queueBackgroundTask(ctx, replyToLine(normalized.reply_token, "已收到管理員確認訊息。", env));
+    logWebhookAckTiming(correlationId, "admin_bootstrap_ack", ackStartedAt, 200, "none");
     return jsonResponse({
       status: "accepted",
       reason: "admin_bootstrap_captured",
@@ -142,76 +224,1335 @@ export async function handleLineWebhook(request, env, ctx = {}) {
     });
   }
 
-  const idempotencyResult = await checkIdempotency(env.IDEMPOTENCY_KV, normalized.line_event_id);
-  if (!idempotencyResult.ok) {
-    queueEvidenceStage(ctx, env, normalized, "idempotency_failed", {
-      reason: idempotencyResult.reason,
-      status: idempotencyResult.status,
+  if (memoCommand.matched) {
+    return handleMemoDeterministicAcceptance({
+      event,
+      normalized,
+      memoCommand,
+      env,
+      ctx,
+      correlationId,
+      ackStartedAt,
+      ackBudgetMs,
     });
+  }
+
+  if (!env.IDEMPOTENCY_KV) {
+    logWebhookAckTiming(correlationId, "idempotency_get_failed", ackStartedAt, 503, "missing_binding");
+    return durableAckUnavailableResponse("missing_IDEMPOTENCY_KV");
+  }
+
+  const acceptanceRead = await runBoundedAckOperation(
+    () => env.IDEMPOTENCY_KV.get(normalized.line_event_id),
+    {
+      startedAt: ackStartedAt,
+      budgetMs: ackBudgetMs,
+      maxOperationMs: kvGetTimeoutMs,
+      ctx,
+    },
+  );
+  if (!acceptanceRead.ok) {
+    logWebhookAckTiming(correlationId, "idempotency_get_failed", ackStartedAt, 503, acceptanceRead.error_class);
+    return durableAckUnavailableResponse("idempotency_get_unavailable");
+  }
+
+  const existingAcceptance = parseWebhookAcceptanceRecord(acceptanceRead.value);
+  if (existingAcceptance.kind === "dispatched" || existingAcceptance.kind === "legacy_dispatched") {
+    logWebhookAckTiming(correlationId, "duplicate_ack", ackStartedAt, 200, "none");
     return jsonResponse({
       status: "accepted",
-      reason: idempotencyResult.reason,
+      reason: "duplicate_line_event",
       check: "idempotency",
       request_id: normalized.request_id,
     }, 200);
   }
-  queueEvidenceStage(ctx, env, normalized, "idempotency_pass");
-  logStage("idempotency_pass", {
-    request_id: normalized.request_id,
-  });
 
-  const markAsReadTask = markLineMessageAsReadForEvent(event, normalized, env);
-  if (ctx.waitUntil) {
-    ctx.waitUntil(markAsReadTask);
-  } else {
-    await markAsReadTask;
+  let acceptanceRecord = existingAcceptance.record;
+  let resumed = existingAcceptance.kind === "accepted";
+  if (!acceptanceRecord) {
+    acceptanceRecord = createWebhookAcceptanceRecord(correlationId);
+    const acceptanceWrite = runBoundedAckOperation(
+      () => env.IDEMPOTENCY_KV.put(
+        normalized.line_event_id,
+        JSON.stringify(acceptanceRecord),
+        { expirationTtl: LINE_WEBHOOK_ACCEPTANCE_TTL_SECONDS },
+      ),
+      {
+        startedAt: ackStartedAt,
+        budgetMs: ackBudgetMs,
+        maxOperationMs: kvPutTimeoutMs,
+        ctx,
+        keepAlive: true,
+      },
+    );
+    const acceptanceWriteResult = await acceptanceWrite;
+    if (!acceptanceWriteResult.ok) {
+      logWebhookAckTiming(correlationId, "durable_acceptance_put_failed", ackStartedAt, 503, acceptanceWriteResult.error_class);
+      return durableAckUnavailableResponse("durable_acceptance_unavailable");
+    }
   }
 
-  queueEvidenceStage(ctx, env, normalized, "line_visible_ack_skipped", {
-    reply_mode: LINE_REPLY_MODE,
-  });
-  logStage("line_visible_ack_skipped", {
-    request_id: normalized.request_id,
-    reply_mode: LINE_REPLY_MODE,
-  });
-
-  const webhookAcceptedCheckpointTask = persistWebhookAcceptedEvidenceCheckpoint(env, normalized, {
-    bootstrap: Boolean(adminResult.bootstrapped),
-  });
-  if (ctx.waitUntil) {
-    ctx.waitUntil(webhookAcceptedCheckpointTask);
-  }
-  const webhookAcceptedCheckpointResult = await waitForEvidenceCheckpoint(
-    webhookAcceptedCheckpointTask,
-    WEBHOOK_ACCEPT_EVIDENCE_CHECKPOINT_TIMEOUT_MS,
-  );
-  logStage("evidence_webhook_accept_checkpoint", {
-    request_id: normalized.request_id,
-    status: webhookAcceptedCheckpointResult.status,
-  });
-
-  if (ctx.waitUntil && env.IDEMPOTENCY_KV) {
-    ctx.waitUntil(env.IDEMPOTENCY_KV.put(normalized.line_event_id, normalized.request_id, { expirationTtl: 3600 }));
-  } else if (env.IDEMPOTENCY_KV) {
-    await env.IDEMPOTENCY_KV.put(normalized.line_event_id, normalized.request_id, { expirationTtl: 3600 });
-  }
-
-  const backgroundTask = processN8nInBackground(normalized, env);
-  if (ctx.waitUntil) {
-    ctx.waitUntil(backgroundTask);
-  } else {
-    await backgroundTask;
-  }
-
-  queueEvidenceStage(ctx, env, normalized, "webhook_http_200_returned", {
-    reply_mode: LINE_REPLY_MODE,
-  });
+  queueBackgroundTask(ctx, processAcceptedLineEventInBackground({
+    event,
+    normalized,
+    env,
+    acceptanceRecord,
+  }));
+  logWebhookAckTiming(correlationId, resumed ? "redelivery_resume_ack" : "message_ack", ackStartedAt, 200, "none");
 
   return jsonResponse({
     status: "accepted",
     request_id: normalized.request_id,
     reply_mode: LINE_REPLY_MODE,
+    resumed,
   });
+}
+
+function boundedTestNumber(value, fallback) {
+  return Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback;
+}
+
+export async function runBoundedAckOperation(operation, options = {}) {
+  const startedAt = Number(options.startedAt || Date.now());
+  const budgetMs = Number(options.budgetMs || LINE_WEBHOOK_ACK_BUDGET_MS);
+  const maxOperationMs = Number(options.maxOperationMs || budgetMs);
+  const remainingMs = budgetMs - (Date.now() - startedAt);
+  if (remainingMs <= 0) {
+    return { ok: false, error_class: "budget_exhausted" };
+  }
+
+  let operationTask;
+  try {
+    operationTask = Promise.resolve().then(operation);
+  } catch (error) {
+    return { ok: false, error_class: safeAckErrorClass(error) };
+  }
+  const settledTask = operationTask.then(
+    (value) => ({ ok: true, value }),
+    (error) => ({ ok: false, error_class: safeAckErrorClass(error) }),
+  );
+  if (options.keepAlive) {
+    queueBackgroundTask(options.ctx, settledTask);
+  }
+
+  const timeoutMs = Math.max(1, Math.min(maxOperationMs, remainingMs));
+  let timeout = null;
+  try {
+    return await Promise.race([
+      settledTask,
+      new Promise((resolve) => {
+        timeout = setTimeout(() => resolve({ ok: false, error_class: "timeout" }), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function safeAckErrorClass(error) {
+  const name = String(error?.name || "Error");
+  if (name === "AbortError") return "abort";
+  if (name === "TypeError") return "type_error";
+  if (name === "RangeError") return "range_error";
+  return "operation_error";
+}
+
+function logWebhookAckTiming(correlationId, stage, startedAt, httpOutcome, errorClass = "none") {
+  console.log(JSON.stringify({
+    correlation_uuid: correlationId,
+    stage,
+    elapsed_ms: Math.max(0, Date.now() - startedAt),
+    http_outcome: Number(httpOutcome || 0),
+    error_class: safeAckLabel(errorClass),
+  }));
+}
+
+function safeAckLabel(value) {
+  return String(value || "none").replace(/[^A-Za-z0-9_\-.]/g, "_").slice(0, 80);
+}
+
+function durableAckUnavailableResponse(reason) {
+  return jsonResponse({
+    status: "retry",
+    reason,
+    check: "durable_acceptance",
+  }, 503);
+}
+
+function createWebhookAcceptanceRecord(correlationId) {
+  return {
+    schema: LINE_WEBHOOK_ACCEPTANCE_SCHEMA,
+    status: "accepted",
+    correlation_uuid: correlationId,
+    accepted_at: new Date().toISOString(),
+  };
+}
+
+export function parseWebhookAcceptanceRecord(raw = "") {
+  if (!raw) return { kind: "missing", record: null };
+  const record = parseJsonSafely(raw);
+  if (!record || record.schema !== LINE_WEBHOOK_ACCEPTANCE_SCHEMA) {
+    return { kind: "legacy_dispatched", record: null };
+  }
+  if (record.status === "dispatched") {
+    return { kind: "dispatched", record };
+  }
+  if (record.status === "accepted") {
+    return { kind: "accepted", record };
+  }
+  return { kind: "legacy_dispatched", record: null };
+}
+
+function queueBackgroundTask(ctx, task) {
+  const guarded = Promise.resolve(task).catch(() => ({ ok: false, reason: "background_task_failed" }));
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(guarded);
+  } else {
+    void guarded;
+  }
+  return guarded;
+}
+
+async function processAcceptedLineEventInBackground({ event, normalized, env, acceptanceRecord }) {
+  const acceptanceEvidenceTask = persistWebhookAcceptedEvidenceCheckpoint(env, normalized, { bootstrap: false });
+  const markAsReadTask = markLineMessageAsReadForEvent(event, normalized, env);
+  const n8nTask = processN8nInBackground(normalized, env);
+  const n8nResult = await n8nTask;
+
+  if (n8nResult?.ok) {
+    await markWebhookAcceptanceDispatched(env, normalized.line_event_id, acceptanceRecord);
+  }
+  const responseEvidenceTask = persistEvidenceStage(env, normalized, "webhook_http_200_returned", {
+    reply_mode: LINE_REPLY_MODE,
+  });
+  await Promise.allSettled([acceptanceEvidenceTask, markAsReadTask, responseEvidenceTask]);
+  return n8nResult;
+}
+
+async function markWebhookAcceptanceDispatched(env = {}, eventId = "", acceptanceRecord = {}) {
+  if (!env.IDEMPOTENCY_KV || !eventId) {
+    return { ok: false, reason: "missing_IDEMPOTENCY_KV" };
+  }
+  try {
+    await env.IDEMPOTENCY_KV.put(eventId, JSON.stringify({
+      schema: LINE_WEBHOOK_ACCEPTANCE_SCHEMA,
+      status: "dispatched",
+      correlation_uuid: String(acceptanceRecord.correlation_uuid || ""),
+      accepted_at: String(acceptanceRecord.accepted_at || ""),
+      dispatched_at: new Date().toISOString(),
+    }), { expirationTtl: LINE_WEBHOOK_ACCEPTANCE_TTL_SECONDS });
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "idempotency_dispatch_state_write_failed" };
+  }
+}
+
+export function parseMemoCreateCommand(messageText = "") {
+  const text = String(messageText || "");
+  if (!text.startsWith(MEMO_CREATE_COMMAND_PREFIX)) {
+    return { matched: false, valid: false, content: "", reason: "not_memo_create" };
+  }
+  const content = text.slice(MEMO_CREATE_COMMAND_PREFIX.length).trim();
+  if (!content) {
+    return { matched: true, valid: false, content: "", reason: "empty_content" };
+  }
+  if (content.length > MEMO_CREATE_MAX_CONTENT_LENGTH) {
+    return { matched: true, valid: false, content: "", reason: "content_too_long" };
+  }
+  return { matched: true, valid: true, content, reason: "" };
+}
+
+export function parseMemoSearchSelectionDeleteCommand(messageText = "") {
+  const text = String(messageText || "").trim();
+  if (text === MEMO_DELETE_SELECTION_ALL_COMMAND || text === "全部清空") {
+    return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "selection_all_not_supported");
+  }
+
+  if (!text.startsWith("刪除第") && !text.startsWith(MEMO_DELETE_SELECTION_ALL_COMMAND)) {
+    if (text.includes("批次刪除") || text.includes("刪除多筆")) {
+      return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "invalid_selection_format");
+    }
+    return { matched: false, valid: false, intent: "", fields: {}, reason: "not_selection_delete" };
+  }
+
+  const rangeMatch = text.match(/^刪除第\s*([1-9]\d*)\s*到第\s*([1-9]\d*)\s*筆備忘錄$/);
+  if (rangeMatch) {
+    const start = Number(rangeMatch[1]);
+    const end = Number(rangeMatch[2]);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start) {
+      return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "invalid_selection_range");
+    }
+    if ((end - start + 1) > MEMO_SEARCH_SELECTION_MAX_DELETE_ITEMS) {
+      return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "selection_too_large");
+    }
+    return memoCommandResult(MEMO_DELETE_OPERATION, true, {
+      selection_mode: "range",
+      selection_indices: Array.from({ length: end - start + 1 }, (_, index) => start + index),
+    });
+  }
+
+  const listMatch = text.match(/^刪除第\s*([1-9]\d*(?:\s*、\s*[1-9]\d*)*)\s*筆備忘錄$/);
+  if (listMatch) {
+    const parsedIndices = listMatch[1].split("、").map((value) => Number(value.trim()));
+    if (parsedIndices.some((value) => !Number.isSafeInteger(value))) {
+      return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "invalid_selection_format");
+    }
+    const indices = [...new Set(parsedIndices)].sort((left, right) => left - right);
+    if (indices.length > MEMO_SEARCH_SELECTION_MAX_DELETE_ITEMS) {
+      return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "selection_too_large");
+    }
+    return memoCommandResult(MEMO_DELETE_OPERATION, true, {
+      selection_mode: indices.length === 1 ? "single" : "multiple",
+      selection_indices: indices,
+    });
+  }
+
+  return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "invalid_selection_format");
+}
+
+export function parseMemoSearchPageCommand(messageText = "") {
+  const text = String(messageText || "").trim();
+  if (text === "查看下一頁") {
+    return memoCommandResult(MEMO_SEARCH_PAGE_OPERATION, true, {
+      page_mode: "next",
+      requested_page: null,
+    });
+  }
+  if (text === "查看上一頁") {
+    return memoCommandResult(MEMO_SEARCH_PAGE_OPERATION, true, {
+      page_mode: "previous",
+      requested_page: null,
+    });
+  }
+  const numberedPage = text.match(/^查看第\s*([1-9]\d*)\s*頁$/);
+  if (numberedPage) {
+    const requestedPage = Number(numberedPage[1]);
+    if (!Number.isSafeInteger(requestedPage) || requestedPage > MEMO_SEARCH_SELECTION_MAX_CANDIDATES) {
+      return memoCommandResult(MEMO_SEARCH_PAGE_OPERATION, false, {}, "invalid_page_command");
+    }
+    return memoCommandResult(MEMO_SEARCH_PAGE_OPERATION, true, {
+      page_mode: "numbered",
+      requested_page: requestedPage,
+    });
+  }
+  if (text.startsWith("查看下一頁") || text.startsWith("查看上一頁") || text.startsWith("查看第")) {
+    return memoCommandResult(MEMO_SEARCH_PAGE_OPERATION, false, {}, "invalid_page_command");
+  }
+  return { matched: false, valid: false, intent: "", fields: {}, reason: "not_search_page" };
+}
+
+export function parseMemoDeterministicCommand(messageText = "") {
+  const text = String(messageText || "");
+
+  const searchPage = parseMemoSearchPageCommand(text);
+  if (searchPage.matched) {
+    return searchPage;
+  }
+
+  const selectionDelete = parseMemoSearchSelectionDeleteCommand(text);
+  if (selectionDelete.matched) {
+    return selectionDelete;
+  }
+
+  if (text.startsWith(MEMO_SEARCH_COMMAND_PREFIX)) {
+    const keyword = text.slice(MEMO_SEARCH_COMMAND_PREFIX.length).trim();
+    if (!keyword) {
+      return memoCommandResult(MEMO_SEARCH_OPERATION, false, {}, "empty_keyword");
+    }
+    if (keyword.length > MEMO_CREATE_MAX_CONTENT_LENGTH) {
+      return memoCommandResult(MEMO_SEARCH_OPERATION, false, {}, "content_too_long");
+    }
+    return memoCommandResult(MEMO_SEARCH_OPERATION, true, {
+      keyword: keyword === "全部" ? "" : keyword,
+      list_all: keyword === "全部",
+    });
+  }
+
+  if (text.startsWith(MEMO_MODIFY_COMMAND_PREFIX)) {
+    const input = text.slice(MEMO_MODIFY_COMMAND_PREFIX.length).trim();
+    const delimiterIndex = input.indexOf("｜");
+    if (delimiterIndex < 0) {
+      return memoCommandResult(MEMO_MODIFY_OPERATION, false, {}, "missing_delimiter");
+    }
+    const memoId = input.slice(0, delimiterIndex).trim();
+    const newContent = input.slice(delimiterIndex + 1).trim();
+    if (!MEMO_ID_PATTERN.test(memoId)) {
+      return memoCommandResult(MEMO_MODIFY_OPERATION, false, {}, "invalid_memo_id");
+    }
+    if (!newContent) {
+      return memoCommandResult(MEMO_MODIFY_OPERATION, false, {}, "empty_content");
+    }
+    if (newContent.length > MEMO_CREATE_MAX_CONTENT_LENGTH) {
+      return memoCommandResult(MEMO_MODIFY_OPERATION, false, {}, "content_too_long");
+    }
+    return memoCommandResult(MEMO_MODIFY_OPERATION, true, {
+      memo_id: memoId,
+      new_content: newContent,
+    });
+  }
+
+  if (text.startsWith(MEMO_DELETE_COMMAND_PREFIX)) {
+    const memoId = text.slice(MEMO_DELETE_COMMAND_PREFIX.length).trim();
+    if (!MEMO_ID_PATTERN.test(memoId)) {
+      return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "invalid_memo_id");
+    }
+    return memoCommandResult(MEMO_DELETE_OPERATION, true, {
+      memo_id: memoId,
+      selection_mode: "memo_id",
+    });
+  }
+
+  const createCommand = parseMemoCreateCommand(text);
+  if (createCommand.matched) {
+    return memoCommandResult(MEMO_CREATE_OPERATION, createCommand.valid, {
+      content: createCommand.content,
+    }, createCommand.reason);
+  }
+  return { matched: false, valid: false, intent: "", fields: {}, reason: "not_memo_command" };
+}
+
+function memoCommandResult(intent, valid, fields = {}, reason = "") {
+  return {
+    matched: true,
+    valid: Boolean(valid),
+    intent,
+    fields: valid ? fields : {},
+    reason: valid ? "" : reason,
+  };
+}
+
+function memoCommandCanonicalInput(memoCommand = {}) {
+  const fields = memoCommand.fields || {};
+  switch (memoCommand.intent) {
+    case MEMO_CREATE_OPERATION:
+      return { content: String(fields.content || "") };
+    case MEMO_SEARCH_OPERATION:
+      return { keyword: String(fields.keyword || ""), list_all: fields.list_all === true };
+    case MEMO_SEARCH_PAGE_OPERATION:
+      return {
+        page_mode: String(fields.page_mode || ""),
+        requested_page: fields.requested_page === null ? null : Number(fields.requested_page),
+      };
+    case MEMO_MODIFY_OPERATION:
+      return { memo_id: String(fields.memo_id || ""), new_content: String(fields.new_content || "") };
+    case MEMO_DELETE_OPERATION:
+      return fields.selection_mode && fields.selection_mode !== "memo_id"
+        ? {
+            selection_mode: String(fields.selection_mode || ""),
+            selection_indices: Array.isArray(fields.selection_indices)
+              ? fields.selection_indices.map((value) => Number(value))
+              : [],
+          }
+        : { memo_id: String(fields.memo_id || ""), selection_mode: "memo_id" };
+    default:
+      return {};
+  }
+}
+
+export async function buildMemoSelectionScopeHash(event = {}, env = {}) {
+  const source = event.source && typeof event.source === "object" ? event.source : {};
+  const scopeMaterial = JSON.stringify({
+    type: String(source.type || "user"),
+    user: String(source.userId || ""),
+    group: String(source.groupId || ""),
+    room: String(source.roomId || ""),
+  });
+  return fingerprint(`memo-selection-scope:${scopeMaterial}`, env);
+}
+
+async function buildMemoDeterministicIdentity(event = {}, memoCommand = {}, env = {}, receivedAt = "") {
+  const rawEventIdentity = String(event.webhookEventId || event.message?.id || "");
+  if (!rawEventIdentity) {
+    return { ok: false, reason: "missing_line_event_identity" };
+  }
+  const safeEventHash = await fingerprint(`line-event:${rawEventIdentity}`, env);
+  const normalizedFields = memoCommandCanonicalInput(memoCommand);
+  const canonicalContentHash = await fingerprint(
+    `memo-command:${memoCommand.intent}:${JSON.stringify(normalizedFields)}`,
+    env,
+  );
+  const selectionScopeHash = await buildMemoSelectionScopeHash(event, env);
+  const memoId = memoCommand.intent === MEMO_CREATE_OPERATION
+    ? `memo-${safeEventHash}`
+    : String(normalizedFields.memo_id || "");
+  return {
+    ok: true,
+    safe_event_hash: safeEventHash,
+    memo_id: memoId,
+    filename: memoCommand.intent === MEMO_CREATE_OPERATION ? `${memoId}.json` : "",
+    canonical_content_hash: canonicalContentHash,
+    selection_scope_hash: selectionScopeHash,
+    received_at: receivedAt || new Date().toISOString(),
+    callback_reference: {
+      callback_url: MEMO_FINALIZE_URL,
+      task_id: `memo-task-${safeEventHash}`,
+      request_id: `memo-request-${safeEventHash}`,
+    },
+  };
+}
+
+export async function buildMemoCreateIdentity(event = {}, content = "", env = {}, receivedAt = "") {
+  const identity = await buildMemoDeterministicIdentity(event, {
+    intent: MEMO_CREATE_OPERATION,
+    fields: { content: String(content || "") },
+  }, env, receivedAt);
+  if (identity.ok) {
+    identity.canonical_content_hash = await fingerprint(`memo-content:${String(content || "")}`, env);
+  }
+  return identity;
+}
+
+export function createMemoCreateAcceptanceRecord({ identity, memoCommand, replyToken, correlationId }) {
+  const normalizedCommand = memoCommand.fields
+    ? memoCommandCanonicalInput(memoCommand)
+    : { content: String(memoCommand.content || "") };
+  return {
+    schema: MEMO_CREATE_ACCEPTANCE_SCHEMA,
+    operation: String(memoCommand.intent || MEMO_CREATE_OPERATION),
+    status: "accepted",
+    dispatch_status: "accepted",
+    input_valid: Boolean(memoCommand.valid),
+    reject_reason: memoCommand.valid ? "" : memoCommand.reason,
+    correlation_uuid: correlationId,
+    safe_event_hash: identity.safe_event_hash,
+    memo_id: identity.memo_id,
+    filename: identity.filename,
+    canonical_content_hash: identity.canonical_content_hash,
+    selection_scope_hash: identity.selection_scope_hash,
+    normalized_command: normalizedCommand,
+    received_at: identity.received_at,
+    callback_reference: identity.callback_reference,
+    reply_token: String(replyToken || ""),
+    accepted_at: new Date().toISOString(),
+  };
+}
+
+function parseMemoCreateAcceptanceRecord(raw = "") {
+  const record = parseJsonSafely(raw);
+  if (
+    !record
+    || record.schema !== MEMO_CREATE_ACCEPTANCE_SCHEMA
+    || !MEMO_DETERMINISTIC_OPERATIONS.includes(record.operation)
+  ) {
+    return null;
+  }
+  return record;
+}
+
+function memoValidationAcceptanceHandoff(record = null, acceptanceKey = "") {
+  const parsed = parseMemoCreateAcceptanceRecord(JSON.stringify(record || null));
+  if (
+    !parsed
+    || parsed.input_valid !== false
+    || !/^[a-f0-9]{64}$/.test(String(parsed.safe_event_hash || ""))
+    || memoCreateAcceptanceKey(parsed.safe_event_hash) !== acceptanceKey
+  ) {
+    return null;
+  }
+  return parsed;
+}
+
+async function handleMemoDeterministicAcceptance({
+  event,
+  normalized,
+  memoCommand,
+  env,
+  ctx,
+  correlationId,
+  ackStartedAt,
+  ackBudgetMs,
+}) {
+  if (!env.IDEMPOTENCY_KV) {
+    logWebhookAckTiming(correlationId, "memo_idempotency_failed", ackStartedAt, 503, "missing_binding");
+    return durableAckUnavailableResponse("missing_IDEMPOTENCY_KV");
+  }
+
+  const identity = memoCommand.intent === MEMO_CREATE_OPERATION
+    ? await buildMemoCreateIdentity(event, memoCommand.fields?.content || "", env, normalized.received_at)
+    : await buildMemoDeterministicIdentity(event, memoCommand, env, normalized.received_at);
+  if (!identity.ok) {
+    logWebhookAckTiming(correlationId, "memo_identity_failed", ackStartedAt, 503, identity.reason);
+    return durableAckUnavailableResponse("memo_identity_unavailable");
+  }
+  const acceptanceKey = memoCreateAcceptanceKey(identity.safe_event_hash);
+  const selectionDelete = memoDeleteUsesSearchSelection(memoCommand);
+  const snapshotDependent = memoUsesSearchSnapshot(memoCommand);
+  const selectionKey = snapshotDependent ? memoSearchSelectionKey(identity.selection_scope_hash) : "";
+  const memoGetBudgetMs = memoAckRemainingBudgetMs({
+    startedAt: ackStartedAt,
+    budgetMs: ackBudgetMs,
+    phase: "get",
+  });
+  if (memoGetBudgetMs <= 0) {
+    logWebhookAckTiming(correlationId, "memo_idempotency_get_failed", ackStartedAt, 503, "budget_exhausted");
+    return durableAckUnavailableResponse("idempotency_get_unavailable");
+  }
+  const acceptanceRead = await runBoundedAckOperation(
+    () => snapshotDependent
+      ? Promise.all([
+          env.IDEMPOTENCY_KV.get(acceptanceKey),
+          env.IDEMPOTENCY_KV.get(selectionKey),
+        ])
+      : env.IDEMPOTENCY_KV.get(acceptanceKey),
+    {
+      startedAt: ackStartedAt,
+      budgetMs: ackBudgetMs,
+      maxOperationMs: memoGetBudgetMs,
+      ctx,
+    },
+  );
+  if (!acceptanceRead.ok) {
+    logWebhookAckTiming(correlationId, "memo_idempotency_get_failed", ackStartedAt, 503, acceptanceRead.error_class);
+    return durableAckUnavailableResponse("idempotency_get_unavailable");
+  }
+
+  const acceptanceRaw = snapshotDependent ? acceptanceRead.value?.[0] : acceptanceRead.value;
+  const selectionSnapshotRaw = snapshotDependent ? acceptanceRead.value?.[1] : "";
+  let acceptanceRecord = parseMemoCreateAcceptanceRecord(acceptanceRaw);
+  const resumed = Boolean(acceptanceRecord);
+  if (acceptanceRaw && !acceptanceRecord) {
+    logWebhookAckTiming(correlationId, "memo_acceptance_conflict", ackStartedAt, 409, "invalid_record");
+    return jsonResponse({ status: "rejected", reason: "memo_acceptance_conflict" }, 409);
+  }
+  if (acceptanceRecord) {
+    if (
+      acceptanceRecord.memo_id !== identity.memo_id
+      || acceptanceRecord.canonical_content_hash !== identity.canonical_content_hash
+      || acceptanceRecord.operation !== memoCommand.intent
+    ) {
+      logWebhookAckTiming(correlationId, "memo_identity_conflict", ackStartedAt, 409, "content_mismatch");
+      return jsonResponse({ status: "rejected", reason: "memo_identity_conflict" }, 409);
+    }
+    if (memoCreateRecordBlocksDispatch(acceptanceRecord)) {
+      logWebhookAckTiming(correlationId, "memo_duplicate_ack", ackStartedAt, 200, "none");
+      return jsonResponse({ status: "accepted", reason: "duplicate_line_event", route: memoCommand.intent }, 200);
+    }
+  } else {
+    let acceptedMemoCommand = memoCommand;
+    if (selectionDelete) {
+      const resolution = resolveMemoSearchSelectionDelete({
+        snapshotRaw: selectionSnapshotRaw,
+        scopeHash: identity.selection_scope_hash,
+        selectionMode: memoCommand.fields?.selection_mode,
+        selectionIndices: memoCommand.fields?.selection_indices,
+      });
+      acceptedMemoCommand = {
+        ...memoCommand,
+        valid: resolution.ok,
+        reason: resolution.ok ? "" : resolution.reason,
+        fields: {
+          ...(memoCommand.fields || {}),
+          resolved_memo_ids: resolution.ok ? resolution.memo_ids : [],
+          selection_snapshot_version: resolution.ok ? resolution.snapshot_version : "",
+        },
+      };
+    } else if (memoCommand.intent === MEMO_SEARCH_PAGE_OPERATION && memoCommand.valid) {
+      const resolution = resolveMemoSearchPage({
+        snapshotRaw: selectionSnapshotRaw,
+        scopeHash: identity.selection_scope_hash,
+        pageMode: memoCommand.fields?.page_mode,
+        requestedPage: memoCommand.fields?.requested_page,
+      });
+      acceptedMemoCommand = {
+        ...memoCommand,
+        valid: resolution.ok,
+        reason: resolution.ok ? "" : resolution.reason,
+        fields: {
+          ...(memoCommand.fields || {}),
+          page_number: resolution.ok ? resolution.page_number : null,
+          page_count: resolution.ok ? resolution.page_count : 0,
+          page_total: resolution.ok ? resolution.total : 0,
+          page_global_start: resolution.ok ? resolution.global_start : 0,
+          page_memo_ids: resolution.ok ? resolution.memo_ids : [],
+          selection_snapshot_version: resolution.ok ? resolution.snapshot_version : "",
+        },
+      };
+    }
+    acceptanceRecord = createMemoCreateAcceptanceRecord({
+      identity,
+      memoCommand: acceptedMemoCommand,
+      replyToken: normalized.reply_token,
+      correlationId,
+    });
+    if (selectionDelete) {
+      acceptanceRecord.normalized_command = {
+        ...acceptanceRecord.normalized_command,
+        memo_ids: acceptedMemoCommand.fields?.resolved_memo_ids || [],
+        selection_snapshot_version: acceptedMemoCommand.fields?.selection_snapshot_version || "",
+      };
+    } else if (memoCommand.intent === MEMO_SEARCH_PAGE_OPERATION) {
+      acceptanceRecord.normalized_command = {
+        ...acceptanceRecord.normalized_command,
+        page_number: acceptedMemoCommand.fields?.page_number ?? null,
+        page_count: acceptedMemoCommand.fields?.page_count || 0,
+        page_total: acceptedMemoCommand.fields?.page_total || 0,
+        page_global_start: acceptedMemoCommand.fields?.page_global_start || 0,
+        page_memo_ids: acceptedMemoCommand.fields?.page_memo_ids || [],
+        selection_snapshot_version: acceptedMemoCommand.fields?.selection_snapshot_version || "",
+      };
+    }
+    const memoPutBudgetMs = memoAckRemainingBudgetMs({
+      startedAt: ackStartedAt,
+      budgetMs: ackBudgetMs,
+      phase: "put",
+    });
+    if (memoPutBudgetMs <= 0) {
+      logWebhookAckTiming(correlationId, "memo_durable_acceptance_failed", ackStartedAt, 503, "budget_exhausted");
+      return durableAckUnavailableResponse("durable_acceptance_unavailable");
+    }
+    const acceptanceWrite = await runBoundedAckOperation(
+      () => writeMemoCreateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, acceptanceRecord),
+      {
+        startedAt: ackStartedAt,
+        budgetMs: ackBudgetMs,
+        maxOperationMs: memoPutBudgetMs,
+        ctx,
+        keepAlive: true,
+      },
+    );
+    if (!acceptanceWrite.ok) {
+      logWebhookAckTiming(correlationId, "memo_durable_acceptance_failed", ackStartedAt, 503, acceptanceWrite.error_class);
+      return durableAckUnavailableResponse("durable_acceptance_unavailable");
+    }
+  }
+
+  queueBackgroundTask(ctx, processAcceptedMemoDeterministicInBackground({
+    event,
+    memoCommand,
+    env,
+    acceptanceKey,
+    validationAcceptanceRecord: acceptanceRecord.input_valid === false ? acceptanceRecord : null,
+  }));
+  logWebhookAckTiming(correlationId, resumed ? "memo_redelivery_resume_ack" : "memo_message_ack", ackStartedAt, 200, "none");
+  return jsonResponse({
+    status: "accepted",
+    route: memoCommand.intent,
+    resumed,
+  }, 200);
+}
+
+export function memoAckRemainingBudgetMs({
+  startedAt = Date.now(),
+  budgetMs = LINE_WEBHOOK_ACK_BUDGET_MS,
+  phase = "get",
+  nowMs = Date.now(),
+} = {}) {
+  const elapsedMs = Math.max(0, Number(nowMs) - Number(startedAt));
+  const responseSafeRemainingMs = Number(budgetMs) - elapsedMs - MEMO_ACK_RESPONSE_MARGIN_MS;
+  const phaseReserveMs = phase === "get" ? MEMO_ACK_PUT_RESERVE_MS : 0;
+  return Math.max(0, Math.floor(responseSafeRemainingMs - phaseReserveMs));
+}
+
+function memoCreateRecordBlocksDispatch(record = {}) {
+  return [
+    "dispatching",
+    "dispatch_ambiguous",
+    "dispatched",
+    "reply_attempt_pending",
+    "final_completed",
+    "final_failed",
+    "delivery_ambiguous",
+    "reply_rejected",
+    "reply_unavailable",
+  ].includes(String(record.status || ""));
+}
+
+async function processAcceptedMemoDeterministicInBackground({
+  event,
+  memoCommand,
+  env,
+  acceptanceKey,
+  validationAcceptanceRecord = null,
+}) {
+  const markAsReadTask = markLineMessageAsReadForEvent(event, { request_id: "", gate_marker: "" }, env);
+  const validationHandoff = memoValidationAcceptanceHandoff(validationAcceptanceRecord, acceptanceKey);
+  const current = validationHandoff
+    || parseMemoCreateAcceptanceRecord(await env.IDEMPOTENCY_KV?.get(acceptanceKey));
+  if (!current) {
+    await Promise.allSettled([markAsReadTask]);
+    return { ok: false, reason: "missing_memo_acceptance" };
+  }
+
+  if (!current.input_valid) {
+    const replyText = memoValidationReplyText(current.operation, current.reject_reason);
+    const result = await deliverMemoReplyOnce(env, acceptanceKey, replyText, "final_failed", {
+      validationAcceptanceRecord: current,
+    });
+    await Promise.allSettled([markAsReadTask]);
+    return result;
+  }
+
+  const dispatching = {
+    ...current,
+    status: "dispatching",
+    dispatch_status: "dispatching",
+    dispatch_started_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  await writeMemoCreateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, dispatching);
+
+  let n8nResult;
+  try {
+    n8nResult = await callN8nWebhook(buildMemoDeterministicN8nPayload(dispatching), env);
+  } catch {
+    await updateMemoCreateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, (record) => ({
+      ...record,
+      status: "dispatch_ambiguous",
+      dispatch_status: "ambiguous",
+      updated_at: new Date().toISOString(),
+    }));
+    await Promise.allSettled([markAsReadTask]);
+    return { ok: false, reason: "memo_dispatch_ambiguous" };
+  }
+
+  await updateMemoCreateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, (record) => ({
+    ...record,
+    status: memoCreateFinalStatus(record.status) ? record.status : "dispatched",
+    dispatch_status: n8nResult.ok ? "dispatched" : "failed",
+    dispatched_at: n8nResult.ok ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString(),
+  }));
+
+  if (!n8nResult.ok || !memoDeterministicN8nResponseAccepted(n8nResult.body, dispatching)) {
+    const failureText = dispatching.operation === MEMO_CREATE_OPERATION
+      ? MEMO_CREATE_FAILED_REPLY_TEXT
+      : MEMO_OPERATION_FAILED_REPLY_TEXT;
+    await deliverMemoReplyOnce(env, acceptanceKey, failureText, "final_failed");
+  }
+  await Promise.allSettled([markAsReadTask]);
+  return n8nResult;
+}
+
+export function buildMemoCreateN8nPayload(record = {}, canonicalContent = "") {
+  return {
+    intent: MEMO_CREATE_OPERATION,
+    safe_event_hash: String(record.safe_event_hash || ""),
+    memo_id: String(record.memo_id || ""),
+    canonical_content: String(canonicalContent || "").trim(),
+    received_at: String(record.received_at || ""),
+    reply_delivery_reference: {
+      callback_url: String(record.callback_reference?.callback_url || ""),
+      task_id: String(record.callback_reference?.task_id || ""),
+      request_id: String(record.callback_reference?.request_id || ""),
+    },
+  };
+}
+
+export function buildMemoDeterministicN8nPayload(record = {}) {
+  if (record.operation === MEMO_CREATE_OPERATION) {
+    return buildMemoCreateN8nPayload(record, record.normalized_command?.content || "");
+  }
+  const base = {
+    intent: String(record.operation || ""),
+    safe_event_hash: String(record.safe_event_hash || ""),
+    received_at: String(record.received_at || ""),
+    reply_delivery_reference: {
+      callback_url: String(record.callback_reference?.callback_url || ""),
+      task_id: String(record.callback_reference?.task_id || ""),
+      request_id: String(record.callback_reference?.request_id || ""),
+    },
+  };
+  if (record.operation === MEMO_SEARCH_OPERATION) {
+    return {
+      ...base,
+      keyword: String(record.normalized_command?.keyword || ""),
+      list_all: record.normalized_command?.list_all === true,
+    };
+  }
+  if (record.operation === MEMO_SEARCH_PAGE_OPERATION) {
+    return {
+      ...base,
+      page_scope: "memo_search_selection_snapshot",
+      selection_snapshot_version: String(record.normalized_command?.selection_snapshot_version || ""),
+      page_number: Number(record.normalized_command?.page_number || 0),
+      page_count: Number(record.normalized_command?.page_count || 0),
+      total: Number(record.normalized_command?.page_total || 0),
+      global_start: Number(record.normalized_command?.page_global_start || 0),
+      memo_ids: Array.isArray(record.normalized_command?.page_memo_ids)
+        ? record.normalized_command.page_memo_ids.map((memoId) => String(memoId || ""))
+        : [],
+    };
+  }
+  if (record.operation === MEMO_MODIFY_OPERATION) {
+    return {
+      ...base,
+      memo_id: String(record.normalized_command?.memo_id || ""),
+      new_content: String(record.normalized_command?.new_content || ""),
+    };
+  }
+  if (record.operation === MEMO_DELETE_OPERATION) {
+    if (record.normalized_command?.selection_mode && record.normalized_command.selection_mode !== "memo_id") {
+      return {
+        ...base,
+        delete_scope: "memo_search_selection_snapshot",
+        selection_mode: String(record.normalized_command.selection_mode || ""),
+        selection_snapshot_version: String(record.normalized_command.selection_snapshot_version || ""),
+        memo_ids: Array.isArray(record.normalized_command.memo_ids)
+          ? record.normalized_command.memo_ids.map((memoId) => String(memoId || ""))
+          : [],
+      };
+    }
+    return {
+      ...base,
+      memo_id: String(record.normalized_command?.memo_id || ""),
+    };
+  }
+  return base;
+}
+
+function memoCreateN8nResponseAccepted(body = {}, memoId = "") {
+  body = normalizeN8nResponseBody(body);
+  return Boolean(
+    body
+    && body.intent === MEMO_CREATE_OPERATION
+    && body.memo_id === memoId
+    && body.callback_sent === true
+    && ["completed", "duplicate"].includes(String(body.status || ""))
+  );
+}
+
+function memoDeterministicN8nResponseAccepted(body = {}, record = {}) {
+  if (record.operation === MEMO_CREATE_OPERATION) {
+    return memoCreateN8nResponseAccepted(body, record.memo_id);
+  }
+  body = normalizeN8nResponseBody(body);
+  if (
+    !body
+    || body.intent !== record.operation
+    || body.callback_sent !== true
+    || !["completed", "duplicate"].includes(String(body.status || ""))
+  ) {
+    return false;
+  }
+  if (
+    record.operation === MEMO_DELETE_OPERATION
+    && record.normalized_command?.selection_mode
+    && record.normalized_command.selection_mode !== "memo_id"
+  ) {
+    const expectedMemoIds = Array.isArray(record.normalized_command?.memo_ids)
+      ? record.normalized_command.memo_ids
+      : [];
+    const responseMemoIds = Array.isArray(body.memo_ids) ? body.memo_ids : [];
+    return expectedMemoIds.length > 0
+      && expectedMemoIds.length === responseMemoIds.length
+      && expectedMemoIds.every((memoId, index) => memoId === responseMemoIds[index]);
+  }
+  if (record.operation === MEMO_SEARCH_PAGE_OPERATION) {
+    const expectedMemoIds = Array.isArray(record.normalized_command?.page_memo_ids)
+      ? record.normalized_command.page_memo_ids
+      : [];
+    const responseMemoIds = Array.isArray(body.memo_ids) ? body.memo_ids : [];
+    return expectedMemoIds.length > 0
+      && expectedMemoIds.length === responseMemoIds.length
+      && expectedMemoIds.every((memoId, index) => memoId === responseMemoIds[index]);
+  }
+  if ([MEMO_MODIFY_OPERATION, MEMO_DELETE_OPERATION].includes(record.operation)) {
+    return body.memo_id === record.memo_id;
+  }
+  return true;
+}
+
+function memoValidationReplyText(operation = "", reason = "") {
+  if (reason === "content_too_long") {
+    return operation === MEMO_CREATE_OPERATION
+      ? MEMO_CREATE_TOO_LONG_REPLY_TEXT
+      : MEMO_OPERATION_TOO_LONG_REPLY_TEXT;
+  }
+  if (reason === "selection_snapshot_missing" || reason === "selection_snapshot_invalid" || reason === "selection_snapshot_empty") {
+    return MEMO_DELETE_SELECTION_MISSING_REPLY_TEXT;
+  }
+  if (reason === "selection_snapshot_expired") return MEMO_DELETE_SELECTION_EXPIRED_REPLY_TEXT;
+  if (reason === "selection_index_out_of_range") return MEMO_DELETE_SELECTION_RANGE_REPLY_TEXT;
+  if (reason === "selection_all_not_supported") return MEMO_DELETE_ALL_UNSUPPORTED_REPLY_TEXT;
+  if (reason === "selection_too_large" || reason === "selection_batch_limit_unverified") {
+    return MEMO_DELETE_SELECTION_TOO_LARGE_REPLY_TEXT;
+  }
+  if (["invalid_selection_format", "invalid_selection_range", "invalid_selection_mode", "empty_selection"].includes(reason)) {
+    return MEMO_DELETE_SELECTION_FORMAT_REPLY_TEXT;
+  }
+  if (reason === "page_snapshot_missing" || reason === "page_snapshot_invalid" || reason === "page_snapshot_empty") {
+    return MEMO_SEARCH_PAGE_MISSING_REPLY_TEXT;
+  }
+  if (reason === "page_snapshot_expired") return MEMO_SEARCH_PAGE_EXPIRED_REPLY_TEXT;
+  if (reason === "page_out_of_range") return MEMO_SEARCH_PAGE_RANGE_REPLY_TEXT;
+  if (reason === "invalid_page_command") return MEMO_SEARCH_PAGE_FORMAT_REPLY_TEXT;
+  if (operation === MEMO_SEARCH_OPERATION) return MEMO_SEARCH_EMPTY_REPLY_TEXT;
+  if (operation === MEMO_SEARCH_PAGE_OPERATION) return MEMO_SEARCH_PAGE_FORMAT_REPLY_TEXT;
+  if (operation === MEMO_MODIFY_OPERATION) return MEMO_MODIFY_FORMAT_REPLY_TEXT;
+  if (operation === MEMO_DELETE_OPERATION) return MEMO_DELETE_FORMAT_REPLY_TEXT;
+  return MEMO_CREATE_EMPTY_REPLY_TEXT;
+}
+
+function memoCreateFinalStatus(status = "") {
+  return ["final_completed", "final_failed", "delivery_ambiguous", "reply_rejected", "reply_unavailable"].includes(status);
+}
+
+async function updateMemoCreateAcceptance(kv, key, updater) {
+  const current = parseMemoCreateAcceptanceRecord(await kv?.get(key));
+  if (!current) return { ok: false, reason: "missing_memo_acceptance" };
+  const next = updater(current);
+  await writeMemoCreateAcceptance(kv, key, next);
+  return { ok: true, record: next };
+}
+
+async function writeMemoCreateAcceptance(kv, key, record) {
+  if (!kv?.put || !key) throw new Error("missing_memo_acceptance_store");
+  await kv.put(key, JSON.stringify(record), { expirationTtl: EVIDENCE_TTL_SECONDS });
+  return { ok: true };
+}
+
+function memoCreateAcceptanceKey(safeEventHash = "") {
+  return `${MEMO_CREATE_ACCEPTANCE_PREFIX}:${safeEventHash}`;
+}
+
+function memoSearchSelectionKey(scopeHash = "") {
+  return `${MEMO_SEARCH_SELECTION_PREFIX}:${scopeHash}`;
+}
+
+function memoDeleteUsesSearchSelection(memoCommand = {}) {
+  return memoCommand.intent === MEMO_DELETE_OPERATION
+    && memoCommand.valid
+    && memoCommand.fields?.selection_mode
+    && memoCommand.fields.selection_mode !== "memo_id";
+}
+
+function memoUsesSearchSnapshot(memoCommand = {}) {
+  return memoDeleteUsesSearchSelection(memoCommand)
+    || (memoCommand.intent === MEMO_SEARCH_PAGE_OPERATION && memoCommand.valid);
+}
+
+function safeMemoSearchSummary(value = "") {
+  const compact = String(value || "").replace(/\s+/g, " ").trim();
+  const redacted = compact
+    .replace(/memo-[a-f0-9]{64}/gi, "（已隱藏編號）")
+    .replace(/(?:\/Users\/|\/菲比工作總倉庫\/)[^\s｜]*/g, "（已隱藏路徑）")
+    .replace(/[^\u0009\u0020-\u007e\u00a0-\uffff]/g, "")
+    .trim();
+  if (!redacted) return "（內容已隱藏）";
+  return redacted.length > 120 ? `${redacted.slice(0, 119)}…` : redacted;
+}
+
+function invalidMemoSearchResult(reason = "invalid_search_candidate_set", safeReplyText = "") {
+  return { ok: false, reason, candidates: [], page_candidates: [], total: 0, reply_text: safeReplyText };
+}
+
+function normalizeMemoSearchPageCandidates(pageCandidates, expectedMemoIds, globalStart) {
+  if (!Array.isArray(pageCandidates) || pageCandidates.length !== expectedMemoIds.length) return null;
+  const normalized = pageCandidates.map((candidate, index) => {
+    const rawSummary = typeof candidate?.summary === "string" ? candidate.summary.trim() : "";
+    return {
+      position: Number(candidate?.position),
+      memo_id: String(candidate?.memo_id || ""),
+      summary: rawSummary ? safeMemoSearchSummary(rawSummary) : "",
+      expected_position: globalStart + index,
+      expected_memo_id: expectedMemoIds[index],
+    };
+  });
+  if (normalized.some((candidate) => (
+    candidate.position !== candidate.expected_position
+    || candidate.memo_id !== candidate.expected_memo_id
+    || !MEMO_ID_PATTERN.test(candidate.memo_id)
+    || !candidate.summary
+  ))) return null;
+  return normalized.map(({ expected_position, expected_memo_id, ...candidate }) => candidate);
+}
+
+function memoSearchPageReplyText(total, pageNumber, pageCount, pageCandidates) {
+  if (total === 0) return "沒有找到符合的使用中備忘錄。";
+  return `找到 ${total} 筆使用中備忘錄，第 ${pageNumber}/${pageCount} 頁。${pageCandidates.map((candidate) => `\n${candidate.position}. ${candidate.summary}`).join("")}`;
+}
+
+export function parseMemoSearchSelectionResult(
+  replyText = "",
+  structuredCandidates = null,
+  structuredTotal = null,
+  structuredPageCandidates = null,
+  structuredPageNumber = 1,
+) {
+  const declaredTotal = Number(structuredTotal);
+  if (Number.isSafeInteger(declaredTotal) && declaredTotal > MEMO_SEARCH_SELECTION_MAX_CANDIDATES) {
+    return invalidMemoSearchResult("search_candidate_limit_exceeded", MEMO_SEARCH_RESULT_LIMIT_REPLY_TEXT);
+  }
+  if (Array.isArray(structuredCandidates)) {
+    const total = Number(structuredTotal);
+    if (!Number.isSafeInteger(total) || total < 0) return invalidMemoSearchResult();
+    if (total > MEMO_SEARCH_SELECTION_MAX_CANDIDATES) {
+      return invalidMemoSearchResult("search_candidate_limit_exceeded", MEMO_SEARCH_RESULT_LIMIT_REPLY_TEXT);
+    }
+    if (structuredCandidates.length !== total) {
+      return invalidMemoSearchResult("incomplete_search_candidate_set", MEMO_SEARCH_RESULT_INCOMPLETE_REPLY_TEXT);
+    }
+    const candidates = structuredCandidates.map((candidate, index) => ({
+      position: Number(candidate?.position),
+      memo_id: String(candidate?.memo_id || ""),
+      expected_position: index + 1,
+    }));
+    if (
+      candidates.some((candidate) => candidate.position !== candidate.expected_position || !MEMO_ID_PATTERN.test(candidate.memo_id))
+      || new Set(candidates.map((candidate) => candidate.memo_id)).size !== candidates.length
+    ) return invalidMemoSearchResult();
+
+    const normalizedCandidates = candidates.map(({ expected_position, ...candidate }) => candidate);
+    if (total === 0) {
+      return {
+        ok: true,
+        candidates: [],
+        page_candidates: [],
+        total: 0,
+        page: 0,
+        page_count: 0,
+        reply_text: memoSearchPageReplyText(0, 0, 0, []),
+      };
+    }
+    const pageCount = Math.ceil(total / MEMO_SEARCH_PAGE_SIZE);
+    const pageNumber = Number(structuredPageNumber);
+    if (pageNumber !== 1) return invalidMemoSearchResult("invalid_search_page_number");
+    const expectedFirstPageIds = normalizedCandidates.slice(0, MEMO_SEARCH_PAGE_SIZE).map((candidate) => candidate.memo_id);
+    const pageSource = Array.isArray(structuredPageCandidates)
+      ? structuredPageCandidates
+      : total <= MEMO_SEARCH_PAGE_SIZE ? structuredCandidates : null;
+    const pageCandidates = normalizeMemoSearchPageCandidates(pageSource, expectedFirstPageIds, 1);
+    if (!pageCandidates) return invalidMemoSearchResult("invalid_search_page_candidate_set");
+    return {
+      ok: true,
+      candidates: normalizedCandidates,
+      page_candidates: pageCandidates,
+      total,
+      page: 1,
+      page_count: pageCount,
+      reply_text: memoSearchPageReplyText(total, 1, pageCount, pageCandidates),
+    };
+  }
+
+  const text = String(replyText || "").replace(/\r\n?/g, "\n").trim();
+  if (text === "沒有找到符合的使用中備忘錄。") {
+    return parseMemoSearchSelectionResult("", [], 0, [], 1);
+  }
+  const lines = text.split("\n");
+  const header = lines.shift()?.match(/^找到 ([1-9]\d*) 筆使用中備忘錄。$/);
+  if (!header) {
+    return invalidMemoSearchResult("invalid_search_result_shape");
+  }
+  const total = Number(header[1]);
+  if (total > MEMO_SEARCH_SELECTION_MAX_CANDIDATES) {
+    return invalidMemoSearchResult("search_candidate_limit_exceeded", MEMO_SEARCH_RESULT_LIMIT_REPLY_TEXT);
+  }
+  if (lines.length === 0 || lines.length > MEMO_SEARCH_PAGE_SIZE) {
+    return invalidMemoSearchResult("invalid_search_result_shape");
+  }
+  const candidates = [];
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(/^([1-9]\d*)\.\s+(memo-[a-f0-9]{64})｜(.+)$/);
+    if (!match || Number(match[1]) !== index + 1 || !match[3].trim()) {
+      return invalidMemoSearchResult("invalid_search_candidate");
+    }
+    candidates.push({ position: index + 1, memo_id: match[2], summary: match[3] });
+  }
+  if (total !== candidates.length) {
+    return invalidMemoSearchResult("incomplete_search_candidate_set", MEMO_SEARCH_RESULT_INCOMPLETE_REPLY_TEXT);
+  }
+  return parseMemoSearchSelectionResult("", candidates, total, candidates, 1);
+}
+
+export function parseMemoSearchPageResult({
+  pageCandidates = null,
+  expectedMemoIds = [],
+  pageNumber = 0,
+  pageCount = 0,
+  total = 0,
+  globalStart = 0,
+} = {}) {
+  const normalizedExpectedIds = Array.isArray(expectedMemoIds) ? expectedMemoIds.map(String) : [];
+  if (
+    !Number.isSafeInteger(pageNumber) || pageNumber < 1
+    || !Number.isSafeInteger(pageCount) || pageCount < 1 || pageNumber > pageCount
+    || !Number.isSafeInteger(total) || total < 1 || total > MEMO_SEARCH_SELECTION_MAX_CANDIDATES
+    || !Number.isSafeInteger(globalStart) || globalStart !== ((pageNumber - 1) * MEMO_SEARCH_PAGE_SIZE) + 1
+    || normalizedExpectedIds.length < 1 || normalizedExpectedIds.length > MEMO_SEARCH_PAGE_SIZE
+    || normalizedExpectedIds.some((memoId) => !MEMO_ID_PATTERN.test(memoId))
+  ) return { ok: false, reason: "invalid_page_contract", page_candidates: [], reply_text: "" };
+  const normalizedPageCandidates = normalizeMemoSearchPageCandidates(pageCandidates, normalizedExpectedIds, globalStart);
+  if (!normalizedPageCandidates) {
+    return { ok: false, reason: "invalid_page_candidate_set", page_candidates: [], reply_text: "" };
+  }
+  return {
+    ok: true,
+    page: pageNumber,
+    page_count: pageCount,
+    total,
+    page_candidates: normalizedPageCandidates,
+    reply_text: memoSearchPageReplyText(total, pageNumber, pageCount, normalizedPageCandidates),
+  };
+}
+
+export function parseMemoSearchSelectionSnapshot(raw = "") {
+  const snapshot = parseJsonSafely(raw);
+  const expectedKeys = [
+    "candidates", "created_at", "current_page", "delete_all_eligible", "delete_all_limit",
+    "expires_at", "page_count", "page_size", "schema", "scope_hash", "search_event_hash", "total",
+  ].sort().join("|");
+  if (
+    !snapshot
+    || snapshot.schema !== MEMO_SEARCH_SELECTION_SCHEMA
+    || Object.keys(snapshot).sort().join("|") !== expectedKeys
+    || !/^[a-f0-9]{64}$/.test(String(snapshot.scope_hash || ""))
+    || !/^[a-f0-9]{64}$/.test(String(snapshot.search_event_hash || ""))
+    || !Number.isFinite(Date.parse(String(snapshot.created_at || "")))
+    || !Number.isFinite(Date.parse(String(snapshot.expires_at || "")))
+    || !Array.isArray(snapshot.candidates)
+    || snapshot.candidates.length > MEMO_SEARCH_SELECTION_MAX_CANDIDATES
+    || snapshot.page_size !== MEMO_SEARCH_PAGE_SIZE
+    || snapshot.delete_all_limit !== 0
+  ) return null;
+  const candidates = snapshot.candidates.map((candidate) => ({
+    position: Number(candidate?.position),
+    memo_id: String(candidate?.memo_id || ""),
+  }));
+  const total = Number(snapshot.total);
+  const pageCount = Number(snapshot.page_count);
+  const currentPage = Number(snapshot.current_page);
+  const expectedPageCount = total === 0 ? 0 : Math.ceil(total / MEMO_SEARCH_PAGE_SIZE);
+  const expectedDeleteAllEligible = false;
+  if (
+    snapshot.candidates.some((candidate) => !candidate || Object.keys(candidate).sort().join("|") !== "memo_id|position")
+    || candidates.some((candidate, index) => candidate.position !== index + 1 || !MEMO_ID_PATTERN.test(candidate.memo_id))
+    || new Set(candidates.map((candidate) => candidate.memo_id)).size !== candidates.length
+    || total !== candidates.length
+    || pageCount !== expectedPageCount
+    || !Number.isSafeInteger(currentPage)
+    || currentPage !== (total === 0 ? 0 : Math.min(Math.max(currentPage, 1), pageCount))
+    || snapshot.delete_all_eligible !== expectedDeleteAllEligible
+  ) return null;
+  return { ...snapshot, candidates, total, page_count: pageCount, current_page: currentPage };
+}
+
+export function resolveMemoSearchSelectionDelete({
+  snapshotRaw = "",
+  scopeHash = "",
+  selectionMode = "",
+  selectionIndices = [],
+  nowMs = Date.now(),
+} = {}) {
+  if (!snapshotRaw) return { ok: false, reason: "selection_snapshot_missing", memo_ids: [] };
+  const snapshot = parseMemoSearchSelectionSnapshot(snapshotRaw);
+  if (!snapshot || snapshot.scope_hash !== scopeHash) {
+    return { ok: false, reason: "selection_snapshot_invalid", memo_ids: [] };
+  }
+  if (Date.parse(snapshot.expires_at) <= Number(nowMs)) {
+    return { ok: false, reason: "selection_snapshot_expired", memo_ids: [] };
+  }
+  if (snapshot.candidates.length === 0) {
+    return { ok: false, reason: "selection_snapshot_empty", memo_ids: [] };
+  }
+
+  if (!["single", "multiple", "range"].includes(selectionMode)) {
+    return { ok: false, reason: selectionMode === "all" ? "selection_all_not_supported" : "invalid_selection_mode", memo_ids: [] };
+  }
+  const rawIndices = Array.isArray(selectionIndices) ? selectionIndices.map((value) => Number(value)) : [];
+  const indices = [...new Set(rawIndices)].sort((left, right) => left - right);
+  if (indices.length === 0) {
+    return { ok: false, reason: "empty_selection", memo_ids: [] };
+  }
+  if (indices.some((index) => !Number.isSafeInteger(index) || index < 1 || index > snapshot.candidates.length)) {
+    return { ok: false, reason: "selection_index_out_of_range", memo_ids: [] };
+  }
+  if (indices.length > MEMO_SELECTION_WORKER_BATCH_REQUEST_LIMIT) {
+    return { ok: false, reason: "selection_batch_limit_unverified", memo_ids: [] };
+  }
+  return {
+    ok: true,
+    reason: "",
+    memo_ids: indices.map((index) => snapshot.candidates[index - 1].memo_id),
+    snapshot_version: snapshot.search_event_hash,
+  };
+}
+
+export function resolveMemoSearchPage({
+  snapshotRaw = "",
+  scopeHash = "",
+  pageMode = "",
+  requestedPage = null,
+  nowMs = Date.now(),
+} = {}) {
+  if (!snapshotRaw) return { ok: false, reason: "page_snapshot_missing", memo_ids: [] };
+  const snapshot = parseMemoSearchSelectionSnapshot(snapshotRaw);
+  if (!snapshot || snapshot.scope_hash !== scopeHash) return { ok: false, reason: "page_snapshot_invalid", memo_ids: [] };
+  if (Date.parse(snapshot.expires_at) <= Number(nowMs)) return { ok: false, reason: "page_snapshot_expired", memo_ids: [] };
+  if (snapshot.total === 0) return { ok: false, reason: "page_snapshot_empty", memo_ids: [] };
+  let pageNumber;
+  if (pageMode === "next") pageNumber = snapshot.current_page + 1;
+  else if (pageMode === "previous") pageNumber = snapshot.current_page - 1;
+  else if (pageMode === "numbered") pageNumber = Number(requestedPage);
+  else return { ok: false, reason: "invalid_page_command", memo_ids: [] };
+  if (!Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > snapshot.page_count) {
+    return { ok: false, reason: "page_out_of_range", memo_ids: [] };
+  }
+  const startIndex = (pageNumber - 1) * MEMO_SEARCH_PAGE_SIZE;
+  const memoIds = snapshot.candidates.slice(startIndex, startIndex + MEMO_SEARCH_PAGE_SIZE).map((candidate) => candidate.memo_id);
+  return {
+    ok: true,
+    reason: "",
+    page_number: pageNumber,
+    page_count: snapshot.page_count,
+    total: snapshot.total,
+    global_start: startIndex + 1,
+    memo_ids: memoIds,
+    snapshot_version: snapshot.search_event_hash,
+  };
+}
+
+async function persistMemoSearchSelectionSnapshot(kv, record = {}, parsedResult = {}, nowMs = Date.now()) {
+  const scopeHash = String(record.selection_scope_hash || "");
+  if (!kv?.put || !/^[a-f0-9]{64}$/.test(scopeHash) || !/^[a-f0-9]{64}$/.test(String(record.safe_event_hash || ""))) {
+    return { ok: false, reason: "invalid_selection_snapshot_identity" };
+  }
+  const createdAt = new Date(nowMs).toISOString();
+  const snapshot = {
+    schema: MEMO_SEARCH_SELECTION_SCHEMA,
+    scope_hash: scopeHash,
+    search_event_hash: String(record.safe_event_hash || ""),
+    candidates: (parsedResult.candidates || []).map((candidate) => ({
+      position: Number(candidate.position),
+      memo_id: String(candidate.memo_id || ""),
+    })),
+    total: Number(parsedResult.total || 0),
+    page_size: MEMO_SEARCH_PAGE_SIZE,
+    page_count: Number(parsedResult.page_count || 0),
+    current_page: Number(parsedResult.page || 0),
+    delete_all_eligible: false,
+    delete_all_limit: 0,
+    created_at: createdAt,
+    expires_at: new Date(nowMs + (MEMO_SEARCH_SELECTION_TTL_SECONDS * 1000)).toISOString(),
+  };
+  await kv.put(memoSearchSelectionKey(scopeHash), JSON.stringify(snapshot), {
+    expirationTtl: MEMO_SEARCH_SELECTION_TTL_SECONDS,
+  });
+  return { ok: true, snapshot };
+}
+
+async function persistMemoSearchPageSnapshotCurrentPage(kv, record = {}, parsedPage = {}) {
+  const scopeHash = String(record.selection_scope_hash || "");
+  const raw = await kv?.get(memoSearchSelectionKey(scopeHash));
+  const snapshot = parseMemoSearchSelectionSnapshot(raw);
+  if (
+    !snapshot
+    || snapshot.scope_hash !== scopeHash
+    || snapshot.search_event_hash !== record.normalized_command?.selection_snapshot_version
+    || snapshot.total !== parsedPage.total
+    || snapshot.page_count !== parsedPage.page_count
+    || Date.parse(snapshot.expires_at) <= Date.now()
+  ) throw new Error("page_snapshot_state_mismatch");
+  const startIndex = (parsedPage.page - 1) * MEMO_SEARCH_PAGE_SIZE;
+  const expectedIds = snapshot.candidates.slice(startIndex, startIndex + MEMO_SEARCH_PAGE_SIZE).map((candidate) => candidate.memo_id);
+  const actualIds = parsedPage.page_candidates.map((candidate) => candidate.memo_id);
+  if (expectedIds.length !== actualIds.length || expectedIds.some((memoId, index) => memoId !== actualIds[index])) {
+    throw new Error("page_snapshot_candidate_mismatch");
+  }
+  const next = { ...snapshot, current_page: parsedPage.page };
+  await kv.put(memoSearchSelectionKey(scopeHash), JSON.stringify(next), {
+    expiration: Math.floor(Date.parse(snapshot.expires_at) / 1000),
+  });
+  return { ok: true, snapshot: next };
 }
 
 export function workerHealth(env = {}) {
@@ -235,7 +1576,50 @@ export function workerHealth(env = {}) {
       webhook_target: n8nWebhookAttribution(env.N8N_WEBHOOK_URL || N8N_WEBHOOK_URL),
       shared_secret_header: N8N_SHARED_SECRET_HEADER,
     },
+    line_webhook_ack: {
+      version: "bounded-durable-ack-v1",
+      budget_ms: LINE_WEBHOOK_ACK_BUDGET_MS,
+      normal_target_ms: NORMAL_ACK_TARGET_MS,
+      kv_get_timeout_ms: LINE_WEBHOOK_KV_GET_TIMEOUT_MS,
+      kv_put_timeout_ms: LINE_WEBHOOK_KV_PUT_TIMEOUT_MS,
+      timeout_http_status: 503,
+      durable_acceptance_store: "IDEMPOTENCY_KV",
+      ambiguous_put_redelivery_resume: true,
+      empty_event_side_effects: false,
+      background_after_acceptance: ["evidence", "mark_as_read", "n8n", "pending", "core", "final"],
+    },
     line_reply_mode: LINE_REPLY_MODE,
+    memo_ack_kv_budget: {
+      version: "remaining-budget-v1",
+      hard_cap_ms: LINE_WEBHOOK_ACK_BUDGET_MS,
+      response_margin_ms: MEMO_ACK_RESPONSE_MARGIN_MS,
+      get_policy: "remaining_minus_response_margin_and_put_reserve",
+      put_reserve_ms: MEMO_ACK_PUT_RESERVE_MS,
+      put_policy: "remaining_minus_response_margin",
+      timeout_http_status: 503,
+      durable_acceptance_before_200: true,
+    },
+    line_final_delivery: {
+      version: LINE_FINAL_DELIVERY_VERSION,
+      reply_first: {
+        endpoint: "/v2/bot/message/reply",
+        eligibility_window_seconds: LINE_REPLY_ELIGIBILITY_WINDOW_MS / 1000,
+        max_attempts: 1,
+        retry_key_header: false,
+        ambiguous_policy: "no_reply_retry_no_immediate_push",
+        monthly_push_usage_gate_applies: false,
+      },
+      push_fallback: {
+        version: LINE_FINAL_DELIVERY_RETRY_VERSION,
+        endpoint: "/v2/bot/message/push",
+        retry_http_status: 429,
+        max_attempts: LINE_FINAL_DELIVERY_MAX_ATTEMPTS,
+        default_retry_after_seconds: LINE_FINAL_DELIVERY_DEFAULT_RETRY_AFTER_SECONDS,
+        retry_key_header: "X-Line-Retry-Key",
+        durable_readback_required_before_push: true,
+      },
+      reply_token_persistence: "pending_only_redacted_after_finalizer",
+    },
     line_mark_as_read: {
       enabled: env.LINE_MARK_AS_READ_ENABLED === "true",
       mode: env.LINE_MARK_AS_READ_ENABLED === "true" ? "api_enabled_chat_on_optional" : "disabled_chat_off_auto_read",
@@ -270,10 +1654,91 @@ export function workerHealth(env = {}) {
       path: CODEX_FINALIZE_PATH,
       mode: "task_token_exactly_once",
     },
+    memo_create: {
+      command_prefix: MEMO_CREATE_COMMAND_PREFIX,
+      colon_contract: "full_width_only",
+      route_mode: "deterministic_before_ai_classification",
+      memo_id: "memo-<safe_event_hash_sha256>",
+      filename: "<memo_id>.json",
+      cloud_writer: "n8n_deterministic_create_if_absent_readback",
+      finalizer_path: MEMO_FINALIZE_PATH,
+      finalizer_reference: "opaque_task_scoped",
+      callback_auth: "header_auth_only",
+      callback_header_auth_configured: Boolean(env.N8N_MEMO_CALLBACK_SECRET),
+      callback_payload_credential_absent: true,
+      reply_token_location: "worker_durable_acceptance_only",
+      raw_user_id_stored: false,
+      monitor_or_wake_dependency: false,
+      processing_push: false,
+      reply_max_attempts: 1,
+      reply_retry_key: false,
+      ambiguous_reply_push: false,
+      eligibility_window_seconds: LINE_REPLY_ELIGIBILITY_WINDOW_MS / 1000,
+    },
+    memo_deterministic_routes: {
+      route_mode: "fixed_prefix_before_ai_classification",
+      colon_contract: "full_width_only",
+      separator_contract: "full_width_vertical_bar_for_modify",
+      intents: [MEMO_SEARCH_OPERATION, MEMO_SEARCH_PAGE_OPERATION, MEMO_MODIFY_OPERATION, MEMO_DELETE_OPERATION],
+      command_prefixes: {
+        search: MEMO_SEARCH_COMMAND_PREFIX,
+        modify: MEMO_MODIFY_COMMAND_PREFIX,
+        delete: MEMO_DELETE_COMMAND_PREFIX,
+      },
+      selection_delete_commands: [
+        "刪除第 N 筆備忘錄",
+        "刪除第 N、N 筆備忘錄",
+        "刪除第 N 到第 N 筆備忘錄",
+      ],
+      selection_scope: "latest_search_snapshot_same_hashed_actor_conversation",
+      selection_storage: "IDEMPOTENCY_KV",
+      selection_ttl_seconds: MEMO_SEARCH_SELECTION_TTL_SECONDS,
+      selection_full_candidate_limit: MEMO_SEARCH_SELECTION_MAX_CANDIDATES,
+      selection_snapshot_schema: MEMO_SEARCH_SELECTION_SCHEMA,
+      selection_snapshot_sensitive_payload: false,
+      page_size: MEMO_SEARCH_PAGE_SIZE,
+      page_commands: ["查看下一頁", "查看上一頁", "查看第 N 頁"],
+      page_readback: "protected_n8n_exact_snapshot_ids_in_order",
+      delete_all_supported: false,
+      parser_supported_selection_items: MEMO_SEARCH_SELECTION_MAX_DELETE_ITEMS,
+      worker_batch_request_items: MEMO_SELECTION_WORKER_BATCH_REQUEST_LIMIT,
+      live_execution_authorized_selection_items: MEMO_SELECTION_LIVE_EXECUTION_AUTHORIZED_LIMIT,
+      n8n_batch_archive_update_required: true,
+      selection_batch_fail_closed_above_authorized_limit: true,
+      search_reply_numbered_without_memo_id: true,
+      list_all_literal: "全部",
+      memo_id_format: "memo-<64_lowercase_sha256_hex>",
+      path_from_user_input: false,
+      ai_agent_bypass: true,
+      durable_acceptance_before_200: true,
+      background_n8n_dispatch: true,
+      callback_auth: "header_auth_only",
+      callback_payload_credential_absent: true,
+      monitor_or_wake_dependency: false,
+      processing_push: false,
+      reply_max_attempts: 1,
+      final_exactly_once: true,
+    },
+    memo_success_reply: {
+      operations: [MEMO_CREATE_OPERATION, MEMO_MODIFY_OPERATION, MEMO_DELETE_OPERATION],
+      normal_source: "validated_n8n_natural_language",
+      fallback: "operation_specific_natural_text_without_id",
+      memo_id_hidden: true,
+      search_reply_numbered_without_memo_id: true,
+      max_length: MEMO_SUCCESS_REPLY_MAX_LENGTH,
+      finalizer_gates: ["header_auth", "task_state", "completed_status", "exactly_once"],
+    },
     codex_monitor: {
       name: CODEX_MONITOR_NAME,
       task_prefixes: [CODEX_TASK_PREFIX, IDEA_TASK_PREFIX],
       actions: [CODEX_TASK_ACTION, IDEA_TASK_ACTION],
+      wake_contract: {
+        key: MONITOR_WAKE_KEY,
+        schema: MONITOR_WAKE_SCHEMA,
+        write_on_new_pending: true,
+        additional_kv_writes_per_new_task: 1,
+        sensitive_payload: false,
+      },
       target_path: CODEX_TASK_SMOKE_FILE_PATH,
       target_content: CODEX_TASK_SMOKE_FILE_CONTENT,
       dropbox_idea_dir: DROPBOX_IDEA_DIR,
@@ -685,10 +2150,13 @@ export async function enqueueCodexTask(env = {}, normalized = {}, body = {}) {
     content: CODEX_TASK_SMOKE_FILE_CONTENT,
     line_user_ref: lineUserRef.value,
     finalize_token: createFinalizeToken(),
+    reply_token: normalized.reply_token || "",
+    reply_received_at: normalized.received_at || "",
     created_at: new Date().toISOString(),
   });
   await env.RUNTIME_KV.put(key, JSON.stringify(task), { expirationTtl: EVIDENCE_TTL_SECONDS });
   await env.RUNTIME_KV.put(codexPendingKey(body.task_id), key, { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await updateMonitorWakeKey(env.RUNTIME_KV);
   return { ok: true, key, task_id: body.task_id, status: "queued" };
 }
 
@@ -700,10 +2168,11 @@ export async function enqueueIdeaTask(env = {}, normalized = {}, body = {}) {
     return { ok: false, reason: "missing_idea_task_identity" };
   }
 
-  const content = extractIdeaContent(normalized.message_text);
-  if (!content) {
+  const canonicalContent = resolveCanonicalIdeaContent(body, normalized.message_text);
+  if (!canonicalContent.ok) {
     return { ok: false, reason: "missing_idea_content" };
   }
+  const content = canonicalContent.content;
 
   const lineEventKey = await fingerprint(`line-event:${normalized.line_event_id}`, env);
   const actorFingerprint = await fingerprint(`line-actor:${normalized.user_id || "unknown"}`, env);
@@ -737,6 +2206,8 @@ export async function enqueueIdeaTask(env = {}, normalized = {}, body = {}) {
     marker: normalized.gate_marker,
     line_user_ref: lineUserRef.value,
     finalize_token: createFinalizeToken(),
+    reply_token: normalized.reply_token || "",
+    reply_received_at: normalized.received_at || "",
     final_reply_text: naturalIdeaReplyText(body.reply_text),
     idea: {
       idea_id: ideaId,
@@ -749,7 +2220,25 @@ export async function enqueueIdeaTask(env = {}, normalized = {}, body = {}) {
   });
   await env.RUNTIME_KV.put(key, JSON.stringify(task), { expirationTtl: EVIDENCE_TTL_SECONDS });
   await env.RUNTIME_KV.put(ideaPendingKey(taskId), key, { expirationTtl: EVIDENCE_TTL_SECONDS });
+  await updateMonitorWakeKey(env.RUNTIME_KV);
   return { ok: true, key, task_id: taskId, status: "pending" };
+}
+
+export async function updateMonitorWakeKey(kv) {
+  if (!kv?.put) {
+    return { ok: false, reason: "missing_RUNTIME_KV" };
+  }
+  const wakeRecord = {
+    schema: MONITOR_WAKE_SCHEMA,
+    version: crypto.randomUUID(),
+    updated_at: new Date().toISOString(),
+  };
+  try {
+    await kv.put(MONITOR_WAKE_KEY, JSON.stringify(wakeRecord), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "monitor_wake_write_failed" };
+  }
 }
 
 export async function callN8nWebhook(payload, env) {
@@ -1020,7 +2509,215 @@ export async function replyToLine(replyToken, replyText, env) {
   return { ok: true };
 }
 
-export async function pushToLine(userId, replyText, env) {
+async function attemptFinalReply(replyToken, replyText, env = {}) {
+  const authorization = lineAuthorizationHeader(env);
+  if (!authorization.ok) {
+    return { ...authorization, explicit_rejection: true };
+  }
+
+  let timeout = null;
+  try {
+    const timeoutMs = Number(env.LINE_REPLY_TIMEOUT_MS || LINE_REPLY_TIMEOUT_MS);
+    const controller = new AbortController();
+    timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const response = await fetch("https://api.line.me/v2/bot/message/reply", {
+      method: "POST",
+      headers: {
+        authorization: authorization.value,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        replyToken,
+        messages: [{ type: "text", text: replyText }],
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        explicit_rejection: true,
+        reason: `line_reply_http_${response.status}`,
+        http_status: response.status,
+      };
+    }
+    return { ok: true, http_status: response.status };
+  } catch {
+    return {
+      ok: false,
+      ambiguous: true,
+      reason: "line_reply_delivery_ambiguous",
+    };
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+export async function deliverFinalReplyFirst({
+  env = {},
+  deliveryKey = "",
+  userId = "",
+  replyToken = "",
+  replyReceivedAt = "",
+  replyText = "",
+} = {}) {
+  if (!env.RUNTIME_KV) {
+    return { ok: false, status: "failed", reason: "missing_RUNTIME_KV", replied: false, pushed: false };
+  }
+  if (!deliveryKey) {
+    return { ok: false, status: "failed", reason: "missing_delivery_key", replied: false, pushed: false };
+  }
+
+  const replyRecordKey = `${deliveryKey}:reply-first`;
+  const existing = await readFinalDeliveryRecord(env.RUNTIME_KV, replyRecordKey);
+  if (!existing.ok) {
+    return { ok: false, status: "failed", reason: existing.reason, replied: false, pushed: false };
+  }
+  if (existing.record?.status === "reply_delivered") {
+    return {
+      ok: true,
+      status: "already_delivered",
+      delivery_mode: "reply",
+      replied: false,
+      pushed: false,
+      duplicate_blocked: true,
+      reply_attempt_count: 1,
+      push_attempt_count: 0,
+    };
+  }
+  if (["delivery_ambiguous", "reply_attempt_pending"].includes(existing.record?.status)) {
+    return {
+      ok: false,
+      status: "delivery_ambiguous",
+      reason: "line_reply_delivery_ambiguous",
+      delivery_mode: "ambiguous",
+      replied: false,
+      pushed: false,
+      reply_attempt_count: 1,
+      push_attempt_count: 0,
+    };
+  }
+
+  let fallbackReason = "";
+  let replyAttemptCount = existing.record?.status === "reply_rejected" ? 1 : 0;
+  if (["reply_unavailable", "reply_rejected"].includes(existing.record?.status)) {
+    fallbackReason = existing.record.reason || existing.record.status;
+  } else {
+    const receivedAtMs = Date.parse(String(replyReceivedAt || ""));
+    const nowMs = typeof env.LINE_REPLY_NOW_MS === "function"
+      ? Number(env.LINE_REPLY_NOW_MS())
+      : Number(env.LINE_REPLY_NOW_MS || Date.now());
+    const ageMs = Number.isFinite(receivedAtMs) && Number.isFinite(nowMs) ? nowMs - receivedAtMs : Number.POSITIVE_INFINITY;
+    const eligible = Boolean(replyToken)
+      && ageMs >= 0
+      && ageMs <= LINE_REPLY_ELIGIBILITY_WINDOW_MS;
+
+    if (!eligible) {
+      fallbackReason = !replyToken ? "missing_reply_token" : "reply_token_expired";
+      const unavailable = await persistFinalDeliveryRecord(env.RUNTIME_KV, replyRecordKey, {
+        status: "reply_unavailable",
+        reason: fallbackReason,
+        reply_attempt_count: 0,
+        eligibility_window_seconds: LINE_REPLY_ELIGIBILITY_WINDOW_MS / 1000,
+        updated_at: new Date(nowMs).toISOString(),
+      }, { requireMissing: true });
+      if (!unavailable.ok && unavailable.reason !== "delivery_record_already_exists") {
+        return { ok: false, status: "failed", reason: unavailable.reason, replied: false, pushed: false };
+      }
+    } else {
+      const pending = await persistFinalDeliveryRecord(env.RUNTIME_KV, replyRecordKey, {
+        status: "reply_attempt_pending",
+        reply_attempt_count: 1,
+        eligibility_window_seconds: LINE_REPLY_ELIGIBILITY_WINDOW_MS / 1000,
+        started_at: new Date(nowMs).toISOString(),
+        updated_at: new Date(nowMs).toISOString(),
+      }, { requireMissing: true });
+      if (!pending.ok) {
+        return {
+          ok: false,
+          status: "delivery_ambiguous",
+          reason: "line_reply_delivery_ambiguous",
+          delivery_mode: "ambiguous",
+          replied: false,
+          pushed: false,
+          reply_attempt_count: 1,
+          push_attempt_count: 0,
+        };
+      }
+
+      const replyResult = await attemptFinalReply(replyToken, replyText, env);
+      replyAttemptCount = 1;
+      if (replyResult.ok) {
+        const delivered = await persistFinalDeliveryRecord(env.RUNTIME_KV, replyRecordKey, {
+          ...pending.record,
+          status: "reply_delivered",
+          http_status: replyResult.http_status,
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+        if (!delivered.ok) {
+          return { ok: false, status: "failed", reason: delivered.reason, replied: false, pushed: false };
+        }
+        return {
+          ok: true,
+          status: "delivered",
+          delivery_mode: "reply",
+          replied: true,
+          pushed: false,
+          reply_attempt_count: 1,
+          push_attempt_count: 0,
+        };
+      }
+
+      if (replyResult.ambiguous) {
+        await persistFinalDeliveryRecord(env.RUNTIME_KV, replyRecordKey, {
+          ...pending.record,
+          status: "delivery_ambiguous",
+          reason: "line_reply_delivery_ambiguous",
+          updated_at: new Date().toISOString(),
+        });
+        return {
+          ok: false,
+          status: "delivery_ambiguous",
+          reason: "line_reply_delivery_ambiguous",
+          delivery_mode: "ambiguous",
+          replied: false,
+          pushed: false,
+          reply_attempt_count: 1,
+          push_attempt_count: 0,
+        };
+      }
+
+      fallbackReason = replyResult.reason || "line_reply_rejected";
+      const rejected = await persistFinalDeliveryRecord(env.RUNTIME_KV, replyRecordKey, {
+        ...pending.record,
+        status: "reply_rejected",
+        reason: fallbackReason,
+        http_status: replyResult.http_status || null,
+        updated_at: new Date().toISOString(),
+      });
+      if (!rejected.ok) {
+        return { ok: false, status: "failed", reason: rejected.reason, replied: false, pushed: false };
+      }
+    }
+  }
+
+  const pushResult = await deliverFinalPushWith429Retry({
+    env,
+    deliveryKey,
+    userId,
+    replyText,
+  });
+  return {
+    ...pushResult,
+    delivery_mode: "push_fallback",
+    fallback_reason: fallbackReason,
+    replied: false,
+    reply_attempt_count: replyAttemptCount,
+    push_attempt_count: pushResult.attempt_count || 0,
+  };
+}
+
+export async function pushToLine(userId, replyText, env, options = {}) {
   const authorization = lineAuthorizationHeader(env);
   if (!authorization.ok) {
     return authorization;
@@ -1030,27 +2727,292 @@ export async function pushToLine(userId, replyText, env) {
   }
 
   let response;
+  let timeout = null;
   try {
+    const timeoutMs = Number(env.LINE_PUSH_TIMEOUT_MS || 1800);
+    const controller = new AbortController();
+    timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const headers = {
+      authorization: authorization.value,
+      "content-type": "application/json",
+    };
+    if (options.retryKey) {
+      headers["X-Line-Retry-Key"] = options.retryKey;
+    }
     response = await fetch("https://api.line.me/v2/bot/message/push", {
       method: "POST",
-      headers: {
-        authorization: authorization.value,
-        "content-type": "application/json",
-      },
+      headers,
       body: JSON.stringify({
         to: userId,
         messages: [{ type: "text", text: replyText }],
       }),
+      signal: controller.signal,
     });
   } catch (error) {
     return { ok: false, reason: `line_push_exception_${error?.name || "Error"}`, status: 502 };
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 
   if (!response.ok) {
-    return { ok: false, reason: `line_push_http_${response.status}`, status: 502 };
+    return {
+      ok: false,
+      reason: `line_push_http_${response.status}`,
+      status: 502,
+      http_status: response.status,
+      retry_after_seconds: parseRetryAfterSeconds(response.headers.get("retry-after")),
+      accepted_request_id_present: Boolean(response.headers.get("x-line-accepted-request-id")),
+    };
   }
 
-  return { ok: true };
+  return { ok: true, http_status: response.status };
+}
+
+export async function deliverFinalPushWith429Retry({
+  env = {},
+  deliveryKey = "",
+  userId = "",
+  replyText = "",
+} = {}) {
+  if (!env.RUNTIME_KV) {
+    return { ok: false, status: "failed", reason: "missing_RUNTIME_KV", pushed: false, attempt_count: 0 };
+  }
+  if (!deliveryKey) {
+    return { ok: false, status: "failed", reason: "missing_delivery_key", pushed: false, attempt_count: 0 };
+  }
+
+  const payloadFingerprint = await finalDeliveryPayloadFingerprint(userId, replyText);
+  const existing = await readFinalDeliveryRecord(env.RUNTIME_KV, deliveryKey);
+  if (!existing.ok) {
+    return { ok: false, status: "failed", reason: existing.reason, pushed: false, attempt_count: 0 };
+  }
+  if (existing.record?.status === "delivered") {
+    return {
+      ok: true,
+      status: "already_delivered",
+      pushed: false,
+      duplicate_blocked: true,
+      attempt_count: existing.record.attempt_count,
+    };
+  }
+  if (["retry_exhausted", "failed"].includes(existing.record?.status)) {
+    return {
+      ok: false,
+      status: existing.record.status,
+      reason: `delivery_${existing.record.status}`,
+      pushed: false,
+      attempt_count: existing.record.attempt_count,
+    };
+  }
+  if (existing.record && existing.record.payload_fingerprint !== payloadFingerprint) {
+    return { ok: false, status: "failed", reason: "delivery_payload_mismatch", pushed: false, attempt_count: existing.record.attempt_count || 0 };
+  }
+
+  let record = existing.record;
+  if (!record) {
+    const pendingRecord = {
+      status: "pending",
+      retry_key: crypto.randomUUID(),
+      attempt_count: 0,
+      payload_fingerprint: payloadFingerprint,
+      first_attempt_at: null,
+      last_attempt_at: null,
+      last_http_status: null,
+      retry_after_seconds: null,
+      next_attempt_at: null,
+    };
+    const created = await persistFinalDeliveryRecord(env.RUNTIME_KV, deliveryKey, pendingRecord, { requireMissing: true });
+    if (!created.ok) {
+      return { ok: false, status: "failed", reason: created.reason, pushed: false, attempt_count: 0 };
+    }
+    record = created.record;
+  }
+
+  while (record.attempt_count < LINE_FINAL_DELIVERY_MAX_ATTEMPTS) {
+    if (record.attempt_count > 0) {
+      const retryAfterSeconds = Number.isFinite(record.retry_after_seconds)
+        ? record.retry_after_seconds
+        : LINE_FINAL_DELIVERY_DEFAULT_RETRY_AFTER_SECONDS;
+      await waitForFinalDeliveryRetry(retryAfterSeconds, env);
+    }
+
+    const attemptedAt = new Date().toISOString();
+    const attemptRecord = {
+      ...record,
+      status: "pending",
+      attempt_count: record.attempt_count + 1,
+      first_attempt_at: record.first_attempt_at || attemptedAt,
+      last_attempt_at: attemptedAt,
+      last_http_status: null,
+      retry_after_seconds: null,
+      next_attempt_at: null,
+    };
+    const attemptPersisted = await persistFinalDeliveryRecord(env.RUNTIME_KV, deliveryKey, attemptRecord, {
+      expectedRetryKey: record.retry_key,
+    });
+    if (!attemptPersisted.ok) {
+      return {
+        ok: false,
+        status: "failed",
+        reason: attemptPersisted.reason,
+        pushed: false,
+        attempt_count: record.attempt_count,
+      };
+    }
+    record = attemptPersisted.record;
+
+    const pushResult = await pushToLine(userId, replyText, env, { retryKey: record.retry_key });
+    const legalDuplicate = pushResult.http_status === 409 && pushResult.accepted_request_id_present === true;
+    if (pushResult.ok || legalDuplicate) {
+      const deliveredRecord = {
+        ...record,
+        status: "delivered",
+        last_http_status: pushResult.http_status,
+        retry_after_seconds: null,
+        next_attempt_at: null,
+      };
+      const delivered = await persistFinalDeliveryRecord(env.RUNTIME_KV, deliveryKey, deliveredRecord, {
+        expectedRetryKey: record.retry_key,
+      });
+      if (!delivered.ok) {
+        return {
+          ok: false,
+          status: "failed",
+          reason: delivered.reason,
+          pushed: false,
+          attempt_count: record.attempt_count,
+        };
+      }
+      return {
+        ok: true,
+        status: "delivered",
+        pushed: true,
+        attempt_count: delivered.record.attempt_count,
+        delivered_via: legalDuplicate ? "accepted_409" : "success_2xx",
+      };
+    }
+
+    if (pushResult.http_status !== 429) {
+      const failedRecord = {
+        ...record,
+        status: "failed",
+        last_http_status: pushResult.http_status || null,
+      };
+      const failed = await persistFinalDeliveryRecord(env.RUNTIME_KV, deliveryKey, failedRecord, {
+        expectedRetryKey: record.retry_key,
+      });
+      return {
+        ok: false,
+        status: "failed",
+        reason: failed.ok ? pushResult.reason : failed.reason,
+        pushed: false,
+        attempt_count: record.attempt_count,
+      };
+    }
+
+    if (record.attempt_count >= LINE_FINAL_DELIVERY_MAX_ATTEMPTS) {
+      const exhaustedRecord = {
+        ...record,
+        status: "retry_exhausted",
+        last_http_status: 429,
+        retry_after_seconds: null,
+        next_attempt_at: null,
+      };
+      const exhausted = await persistFinalDeliveryRecord(env.RUNTIME_KV, deliveryKey, exhaustedRecord, {
+        expectedRetryKey: record.retry_key,
+      });
+      return {
+        ok: false,
+        status: "retry_exhausted",
+        reason: exhausted.ok ? "line_push_http_429_retry_exhausted" : exhausted.reason,
+        pushed: false,
+        attempt_count: record.attempt_count,
+      };
+    }
+
+    const retryAfterSeconds = Number.isFinite(pushResult.retry_after_seconds)
+      ? pushResult.retry_after_seconds
+      : LINE_FINAL_DELIVERY_DEFAULT_RETRY_AFTER_SECONDS;
+    const retryRecord = {
+      ...record,
+      status: "pending",
+      last_http_status: 429,
+      retry_after_seconds: retryAfterSeconds,
+      next_attempt_at: new Date(Date.now() + retryAfterSeconds * 1000).toISOString(),
+    };
+    const retryPending = await persistFinalDeliveryRecord(env.RUNTIME_KV, deliveryKey, retryRecord, {
+      expectedRetryKey: record.retry_key,
+    });
+    if (!retryPending.ok) {
+      return {
+        ok: false,
+        status: "failed",
+        reason: retryPending.reason,
+        pushed: false,
+        attempt_count: record.attempt_count,
+      };
+    }
+    record = retryPending.record;
+  }
+
+  return { ok: false, status: "retry_exhausted", reason: "line_push_http_429_retry_exhausted", pushed: false, attempt_count: record.attempt_count };
+}
+
+function parseRetryAfterSeconds(value) {
+  const text = String(value || "").trim();
+  if (!/^\d+$/.test(text)) return null;
+  const seconds = Number(text);
+  return Number.isSafeInteger(seconds) && seconds >= 0 ? seconds : null;
+}
+
+async function finalDeliveryPayloadFingerprint(userId, replyText) {
+  const payload = JSON.stringify({
+    to: String(userId || ""),
+    messages: [{ type: "text", text: String(replyText || "") }],
+  });
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function readFinalDeliveryRecord(kv, deliveryKey) {
+  try {
+    const raw = await kv.get(deliveryKey);
+    if (!raw) return { ok: true, record: null };
+    const record = parseJsonSafely(raw);
+    return record ? { ok: true, record } : { ok: false, reason: "delivery_record_unreadable" };
+  } catch {
+    return { ok: false, reason: "delivery_record_read_failed" };
+  }
+}
+
+async function persistFinalDeliveryRecord(kv, deliveryKey, record, options = {}) {
+  try {
+    const beforeRaw = await kv.get(deliveryKey);
+    const before = beforeRaw ? parseJsonSafely(beforeRaw) : null;
+    if (options.requireMissing && beforeRaw) {
+      return { ok: false, reason: "delivery_record_already_exists" };
+    }
+    if (options.expectedRetryKey && before?.retry_key !== options.expectedRetryKey) {
+      return { ok: false, reason: "delivery_retry_key_mismatch" };
+    }
+    await kv.put(deliveryKey, JSON.stringify(record), { expirationTtl: EVIDENCE_TTL_SECONDS });
+    const readbackRaw = await kv.get(deliveryKey);
+    const readback = readbackRaw ? parseJsonSafely(readbackRaw) : null;
+    if (!readback || JSON.stringify(readback) !== JSON.stringify(record)) {
+      return { ok: false, reason: "delivery_record_readback_failed" };
+    }
+    return { ok: true, record: readback };
+  } catch {
+    return { ok: false, reason: "delivery_record_write_failed" };
+  }
+}
+
+async function waitForFinalDeliveryRetry(seconds, env = {}) {
+  if (typeof env.LINE_FINAL_RETRY_WAIT === "function") {
+    await env.LINE_FINAL_RETRY_WAIT(seconds);
+    return;
+  }
+  await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
 
 export async function markLineMessageAsRead(markAsReadToken, env = {}) {
@@ -1375,6 +3337,311 @@ export async function handleCodexFinalize(request, env = {}) {
   return jsonResponse(result, result.ok ? 200 : 500);
 }
 
+export async function handleMemoFinalize(request, env = {}) {
+  if (!env.IDEMPOTENCY_KV) {
+    return jsonResponse({ status: "rejected", reason: "missing_IDEMPOTENCY_KV" }, 503);
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ status: "rejected", reason: "invalid_json" }, 400);
+  }
+
+  const taskId = sanitizeEvidenceId(body.task_id || "");
+  const requestId = sanitizeEvidenceId(body.request_id || "");
+  const providedHeaderSecret = request.headers.get(MEMO_CALLBACK_SECRET_HEADER) || "";
+  const headerAuthValid = Boolean(
+    env.N8N_MEMO_CALLBACK_SECRET
+    && providedHeaderSecret
+    && constantTimeEqual(env.N8N_MEMO_CALLBACK_SECRET, providedHeaderSecret)
+  );
+  const callbackStatus = sanitizeEvidenceId(body.status || "");
+  const operation = sanitizeEvidenceId(body.operation || "");
+  const memoId = sanitizeEvidenceId(body.memo_id || "");
+  const callbackMemoIds = Array.isArray(body.memo_ids)
+    ? body.memo_ids.map((value) => String(value || ""))
+    : [];
+  const safeEventHash = memoSafeEventHashFromTaskId(taskId);
+  if (!safeEventHash || !requestId || !MEMO_DETERMINISTIC_OPERATIONS.includes(operation)) {
+    return jsonResponse({ status: "rejected", reason: "missing_finalize_identity" }, 400);
+  }
+  if (!headerAuthValid) {
+    return jsonResponse({ status: "rejected", reason: "invalid_callback_auth" }, 401);
+  }
+
+  const acceptanceKey = memoCreateAcceptanceKey(safeEventHash);
+  const record = parseMemoCreateAcceptanceRecord(await env.IDEMPOTENCY_KV.get(acceptanceKey));
+  if (!record) {
+    return jsonResponse({ status: "rejected", reason: "missing_memo_acceptance" }, 404);
+  }
+  const selectionDelete = operation === MEMO_DELETE_OPERATION
+    && record.normalized_command?.selection_mode
+    && record.normalized_command.selection_mode !== "memo_id";
+  const expectedMemoIds = selectionDelete && Array.isArray(record.normalized_command?.memo_ids)
+    ? record.normalized_command.memo_ids
+    : [];
+  const pageReadback = operation === MEMO_SEARCH_PAGE_OPERATION;
+  const expectedPageMemoIds = pageReadback && Array.isArray(record.normalized_command?.page_memo_ids)
+    ? record.normalized_command.page_memo_ids
+    : [];
+  const singleMemoIdentityRequired = [MEMO_CREATE_OPERATION, MEMO_MODIFY_OPERATION].includes(operation)
+    || (operation === MEMO_DELETE_OPERATION && !selectionDelete);
+  if (
+    record.safe_event_hash !== safeEventHash
+    || record.operation !== operation
+    || (singleMemoIdentityRequired
+      && (!MEMO_ID_PATTERN.test(memoId) || record.memo_id !== memoId))
+    || (selectionDelete && (
+      expectedMemoIds.length === 0
+      || callbackMemoIds.length !== expectedMemoIds.length
+      || callbackMemoIds.some((candidate, index) => !MEMO_ID_PATTERN.test(candidate) || candidate !== expectedMemoIds[index])
+    ))
+    || (pageReadback && (
+      expectedPageMemoIds.length === 0
+      || callbackMemoIds.length !== expectedPageMemoIds.length
+      || callbackMemoIds.some((candidate, index) => !MEMO_ID_PATTERN.test(candidate) || candidate !== expectedPageMemoIds[index])
+    ))
+    || record.callback_reference?.task_id !== taskId
+    || record.callback_reference?.request_id !== requestId
+  ) {
+    return jsonResponse({ status: "rejected", reason: "finalize_task_mismatch" }, 409);
+  }
+
+  if (memoCreateFinalStatus(record.status)) {
+    return jsonResponse({
+      ok: true,
+      status: "already_finalized",
+      replied: false,
+      pushed: false,
+    }, 200);
+  }
+
+  let replyText;
+  let terminalStatus;
+  if (callbackStatus === "completed" || callbackStatus === "duplicate") {
+    if (operation === MEMO_SEARCH_OPERATION) {
+      const parsedSearch = parseMemoSearchSelectionResult(
+        body.reply_text,
+        body.selection_candidates,
+        body.total,
+        body.page_candidates,
+        body.page,
+      );
+      if (!parsedSearch.ok) {
+        try {
+          await persistMemoSearchSelectionSnapshot(env.IDEMPOTENCY_KV, record, {
+            candidates: [], total: 0, page_count: 0, page: 0,
+          });
+        } catch {
+          // The reply remains fail-closed even if the prior snapshot could not be invalidated.
+        }
+        const failed = await deliverMemoReplyOnce(
+          env,
+          acceptanceKey,
+          parsedSearch.reply_text || MEMO_SEARCH_SELECTION_FAILED_REPLY_TEXT,
+          "final_failed",
+        );
+        return jsonResponse({ ok: Boolean(failed.ok), status: failed.status, replied: Boolean(failed.replied), pushed: false }, 200);
+      }
+      try {
+        await persistMemoSearchSelectionSnapshot(env.IDEMPOTENCY_KV, record, parsedSearch);
+      } catch {
+        const failed = await deliverMemoReplyOnce(
+          env,
+          acceptanceKey,
+          MEMO_SEARCH_SELECTION_FAILED_REPLY_TEXT,
+          "final_failed",
+        );
+        return jsonResponse({ ok: Boolean(failed.ok), status: failed.status, replied: Boolean(failed.replied), pushed: false }, 200);
+      }
+      replyText = parsedSearch.reply_text;
+      terminalStatus = "final_completed";
+    } else if (operation === MEMO_SEARCH_PAGE_OPERATION) {
+      const parsedPage = parseMemoSearchPageResult({
+        pageCandidates: body.page_candidates,
+        expectedMemoIds: expectedPageMemoIds,
+        pageNumber: Number(record.normalized_command?.page_number || 0),
+        pageCount: Number(record.normalized_command?.page_count || 0),
+        total: Number(record.normalized_command?.page_total || 0),
+        globalStart: Number(record.normalized_command?.page_global_start || 0),
+      });
+      if (!parsedPage.ok) {
+        const failed = await deliverMemoReplyOnce(
+          env,
+          acceptanceKey,
+          MEMO_SEARCH_SELECTION_FAILED_REPLY_TEXT,
+          "final_failed",
+        );
+        return jsonResponse({ ok: Boolean(failed.ok), status: failed.status, replied: Boolean(failed.replied), pushed: false }, 200);
+      }
+      try {
+        await persistMemoSearchPageSnapshotCurrentPage(env.IDEMPOTENCY_KV, record, parsedPage);
+      } catch {
+        const failed = await deliverMemoReplyOnce(
+          env,
+          acceptanceKey,
+          MEMO_SEARCH_SELECTION_FAILED_REPLY_TEXT,
+          "final_failed",
+        );
+        return jsonResponse({ ok: Boolean(failed.ok), status: failed.status, replied: Boolean(failed.replied), pushed: false }, 200);
+      }
+      replyText = parsedPage.reply_text;
+      terminalStatus = "final_completed";
+    } else {
+    replyText = memoSuccessReplyText({ operation, callbackStatus, replyText: body.reply_text });
+    if (!replyText) {
+      return jsonResponse({ status: "rejected", reason: "invalid_reply_text" }, 400);
+    }
+    terminalStatus = "final_completed";
+    }
+  } else if (["failed", "readback_failed", "conflict"].includes(callbackStatus)) {
+    if (operation === MEMO_SEARCH_OPERATION) {
+      try {
+        await persistMemoSearchSelectionSnapshot(env.IDEMPOTENCY_KV, record, { candidates: [] });
+      } catch {
+        // Failure replies stay fail-safe even if the stale snapshot could not be replaced.
+      }
+    }
+    replyText = operation === MEMO_CREATE_OPERATION
+      ? MEMO_CREATE_FAILED_REPLY_TEXT
+      : MEMO_OPERATION_FAILED_REPLY_TEXT;
+    terminalStatus = "final_failed";
+  } else {
+    return jsonResponse({ status: "rejected", reason: "unsupported_finalize_status" }, 400);
+  }
+
+  const result = await deliverMemoReplyOnce(env, acceptanceKey, replyText, terminalStatus);
+  return jsonResponse({
+    ok: Boolean(result.ok),
+    status: result.status,
+    replied: Boolean(result.replied),
+    pushed: false,
+  }, 200);
+}
+
+export function memoSuccessReplyText({ operation = "", replyText = "" } = {}) {
+  if (operation === MEMO_SEARCH_OPERATION) {
+    const parsed = parseMemoSearchSelectionResult(replyText);
+    return parsed.ok ? parsed.reply_text : "";
+  }
+  const fallback = MEMO_SUCCESS_REPLY_FALLBACK[operation] || "";
+  if (!fallback) return "";
+  const candidate = typeof replyText === "string"
+    ? replyText.replace(/\s+/g, " ").trim()
+    : "";
+  const safe = candidate.length >= 2
+    && candidate.length <= MEMO_SUCCESS_REPLY_MAX_LENGTH
+    && /[\u3400-\u9fff]/.test(candidate)
+    && !MEMO_SUCCESS_REPLY_FORBIDDEN_PATTERN.test(candidate)
+    && !MEMO_SUCCESS_REPLY_SIMPLIFIED_PATTERN.test(candidate);
+  return safe ? candidate : fallback;
+}
+
+async function deliverMemoReplyOnce(
+  env = {},
+  acceptanceKey = "",
+  replyText = "",
+  terminalStatus = "final_completed",
+  options = {},
+) {
+  const validationHandoff = memoValidationAcceptanceHandoff(
+    options.validationAcceptanceRecord,
+    acceptanceKey,
+  );
+  const record = validationHandoff
+    || parseMemoCreateAcceptanceRecord(await env.IDEMPOTENCY_KV?.get(acceptanceKey));
+  if (!record) {
+    return { ok: false, status: "failed", reason: "missing_memo_acceptance", replied: false, pushed: false };
+  }
+  if (memoCreateFinalStatus(record.status)) {
+    return { ok: true, status: "already_finalized", replied: false, pushed: false, duplicate_blocked: true };
+  }
+  if (record.status === "reply_attempt_pending") {
+    return { ok: false, status: "delivery_ambiguous", replied: false, pushed: false, duplicate_blocked: true };
+  }
+
+  const receivedAtMs = Date.parse(String(record.received_at || ""));
+  const nowMs = typeof env.LINE_REPLY_NOW_MS === "function"
+    ? Number(env.LINE_REPLY_NOW_MS())
+    : Number(env.LINE_REPLY_NOW_MS || Date.now());
+  const ageMs = Number.isFinite(receivedAtMs) && Number.isFinite(nowMs)
+    ? nowMs - receivedAtMs
+    : Number.POSITIVE_INFINITY;
+  const eligible = Boolean(record.reply_token)
+    && ageMs >= 0
+    && ageMs <= LINE_REPLY_ELIGIBILITY_WINDOW_MS;
+  if (!eligible) {
+    const unavailable = clearMemoDeliveryMaterial({
+      ...record,
+      status: "reply_unavailable",
+      final_status: terminalStatus,
+      reason: record.reply_token ? "reply_token_expired" : "missing_reply_token",
+      updated_at: new Date(nowMs).toISOString(),
+    });
+    await writeMemoCreateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, unavailable);
+    return { ok: false, status: "reply_unavailable", reason: unavailable.reason, replied: false, pushed: false };
+  }
+
+  const pending = {
+    ...record,
+    status: "reply_attempt_pending",
+    final_status: terminalStatus,
+    reply_attempt_count: 1,
+    reply_started_at: new Date(nowMs).toISOString(),
+    updated_at: new Date(nowMs).toISOString(),
+  };
+  await writeMemoCreateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, pending);
+  const replyResult = await attemptFinalReply(record.reply_token, replyText, env);
+  if (replyResult.ok) {
+    await writeMemoCreateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, clearMemoDeliveryMaterial({
+      ...pending,
+      status: terminalStatus,
+      delivery_status: "reply_delivered",
+      reply_http_status: replyResult.http_status,
+      final_completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }));
+    return { ok: true, status: terminalStatus, replied: true, pushed: false, reply_attempt_count: 1 };
+  }
+
+  const status = replyResult.ambiguous ? "delivery_ambiguous" : "reply_rejected";
+  await writeMemoCreateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, clearMemoDeliveryMaterial({
+    ...pending,
+    status,
+    delivery_status: status,
+    reason: replyResult.reason,
+    reply_http_status: replyResult.http_status || null,
+    updated_at: new Date().toISOString(),
+  }));
+  return {
+    ok: false,
+    status,
+    reason: replyResult.reason,
+    replied: false,
+    pushed: false,
+    reply_attempt_count: 1,
+  };
+}
+
+function clearMemoDeliveryMaterial(record = {}) {
+  return {
+    ...record,
+    reply_token: "",
+    callback_reference: {
+      callback_url: String(record.callback_reference?.callback_url || ""),
+      task_id: String(record.callback_reference?.task_id || ""),
+      request_id: String(record.callback_reference?.request_id || ""),
+    },
+    delivery_material_cleared_at: new Date().toISOString(),
+  };
+}
+
+function memoSafeEventHashFromTaskId(taskId = "") {
+  return String(taskId || "").match(/^memo-task-([a-f0-9]{64})$/)?.[1] || "";
+}
+
 export async function persistWebhookAcceptedEvidenceCheckpoint(env = {}, normalized = {}, details = {}) {
   return persistEvidenceStages(env, normalized, [
     ["line_event_received", { marker: normalized.gate_marker }],
@@ -1434,22 +3701,30 @@ async function pushIdeaFinalOnce(env = {}, task = {}) {
     return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
   }
 
-  const pushResult = await pushToLine(userId.value, naturalIdeaReplyText(task.final_reply_text), env);
-  if (!pushResult.ok) {
+  const deliveryResult = await deliverFinalReplyFirst({
+    env,
+    deliveryKey: `${finalKey}:delivery`,
+    userId: userId.value,
+    replyToken: task.reply_token,
+    replyReceivedAt: task.reply_received_at,
+    replyText: naturalIdeaReplyText(task.final_reply_text),
+  });
+  if (!deliveryResult.ok) {
+    const finalStatus = deliveryResult.status === "delivery_ambiguous" ? "delivery_ambiguous" : "failed";
     await env.RUNTIME_KV.put(finalKey, JSON.stringify({
       schema: "pline-v3-test-idea-final/v1",
-      status: "failed",
+      status: finalStatus,
       task_id: task.task_id,
       request_id: task.request_id,
-      reason: pushResult.reason,
+      reason: deliveryResult.reason,
       updated_at: new Date().toISOString(),
     }), { expirationTtl: EVIDENCE_TTL_SECONDS });
-    await persistEvidenceStage(env, ideaTaskEvidenceTarget(task), "idea_json_final_push_failed", {
+    await persistEvidenceStage(env, ideaTaskEvidenceTarget(task), finalStatus === "delivery_ambiguous" ? "idea_json_final_delivery_ambiguous" : "idea_json_final_push_failed", {
       action: IDEA_TASK_ACTION,
-      status: "failed",
-      reason: pushResult.reason,
+      status: finalStatus,
+      reason: deliveryResult.reason,
     });
-    return { ok: false, status: "failed", reason: pushResult.reason, request_id: task.request_id };
+    return { ok: false, status: finalStatus, reason: deliveryResult.reason, pushed: false, replied: false, request_id: task.request_id };
   }
 
   await env.RUNTIME_KV.put(finalKey, JSON.stringify({
@@ -1457,20 +3732,29 @@ async function pushIdeaFinalOnce(env = {}, task = {}) {
     status: "completed",
     task_id: task.task_id,
     request_id: task.request_id,
+    delivery_mode: deliveryResult.delivery_mode,
     updated_at: new Date().toISOString(),
   }), { expirationTtl: EVIDENCE_TTL_SECONDS });
-  await persistEvidenceStage(env, ideaTaskEvidenceTarget(task), "idea_json_final_push_completed", {
+  const completedStage = deliveryResult.delivery_mode === "reply" ? "idea_json_final_reply_completed" : "idea_json_final_push_completed";
+  await persistEvidenceStage(env, ideaTaskEvidenceTarget(task), completedStage, {
     action: IDEA_TASK_ACTION,
     status: "completed",
-    final_mode: "monitor_callback_exactly_once",
+    final_mode: `monitor_callback_exactly_once_${deliveryResult.delivery_mode}`,
   });
-  logStage("idea_json_final_push_completed", {
+  logStage(completedStage, {
     request_id: task.request_id,
     action: IDEA_TASK_ACTION,
     status: "completed",
-    final_mode: "monitor_callback_exactly_once",
+    final_mode: `monitor_callback_exactly_once_${deliveryResult.delivery_mode}`,
   });
-  return { ok: true, status: "completed", pushed: true, request_id: task.request_id };
+  return {
+    ok: true,
+    status: "completed",
+    pushed: Boolean(deliveryResult.pushed),
+    replied: Boolean(deliveryResult.replied),
+    delivery_mode: deliveryResult.delivery_mode,
+    request_id: task.request_id,
+  };
 }
 
 async function suppressIdeaFinalOnce(env = {}, task = {}, reason = "duplicate_idea_task") {
@@ -1546,22 +3830,30 @@ async function pushIdeaFailureOnce(env = {}, task = {}, reason = "monitor_task_f
     return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
   }
 
-  const pushResult = await pushToLine(userId.value, IDEA_SAVE_FAILED_REPLY_TEXT, env);
-  if (!pushResult.ok) {
+  const deliveryResult = await deliverFinalReplyFirst({
+    env,
+    deliveryKey: `${finalKey}:delivery`,
+    userId: userId.value,
+    replyToken: task.reply_token,
+    replyReceivedAt: task.reply_received_at,
+    replyText: IDEA_SAVE_FAILED_REPLY_TEXT,
+  });
+  if (!deliveryResult.ok) {
+    const finalStatus = deliveryResult.status === "delivery_ambiguous" ? "delivery_ambiguous" : "failed";
     await env.RUNTIME_KV.put(finalKey, JSON.stringify({
       schema: "pline-v3-test-idea-final/v1",
-      status: "failed",
+      status: finalStatus,
       task_id: task.task_id,
       request_id: task.request_id,
-      reason: pushResult.reason,
+      reason: deliveryResult.reason,
       updated_at: new Date().toISOString(),
     }), { expirationTtl: EVIDENCE_TTL_SECONDS });
-    await persistEvidenceStage(env, ideaTaskEvidenceTarget(task), "idea_json_final_push_failed", {
+    await persistEvidenceStage(env, ideaTaskEvidenceTarget(task), finalStatus === "delivery_ambiguous" ? "idea_json_final_delivery_ambiguous" : "idea_json_final_push_failed", {
       action: IDEA_TASK_ACTION,
-      status: "failed",
-      reason: pushResult.reason,
+      status: finalStatus,
+      reason: deliveryResult.reason,
     });
-    return { ok: false, status: "failed", reason: pushResult.reason, request_id: task.request_id };
+    return { ok: false, status: finalStatus, reason: deliveryResult.reason, pushed: false, replied: false, request_id: task.request_id };
   }
 
   await env.RUNTIME_KV.put(finalKey, JSON.stringify({
@@ -1577,7 +3869,14 @@ async function pushIdeaFailureOnce(env = {}, task = {}, reason = "monitor_task_f
     status: "failed",
     reason,
   });
-  return { ok: true, status: "failure_notice_completed", pushed: true, request_id: task.request_id };
+  return {
+    ok: true,
+    status: "failure_notice_completed",
+    pushed: Boolean(deliveryResult.pushed),
+    replied: Boolean(deliveryResult.replied),
+    delivery_mode: deliveryResult.delivery_mode,
+    request_id: task.request_id,
+  };
 }
 
 async function pushCodexFinalOnce(env = {}, task = {}) {
@@ -1621,22 +3920,30 @@ async function pushCodexFinalOnce(env = {}, task = {}) {
     return { ok: false, status: "failed", reason: userId.reason, request_id: task.request_id };
   }
 
-  const pushResult = await pushToLine(userId.value, CODEX_COMPLETED_REPLY_TEXT, env);
-  if (!pushResult.ok) {
+  const deliveryResult = await deliverFinalReplyFirst({
+    env,
+    deliveryKey: `${finalKey}:delivery`,
+    userId: userId.value,
+    replyToken: task.reply_token,
+    replyReceivedAt: task.reply_received_at,
+    replyText: CODEX_COMPLETED_REPLY_TEXT,
+  });
+  if (!deliveryResult.ok) {
+    const finalStatus = deliveryResult.status === "delivery_ambiguous" ? "delivery_ambiguous" : "failed";
     await env.RUNTIME_KV.put(finalKey, JSON.stringify({
       schema: "pline-v3-test-codex-final/v1",
-      status: "failed",
+      status: finalStatus,
       task_id: task.task_id,
       request_id: task.request_id,
-      reason: pushResult.reason,
+      reason: deliveryResult.reason,
       updated_at: new Date().toISOString(),
     }), { expirationTtl: EVIDENCE_TTL_SECONDS });
-    await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_final_push_failed", {
+    await persistEvidenceStage(env, codexTaskEvidenceTarget(task), finalStatus === "delivery_ambiguous" ? "codex_task_final_delivery_ambiguous" : "codex_task_final_push_failed", {
       action: CODEX_TASK_ACTION,
-      status: "failed",
-      reason: pushResult.reason,
+      status: finalStatus,
+      reason: deliveryResult.reason,
     });
-    return { ok: false, status: "failed", reason: pushResult.reason, request_id: task.request_id };
+    return { ok: false, status: finalStatus, reason: deliveryResult.reason, pushed: false, replied: false, request_id: task.request_id };
   }
 
   await env.RUNTIME_KV.put(finalKey, JSON.stringify({
@@ -1644,20 +3951,29 @@ async function pushCodexFinalOnce(env = {}, task = {}) {
     status: "completed",
     task_id: task.task_id,
     request_id: task.request_id,
+    delivery_mode: deliveryResult.delivery_mode,
     updated_at: new Date().toISOString(),
   }), { expirationTtl: EVIDENCE_TTL_SECONDS });
-  await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_final_push_completed", {
+  const completedStage = deliveryResult.delivery_mode === "reply" ? "codex_task_final_reply_completed" : "codex_task_final_push_completed";
+  await persistEvidenceStage(env, codexTaskEvidenceTarget(task), completedStage, {
     action: CODEX_TASK_ACTION,
     status: "completed",
-    final_mode: "monitor_callback_exactly_once",
+    final_mode: `monitor_callback_exactly_once_${deliveryResult.delivery_mode}`,
   });
-  logStage("codex_task_final_push_completed", {
+  logStage(completedStage, {
     request_id: task.request_id,
     action: CODEX_TASK_ACTION,
     status: "completed",
-    final_mode: "monitor_callback_exactly_once",
+    final_mode: `monitor_callback_exactly_once_${deliveryResult.delivery_mode}`,
   });
-  return { ok: true, status: "completed", pushed: true, request_id: task.request_id };
+  return {
+    ok: true,
+    status: "completed",
+    pushed: Boolean(deliveryResult.pushed),
+    replied: Boolean(deliveryResult.replied),
+    delivery_mode: deliveryResult.delivery_mode,
+    request_id: task.request_id,
+  };
 }
 
 async function pushCodexFailureOnce(env = {}, task = {}, reason = "monitor_task_failed") {
@@ -1698,22 +4014,30 @@ async function pushCodexFailureOnce(env = {}, task = {}, reason = "monitor_task_
   }
 
   const failureReplyText = reason === "capability_not_yet_enabled" ? CODEX_CAPABILITY_NOT_ENABLED_REPLY_TEXT : CODEX_FAILED_REPLY_TEXT;
-  const pushResult = await pushToLine(userId.value, failureReplyText, env);
-  if (!pushResult.ok) {
+  const deliveryResult = await deliverFinalReplyFirst({
+    env,
+    deliveryKey: `${finalKey}:delivery`,
+    userId: userId.value,
+    replyToken: task.reply_token,
+    replyReceivedAt: task.reply_received_at,
+    replyText: failureReplyText,
+  });
+  if (!deliveryResult.ok) {
+    const finalStatus = deliveryResult.status === "delivery_ambiguous" ? "delivery_ambiguous" : "failed";
     await env.RUNTIME_KV.put(finalKey, JSON.stringify({
       schema: "pline-v3-test-codex-final/v1",
-      status: "failed",
+      status: finalStatus,
       task_id: task.task_id,
       request_id: task.request_id,
-      reason: pushResult.reason,
+      reason: deliveryResult.reason,
       updated_at: new Date().toISOString(),
     }), { expirationTtl: EVIDENCE_TTL_SECONDS });
-    await persistEvidenceStage(env, codexTaskEvidenceTarget(task), "codex_task_final_push_failed", {
+    await persistEvidenceStage(env, codexTaskEvidenceTarget(task), finalStatus === "delivery_ambiguous" ? "codex_task_final_delivery_ambiguous" : "codex_task_final_push_failed", {
       action: CODEX_TASK_ACTION,
-      status: "failed",
-      reason: pushResult.reason,
+      status: finalStatus,
+      reason: deliveryResult.reason,
     });
-    return { ok: false, status: "failed", reason: pushResult.reason, request_id: task.request_id };
+    return { ok: false, status: finalStatus, reason: deliveryResult.reason, pushed: false, replied: false, request_id: task.request_id };
   }
 
   await env.RUNTIME_KV.put(finalKey, JSON.stringify({
@@ -1729,7 +4053,14 @@ async function pushCodexFailureOnce(env = {}, task = {}, reason = "monitor_task_
     status: "failed",
     reason,
   });
-  return { ok: true, status: "failure_notice_completed", pushed: true, request_id: task.request_id };
+  return {
+    ok: true,
+    status: "failure_notice_completed",
+    pushed: Boolean(deliveryResult.pushed),
+    replied: Boolean(deliveryResult.replied),
+    delivery_mode: deliveryResult.delivery_mode,
+    request_id: task.request_id,
+  };
 }
 
 function ideaTaskEvidenceTarget(task = {}) {
@@ -2027,6 +4358,8 @@ function sanitizeCodexTaskRecord(record) {
     content: CODEX_TASK_SMOKE_FILE_CONTENT,
     line_user_ref: String(record.line_user_ref || ""),
     finalize_token: sanitizeEvidenceId(record.finalize_token || ""),
+    reply_token: String(record.reply_token || ""),
+    reply_received_at: String(record.reply_received_at || ""),
     created_at: record.created_at,
   };
 }
@@ -2043,6 +4376,8 @@ function sanitizeIdeaTaskRecord(record) {
     target_dir: DROPBOX_IDEA_DIR,
     line_user_ref: String(record.line_user_ref || ""),
     finalize_token: sanitizeEvidenceId(record.finalize_token || ""),
+    reply_token: String(record.reply_token || ""),
+    reply_received_at: String(record.reply_received_at || ""),
     final_reply_text: naturalIdeaReplyText(record.final_reply_text || ""),
     idea: sanitizeIdeaJson(record.idea || {}),
     created_at: record.created_at,
@@ -2063,11 +4398,31 @@ function sanitizeIdeaJson(idea) {
   };
 }
 
-function extractIdeaContent(messageText = "") {
-  return String(messageText || "")
-    .replace(GATE_MARKER_PATTERN, "")
+export function resolveCanonicalIdeaContent(body = {}, messageText = "") {
+  const responseBody = normalizeN8nResponseBody(body);
+  if (typeof responseBody?.idea_content === "string") {
+    const n8nContent = responseBody.idea_content.trim();
+    if (n8nContent) {
+      return { ok: true, content: n8nContent, source: "n8n.idea_content" };
+    }
+  }
+
+  const fallbackContent = extractIdeaContent(messageText);
+  if (fallbackContent) {
+    return { ok: true, content: fallbackContent, source: "normalized.message_text" };
+  }
+  return { ok: false, content: "", source: "none" };
+}
+
+export function extractIdeaContent(messageText = "") {
+  const commandStripped = String(messageText || "")
     .replace(/^\s*記一下[:：]\s*/, "")
     .trim();
+  const marker = commandStripped.match(GATE_MARKER_PATTERN)?.[0] || "";
+  if (marker && commandStripped === marker) {
+    return marker;
+  }
+  return commandStripped.replace(GATE_MARKER_PATTERN, "").trim();
 }
 
 function naturalIdeaReplyText(replyText = "") {

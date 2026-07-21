@@ -11,6 +11,17 @@
 - Runtime accepted at Worker deployment `56558dd5-7856-4a67-9a8f-e6a1e8e96358` and n8n Published version `a88e1361-c4fa-4f44-b79b-a0fe9c44e7c2` for workflow `kcMcBQos5cxsnWU1`.
 - Documentation-only milestone: no program, workflow, credential, deployment, LINE test, or Calendar change was made by this milestone task.
 
+## 2026-07-21 - Daily Closeout: Memo Core
+
+- Recorded closeout marker `MEMO_CORE_COMPLETED_20260721`.
+- Reconciled current Worker source, sanitized n8n workflow source, Memo build/test assets, evidence, and final live acceptance for Create, keyword Search, Search All, Modify, single-position Delete, comma-list Delete, and range Delete.
+- Re-ran offline closeout checks without external side effects: Worker/Memo 62 PASS, Dropbox revision 9/9, CRUD 39/39, Delete 18/18, Natural Reply 9/9, and multi-position archive 19/19.
+- Confirmed Create/Modify/Delete natural success replies hide `memo_id`; Reply-first, exactly-once, idempotency, duplicate safety, and archive-only deletion remain PASS.
+- Preserved the final live evidence: Push attempt 0, duplicate file/reply 0, permanent delete 0, and terminal archived readback PASS.
+- Kept `刪除全部` disabled. Calendar and all new Gates remain not started. Previous Page / specific-page navigation is not promoted to fresh-live PASS by this closeout.
+- Excluded backups, sanitized-download baselines, execution fixtures, runtime output, `.DS_Store`, credentials, secrets, tokens, and unrelated pre-existing project changes from the closeout commit.
+- No LINE live test, n8n Publish, Worker deploy, credential mutation, Monitor start, or runtime feature change occurred during closeout.
+
 ## 2026-07-18
 
 - Created clean-room document baseline for `菲比 LINE 智能助理_03`.
