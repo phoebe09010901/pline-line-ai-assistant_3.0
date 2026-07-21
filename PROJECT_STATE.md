@@ -1,5 +1,18 @@
 # PROJECT_STATE
 
+## Memo Core Completion Milestone — 2026-07-21 22:52 Asia/Taipei
+
+- Milestone marker: `MEMO_CORE_COMPLETED_20260721_2252`.
+- Status: **PASS — Memo 備忘錄功能正式完成**.
+- Canonical project root: `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`.
+- Completed Memo scope: deterministic create, keyword search, search-all with complete candidate snapshot and paged content display, modify, single-position delete, multi-position delete, and range delete.
+- Multi-position delete accepts explicit comma-separated positions or an explicit range, with a maximum of five Memo records per request. `刪除全部` remains intentionally unsupported and fails closed.
+- Create, Modify, and Delete return user-visible natural Traditional Chinese success replies without `memo_id`, filenames, paths, JSON, or other internal fields. Search keeps only the safe numbered context needed for later selection.
+- Runtime guarantees verified: Reply-first, exactly-once, idempotency, duplicate-file/reply safety, create/readback verification, revision-aware modification, and Dropbox archive-only deletion with terminal readback. Permanent deletion is not used.
+- Final fresh LINE batch acceptance: five isolated Memo fixtures; comma selection positions 2/4/5 and range positions 1–2 both passed exactly once; 9/9 expected LINE finals were visible; duplicate file/reply, Push fallback, and permanent delete were all zero; final fixture state was active 0 / archive 5.
+- Verified runtime references: Worker deployment `56558dd5-7856-4a67-9a8f-e6a1e8e96358`; n8n Published version `a88e1361-c4fa-4f44-b79b-a0fe9c44e7c2` on workflow `kcMcBQos5cxsnWU1`.
+- Calendar work is not part of this milestone and has not started.
+
 ## Project
 
 - Name: `菲比 LINE 智能助理_03`

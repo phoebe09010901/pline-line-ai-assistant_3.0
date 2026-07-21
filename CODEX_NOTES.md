@@ -1,5 +1,16 @@
 # CODEX_NOTES
 
+## Memo Core Completion Milestone - 2026-07-21 22:52 Asia/Taipei
+
+- Marker: `MEMO_CORE_COMPLETED_20260721_2252`.
+- Evidence-backed result: Memo Create, keyword Search, Search All, Modify, single-position Delete, comma-list Delete, and range Delete are complete with fresh user-visible LINE acceptance.
+- Search All uses a complete ordered candidate snapshot and numbered paged summaries; later Delete resolves explicit positions only against the latest valid snapshot.
+- Batch Delete is capped at five unique positions, fails closed on invalid selection, moves records to the archive without overwrite or permanent deletion, and requires terminal archive readback. Delete All remains unsupported.
+- Create/Modify/Delete success finals use natural Traditional Chinese and hide `memo_id` and internal system fields. Search keeps safe numbered context for follow-up selection.
+- Reply-first, exactly-once, idempotency, duplicate safety, revision-aware update, and Dropbox archive readback remain PASS. Final isolated batch acceptance observed duplicate file/reply 0, Push 0, permanent delete 0, active fixture 0, and archived fixture 5.
+- Accepted runtime references: Worker `56558dd5-7856-4a67-9a8f-e6a1e8e96358`; n8n workflow `kcMcBQos5cxsnWU1`, Published `a88e1361-c4fa-4f44-b79b-a0fe9c44e7c2`.
+- This entry is documentation-only. It does not modify program code, n8n, credentials, deployment state, or Calendar scope.
+
 ## Worker Role
 
 This thread is `PLine03｜FIX｜Worker 與程式`.

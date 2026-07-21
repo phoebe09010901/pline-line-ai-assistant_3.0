@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 2026-07-21 - Memo Core Completion Milestone
+
+- Added milestone marker `MEMO_CORE_COMPLETED_20260721_2252` at 2026-07-21 22:52 Asia/Taipei.
+- Completed and live-verified Memo create, keyword search, search-all with numbered paged results, modify, single-position delete, multi-position delete, and range delete.
+- Verified natural Traditional Chinese success replies for Create, Modify, and Delete without exposing `memo_id` or other internal fields; Search retains safe numbered selection context.
+- Verified Reply-first delivery, exactly-once/idempotency, duplicate safety, Dropbox write/readback, revision-aware update, and archive-only deletion. Push fallback, duplicate file/reply, and permanent deletion were zero in final fresh acceptance.
+- Final multi-position acceptance archived positions 2/4/5 and then the remaining range 1–2 from isolated search snapshots; all five fixtures ended in the archive with terminal nine-field readback and none remained active.
+- Kept the batch limit at five explicit selections. `刪除全部` remains deliberately unsupported and fail-closed.
+- Runtime accepted at Worker deployment `56558dd5-7856-4a67-9a8f-e6a1e8e96358` and n8n Published version `a88e1361-c4fa-4f44-b79b-a0fe9c44e7c2` for workflow `kcMcBQos5cxsnWU1`.
+- Documentation-only milestone: no program, workflow, credential, deployment, LINE test, or Calendar change was made by this milestone task.
+
 ## 2026-07-18
 
 - Created clean-room document baseline for `菲比 LINE 智能助理_03`.
