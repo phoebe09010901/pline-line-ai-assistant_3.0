@@ -28,6 +28,9 @@ class MemoryKv {
     this.values.set(key, value);
     this.writes.push({ key, value, options });
   }
+  async delete(key) {
+    this.values.delete(key);
+  }
   async list({ prefix = "" } = {}) {
     return { keys: Array.from(this.values.keys()).filter((key) => key.startsWith(prefix)).map((name) => ({ name })) };
   }

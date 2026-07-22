@@ -1,5 +1,17 @@
 # PROJECT_STATE
 
+## CALENDAR_CREATE_FOLLOWUP_CONTINUITY_FIX — 2026-07-22 Asia/Taipei
+
+- `FIXED_GATE_STATUS=completed_with_retry_evidence_limitation`; Calendar Search/Update/Delete remain not started.
+- Worker root cause was the missing same-actor pending context before general routing. The deployed repair saves the partial draft before clarification, uses a stable hashed actor key, checks pending before generic routing, preserves title/start, supports date/duration/end continuations, and clears on success/cancel/expiry.
+- Published n8n workflow `kcMcBQos5cxsnWU1` version `fe757d90-b40b-4234-af4d-6162aded24a4`; Worker deployment `814fcaca-2040-4323-aced-6e176073c178`.
+- Fresh TEST `019f8872-1f35-7de2-9b0b-16e78d93c7a5`, marker `CALENDAR-CREATE-FOLLOWUP-20260722-NEWFIX-141153`: cases A/B/C and D cancel formal LINE PASS; Google primary readback PASS; fixture cleanup PASS; post-cleanup marker active count 0.
+- Case E retry evidence is isolated only: 15/15 PASS, duplicate Calendar write 0, duplicate LINE final 0. Live identical webhook replay was unsafe and not executed; no live replay PASS is claimed.
+- Existing Calendar effect 0; Memo production effect 0; Memo offline regression 39/39 PASS; internal identifier leak 0.
+- Sanitized Published export SHA-256: `141aad725558c5b8e431db639daf281efacf83e8331d8260180f87ea2a768bcc`.
+- Full evidence: `CALENDAR_CREATE_FOLLOWUP_CONTINUITY_FIX_REPORT_20260722.md`.
+- Next safe action: stop at this Gate and return to Orchestrator; do not start Calendar Search/Update/Delete.
+
 ## MEMO_CORE_STABLE_CHECKPOINT_20260722 — 2026-07-22 Asia/Taipei
 
 - `MEMO_DELETE_GATE_STATUS=completed`.

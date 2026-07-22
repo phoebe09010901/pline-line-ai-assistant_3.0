@@ -6,12 +6,17 @@ import {
   buildCalendarCreateN8nPayload,
   calendarAcceptanceKey,
   calendarFailureReplyText,
+  calendarPendingKey,
   calendarRecordIsFinal,
   calendarSuccessReplyText,
   calendarValidationReplyText,
   createCalendarAcceptanceRecord,
+  createCalendarPendingRecord,
+  mergeCalendarCreateContinuation,
   parseCalendarAcceptanceRecord,
   parseCalendarCreateCommand,
+  parseCalendarCreateContinuation,
+  parseCalendarPendingRecord,
   validateCalendarCreateN8nResult,
 } from "./calendar-create.js";
 
@@ -216,6 +221,7 @@ export async function handleLineWebhook(request, env, ctx = {}) {
 
   const normalized = normalizeForN8n(event);
   const calendarCommand = parseCalendarCreateCommand(event.message?.text || "", normalized.received_at);
+  const calendarContinuation = parseCalendarCreateContinuation(event.message?.text || "");
   const memoCommand = parseMemoDeterministicCommand(event.message?.text || "");
   const memoDeleteConfirmation = parseMemoDeleteConfirmationCommand(event.message?.text || "");
   const adminResult = await runBoundedAckOperation(
@@ -252,11 +258,26 @@ export async function handleLineWebhook(request, env, ctx = {}) {
     });
   }
 
-  if (calendarCommand.matched) {
+  const calendarRoute = await resolveCalendarCreateRoute({
+    event,
+    normalized,
+    calendarCommand,
+    calendarContinuation,
+    env,
+    ctx,
+    ackStartedAt,
+    ackBudgetMs,
+  });
+  if (calendarRoute.unavailable) {
+    logWebhookAckTiming(correlationId, "calendar_route_state_failed", ackStartedAt, 503, calendarRoute.reason);
+    return durableAckUnavailableResponse(calendarRoute.reason);
+  }
+  if (calendarRoute.matched) {
     return handleCalendarCreateAcceptance({
       event,
       normalized,
-      calendarCommand,
+      calendarCommand: calendarRoute.command,
+      identity: calendarRoute.identity,
       env,
       ctx,
       correlationId,
@@ -375,10 +396,142 @@ async function updateCalendarAcceptance(kv, key, updater) {
   return next;
 }
 
+async function deleteCalendarPending(kv, key) {
+  await kv.delete(key);
+  return true;
+}
+
+export async function resolveCalendarCreateRoute({
+  event,
+  normalized,
+  calendarCommand,
+  calendarContinuation,
+  env,
+  ctx,
+  ackStartedAt,
+  ackBudgetMs,
+}) {
+  if (calendarCommand.matched) {
+    return { matched: true, command: calendarCommand, identity: null, unavailable: false };
+  }
+  if (!calendarContinuation.matched) return { matched: false, unavailable: false };
+  if (!env.IDEMPOTENCY_KV) {
+    return { matched: false, unavailable: true, reason: "missing_calendar_kv_binding" };
+  }
+  const identity = await buildCalendarCreateIdentity(event);
+  if (!identity.ok) return { matched: false, unavailable: true, reason: "calendar_identity_unavailable" };
+  const readBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "get" });
+  if (readBudgetMs <= 0) return { matched: false, unavailable: true, reason: "calendar_route_state_unavailable" };
+  const eventAcceptance = await runBoundedAckOperation(
+    () => env.IDEMPOTENCY_KV.get(calendarAcceptanceKey(identity.safe_event_hash)),
+    { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: readBudgetMs, ctx },
+  );
+  if (!eventAcceptance.ok) return { matched: false, unavailable: true, reason: "calendar_route_state_unavailable" };
+  if (eventAcceptance.value) {
+    return {
+      matched: true,
+      identity,
+      unavailable: false,
+      command: { matched: true, valid: false, reason: "continuation_rejected", fields: {}, draft: {}, pending: false },
+    };
+  }
+  const pendingKey = calendarPendingKey(identity.actor_hash);
+  const pendingRead = await runBoundedAckOperation(
+    () => env.IDEMPOTENCY_KV.get(pendingKey),
+    { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: readBudgetMs, ctx },
+  );
+  if (!pendingRead.ok) return { matched: false, unavailable: true, reason: "calendar_pending_read_unavailable" };
+  if (!pendingRead.value) return { matched: false, unavailable: false };
+  const nowMs = Date.parse(normalized.received_at || "") || Date.now();
+  const pending = parseCalendarPendingRecord(pendingRead.value, identity.actor_hash, nowMs);
+  if (!pending) {
+    return {
+      matched: true,
+      identity,
+      unavailable: false,
+      command: {
+        matched: true,
+        valid: false,
+        reason: "continuation_rejected",
+        fields: {},
+        draft: {},
+        pending: false,
+        rejected: true,
+        continuation: true,
+      },
+    };
+  }
+  if (pending.expired) {
+    return {
+      matched: true,
+      identity,
+      unavailable: false,
+      command: {
+        matched: true,
+        valid: false,
+        reason: "pending_expired",
+        fields: {},
+        draft: {},
+        pending: false,
+        rejected: true,
+        continuation: true,
+        pending_source_event_hash: pending.source_event_hash,
+      },
+    };
+  }
+  const command = mergeCalendarCreateContinuation(pending, normalized.message_text, normalized.received_at);
+  return {
+    matched: true,
+    identity,
+    unavailable: false,
+    command: {
+      ...command,
+      continuation: true,
+      pending_source_event_hash: pending.source_event_hash,
+    },
+  };
+}
+
+async function applyCalendarPendingState(kv, identity, command) {
+  const key = calendarPendingKey(identity.actor_hash);
+  if (command.continuation && command.pending_source_event_hash) {
+    const currentRaw = await kv.get(key);
+    const current = parseCalendarPendingRecord(currentRaw, identity.actor_hash, Date.now());
+    if (!current && !command.pending) return { ok: true, action: "already_cleared" };
+    if (current?.source_event_hash === identity.safe_event_hash && command.pending) {
+      return { ok: true, action: "already_stored" };
+    }
+    if (!current || current.source_event_hash !== command.pending_source_event_hash) {
+      return { ok: false, reason: "calendar_pending_snapshot_changed" };
+    }
+  }
+  if (command.pending) {
+    const pending = createCalendarPendingRecord({ identity, command });
+    await kv.put(key, JSON.stringify(pending), { expirationTtl: CALENDAR_CREATE_TTL_SECONDS });
+    return { ok: true, action: "stored" };
+  }
+  await deleteCalendarPending(kv, key);
+  return { ok: true, action: "cleared" };
+}
+
+function calendarCommandFromAcceptance(record = {}) {
+  return {
+    matched: true,
+    valid: record.input_valid === true,
+    reason: String(record.reject_reason || ""),
+    fields: structuredClone(record.canonical || {}),
+    draft: structuredClone(record.pending_draft || {}),
+    pending: record.pending_context === true,
+    continuation: record.continuation === true,
+    pending_source_event_hash: String(record.pending_source_event_hash || ""),
+  };
+}
+
 export async function handleCalendarCreateAcceptance({
   event,
   normalized,
   calendarCommand,
+  identity: providedIdentity,
   env,
   ctx,
   correlationId,
@@ -389,7 +542,7 @@ export async function handleCalendarCreateAcceptance({
     logWebhookAckTiming(correlationId, "calendar_idempotency_failed", ackStartedAt, 503, "missing_binding");
     return durableAckUnavailableResponse("missing_calendar_kv_binding");
   }
-  const identity = await buildCalendarCreateIdentity(event);
+  const identity = providedIdentity || await buildCalendarCreateIdentity(event);
   if (!identity.ok) {
     logWebhookAckTiming(correlationId, "calendar_identity_failed", ackStartedAt, 503, identity.reason);
     return durableAckUnavailableResponse("calendar_identity_unavailable");
@@ -405,6 +558,7 @@ export async function handleCalendarCreateAcceptance({
 
   let record = parseCalendarAcceptanceRecord(acceptanceRead.value);
   let readbackOnly = false;
+  let pendingCommand = calendarCommand;
   const resumed = Boolean(record);
   if (acceptanceRead.value && !record) {
     return jsonResponse({ status: "rejected", reason: "calendar_acceptance_conflict" }, 409);
@@ -417,6 +571,7 @@ export async function handleCalendarCreateAcceptance({
       return jsonResponse({ status: "accepted", reason: "duplicate_line_event", route: "calendar_create" }, 200);
     }
     readbackOnly = ["dispatching", "dispatch_ambiguous", "dispatched", "reply_attempt_pending"].includes(record.status);
+    pendingCommand = calendarCommandFromAcceptance(record);
   } else {
     record = createCalendarAcceptanceRecord({
       identity,
@@ -431,6 +586,22 @@ export async function handleCalendarCreateAcceptance({
       { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: writeBudgetMs, ctx, keepAlive: true },
     );
     if (!acceptanceWrite.ok) return durableAckUnavailableResponse("durable_acceptance_unavailable");
+  }
+
+  if (record.status === "accepted") {
+    const pendingState = await runBoundedAckOperation(
+      () => applyCalendarPendingState(env.IDEMPOTENCY_KV, identity, pendingCommand),
+      {
+        startedAt: ackStartedAt,
+        budgetMs: ackBudgetMs,
+        maxOperationMs: memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "put" }),
+        ctx,
+        keepAlive: true,
+      },
+    );
+    if (!pendingState.ok || !pendingState.value?.ok) {
+      return durableAckUnavailableResponse(pendingState.value?.reason || "calendar_pending_state_unavailable");
+    }
   }
 
   queueBackgroundTask(ctx, processAcceptedCalendarCreateInBackground({
@@ -2322,6 +2493,12 @@ export function workerHealth(env = {}) {
       clarification_zero_calendar_write: true,
       duration_limit_minutes: 10080,
       state_ttl_seconds: CALENDAR_CREATE_TTL_SECONDS,
+      pending_context: "same_actor_safe_hash_partial_draft",
+      continuation_inputs: ["今天", "明天", "下週一", "5分鐘", "一小時", "到三點", "5分鐘結束", "取消"],
+      continuation_preserves: ["title", "date", "start", "location"],
+      pending_clear_states: ["success", "cancelled", "expired", "rejected", "new_explicit_complete_create"],
+      actor_isolation: true,
+      next_missing_field_only: true,
       deterministic_event_reference: true,
       external_writer: "n8n_google_calendar_create_with_terminal_readback",
       retry_policy: "readback_before_any_recreate",

@@ -12,6 +12,7 @@ const names = [
   'Calendar Terminal Readback',
   'Calendar Verify Readback',
 ];
+const removalNames = [...names, 'Calendar Follow-up Continuity Contract'];
 const currentNormalizeTargets = workflow.connections['Normalize Input']?.main?.[0];
 const routedMemoTargets = workflow.connections['Calendar Create Route']?.main?.[1];
 const priorNormalizeTargets = currentNormalizeTargets?.[0]?.node === 'Calendar Create Route'
@@ -19,8 +20,8 @@ const priorNormalizeTargets = currentNormalizeTargets?.[0]?.node === 'Calendar C
       ? [{ node: 'Memo Search Page Route', type: 'main', index: 0 }]
       : routedMemoTargets)
   : currentNormalizeTargets;
-workflow.nodes = workflow.nodes.filter((node) => !names.includes(node.name));
-for (const name of names) delete workflow.connections[name];
+workflow.nodes = workflow.nodes.filter((node) => !removalNames.includes(node.name));
+for (const name of removalNames) delete workflow.connections[name];
 
 const normalize = workflow.nodes.find((node) => node.name === 'Normalize Input');
 if (!normalize) throw new Error('missing Normalize Input');

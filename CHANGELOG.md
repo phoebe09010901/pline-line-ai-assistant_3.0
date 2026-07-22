@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2026-07-22 - Calendar Create Follow-up Continuity Fix
+
+- Added same-actor, 600-second Calendar Create pending context before general n8n routing; pending is saved before clarification and preserves title/start across date, duration and end-time follow-ups.
+- Added cancellation, expiry, actor isolation, pending cleanup, webhook idempotency and readback-before-recreate coverage.
+- Published n8n workflow `kcMcBQos5cxsnWU1` as `fe757d90-b40b-4234-af4d-6162aded24a4` and deployed Worker `814fcaca-2040-4323-aced-6e176073c178`.
+- Fresh formal LINE marker `CALENDAR-CREATE-FOLLOWUP-20260722-NEWFIX-141153` passed A/B/C, D cancel, Google primary readback and fixture cleanup. Existing Calendar effect 0; Memo production effect 0.
+- Retry evidence is limited to isolated 15/15 with duplicate Calendar write 0 and duplicate LINE final 0. Live identical webhook replay was unsafe and not executed.
+- Saved a redacted 144-node/143-connection Published export with SHA-256 `141aad725558c5b8e431db639daf281efacf83e8331d8260180f87ea2a768bcc`.
+- Calendar Search/Update/Delete remain not started.
+
 ## 2026-07-22 - Memo Core Stable Checkpoint
 
 - Added `checkpoints/MEMO_CORE_STABLE_CHECKPOINT_20260722.md` as the single stable Memo Core evidence checkpoint.

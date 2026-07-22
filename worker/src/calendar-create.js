@@ -6,6 +6,8 @@ export const CALENDAR_MAX_DURATION_MINUTES = 10_080;
 
 const CALENDAR_ACCEPTANCE_SCHEMA = "pline-v3-calendar-create-acceptance/v1";
 const CALENDAR_ACCEPTANCE_PREFIX = "calendar_create:v1:acceptance";
+const CALENDAR_PENDING_SCHEMA = "pline-v3-calendar-create-pending/v1";
+const CALENDAR_PENDING_PREFIX = "calendar_create:v1:pending";
 const CALENDAR_EVENT_ID_PREFIX = "cal";
 const FINAL_STATES = new Set([
   "final_completed",
@@ -24,6 +26,9 @@ const REPLIES = Object.freeze({
   ambiguous_time: "時間有點不確定，請說明上午、下午或使用 24 小時制。",
   ambiguous_end: "結束時間有點不確定，請告訴我完整的開始與結束時間。",
   duration_over_limit: "這個行程超過 7 天，請重新確認日期與時間後再新增。",
+  cancelled: "已取消這次行程新增。",
+  pending_expired: "這個行程草稿已逾時，請重新告訴我新的行程。",
+  continuation_rejected: "這次補充的資訊無法安全套用，行程草稿已取消。",
   invalid_format: "請用「行事曆新增：內容」告訴我行程、日期與時間。",
   failed: "這次沒有成功新增行程，我先停在安全狀態，請稍後再試一次。",
 });
@@ -136,6 +141,21 @@ function timeMatches(text) {
   return Array.from(text.matchAll(pattern));
 }
 
+function parseDurationMinutes(text) {
+  let durationMinutes = null;
+  const halfHours = text.match(/([0-9一二三四五六七八九十兩]+)?個?半小時/);
+  if (halfHours) {
+    const whole = halfHours[1] ? chineseNumber(halfHours[1]) : 0;
+    durationMinutes = whole * 60 + 30;
+  } else {
+    const hours = text.match(/([0-9一二三四五六七八九十兩]+)個?小時/);
+    const minutes = text.match(/([0-9一二三四五六七八九十兩]+)分鐘/);
+    if (hours) durationMinutes = chineseNumber(hours[1]) * 60;
+    if (minutes) durationMinutes = (durationMinutes || 0) + chineseNumber(minutes[1]);
+  }
+  return Number.isFinite(durationMinutes) && durationMinutes > 0 ? durationMinutes : null;
+}
+
 function parseTimes(text) {
   const matches = timeMatches(text);
   if (matches.length === 0) return { ok: false, reason: "missing_start", matches };
@@ -158,18 +178,8 @@ function parseTimes(text) {
     return { ok: true, startMinutes, endMinutes, durationMinutes: endMinutes - startMinutes, matches };
   }
 
-  let durationMinutes = null;
-  const halfHours = text.match(/([0-9一二三四五六七八九十兩]+)?個?半小時/);
-  if (halfHours) {
-    const whole = halfHours[1] ? chineseNumber(halfHours[1]) : 0;
-    durationMinutes = whole * 60 + 30;
-  } else {
-    const hours = text.match(/([0-9一二三四五六七八九十兩]+)個?小時/);
-    const minutes = text.match(/([0-9一二三四五六七八九十兩]+)分鐘/);
-    if (hours) durationMinutes = chineseNumber(hours[1]) * 60;
-    if (minutes) durationMinutes = (durationMinutes || 0) + chineseNumber(minutes[1]);
-  }
-  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+  const durationMinutes = parseDurationMinutes(text);
+  if (!durationMinutes) {
     return { ok: false, reason: "missing_end_or_duration", startMinutes, matches };
   }
   if (durationMinutes > CALENDAR_MAX_DURATION_MINUTES) {
@@ -191,9 +201,9 @@ function titleFrom(text, dateToken, timeTokens, locationToken, allDay) {
     if (token) title = title.replace(token, " ");
   }
   title = title
-    .replace(/([0-9一二三四五六七八九十兩]+)?個?半小時/g, " ")
-    .replace(/[0-9一二三四五六七八九十兩]+個?小時/g, " ")
-    .replace(/[0-9一二三四五六七八九十兩]+分鐘/g, " ")
+    .replace(/(?:持續)?([0-9一二三四五六七八九十兩]+)?個?半小時(?:結束)?/g, " ")
+    .replace(/(?:持續)?[0-9一二三四五六七八九十兩]+個?小時(?:結束)?/g, " ")
+    .replace(/(?:持續)?[0-9一二三四五六七八九十兩]+分鐘(?:結束)?/g, " ")
     .replace(allDay ? /全天/g : /$^/, " ")
     .replace(/\s*到\s*/g, " ")
     .replace(/^[：:\s，,。]+|[：:\s，,。]+$/g, "")
@@ -208,56 +218,185 @@ function rfc3339(date, minutes) {
   return `${dateKey(date)}T${pad2(hour)}:${pad2(minute)}:00+08:00`;
 }
 
-export function parseCalendarCreateCommand(messageText = "", receivedAt = new Date().toISOString()) {
-  const text = String(messageText || "").trim();
-  if (!text.startsWith(CALENDAR_CREATE_COMMAND_PREFIX)) {
-    return { matched: false, valid: false, reason: "not_calendar_create", fields: {} };
-  }
-  const input = text.slice(CALENDAR_CREATE_COMMAND_PREFIX.length).trim();
-  if (!input) return { matched: true, valid: false, reason: "invalid_format", fields: {} };
+function datePartsFromKey(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const parts = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+  return validDate(parts) ? parts : null;
+}
 
-  const date = parseDate(input, receivedAt);
-  if (!date.ok) return { matched: true, valid: false, reason: date.reason, fields: {} };
-  const location = parseLocation(input);
-  const allDay = input.includes("全天");
-  if (allDay) {
-    const title = titleFrom(input, date.token, [], location.token, true);
-    if (!title) return { matched: true, valid: false, reason: "missing_title", fields: {} };
+function commandFromDraft(draft = {}, fatalReason = "") {
+  const normalized = {
+    title: String(draft.title || "").trim(),
+    location: String(draft.location || "").trim(),
+    all_day: draft.all_day === true,
+    date: String(draft.date || ""),
+    start_minutes: Number.isInteger(draft.start_minutes) ? draft.start_minutes : null,
+    end_minutes: Number.isInteger(draft.end_minutes) ? draft.end_minutes : null,
+    duration_minutes: Number.isInteger(draft.duration_minutes) ? draft.duration_minutes : null,
+    timezone: CALENDAR_TIMEZONE,
+  };
+  if (fatalReason) {
+    return { matched: true, valid: false, reason: fatalReason, fields: {}, draft: normalized, pending: false, rejected: true };
+  }
+  let reason = "";
+  if (!datePartsFromKey(normalized.date)) reason = "missing_date";
+  else if (!normalized.all_day && normalized.start_minutes === null) reason = "missing_start";
+  else if (!normalized.all_day && normalized.end_minutes === null) reason = "missing_end_or_duration";
+  else if (!normalized.title) reason = "missing_title";
+  if (reason) {
+    return { matched: true, valid: false, reason, fields: {}, draft: normalized, pending: true, rejected: false };
+  }
+  const dateParts = datePartsFromKey(normalized.date);
+  if (normalized.all_day) {
     return {
       matched: true,
       valid: true,
       reason: "",
+      pending: false,
+      rejected: false,
+      draft: normalized,
       fields: {
-        title,
-        location: location.location,
+        title: normalized.title,
+        location: normalized.location,
         all_day: true,
-        date: dateKey(date.parts),
-        start: `${dateKey(date.parts)}T00:00:00+08:00`,
-        end: `${dateKey(addDays(date.parts, 1))}T00:00:00+08:00`,
+        date: normalized.date,
+        start: `${normalized.date}T00:00:00+08:00`,
+        end: `${dateKey(addDays(dateParts, 1))}T00:00:00+08:00`,
         timezone: CALENDAR_TIMEZONE,
       },
     };
   }
-
-  const times = parseTimes(input);
-  if (!times.ok) return { matched: true, valid: false, reason: times.reason, fields: {} };
-  const title = titleFrom(input, date.token, times.matches.map((match) => match[0]), location.token, false);
-  if (!title) return { matched: true, valid: false, reason: "missing_title", fields: {} };
+  const durationMinutes = normalized.end_minutes - normalized.start_minutes;
+  if (durationMinutes <= 0 || durationMinutes > CALENDAR_MAX_DURATION_MINUTES || normalized.end_minutes >= 24 * 60) {
+    const reason = durationMinutes > CALENDAR_MAX_DURATION_MINUTES ? "duration_over_limit" : "ambiguous_end";
+    return { matched: true, valid: false, reason, fields: {}, draft: normalized, pending: false, rejected: true };
+  }
   return {
     matched: true,
     valid: true,
     reason: "",
+    pending: false,
+    rejected: false,
+    draft: { ...normalized, duration_minutes: durationMinutes },
     fields: {
-      title,
-      location: location.location,
+      title: normalized.title,
+      location: normalized.location,
       all_day: false,
-      date: dateKey(date.parts),
-      start: rfc3339(date.parts, times.startMinutes),
-      end: rfc3339(date.parts, times.endMinutes),
-      duration_minutes: times.durationMinutes,
+      date: normalized.date,
+      start: rfc3339(dateParts, normalized.start_minutes),
+      end: rfc3339(dateParts, normalized.end_minutes),
+      duration_minutes: durationMinutes,
       timezone: CALENDAR_TIMEZONE,
     },
   };
+}
+
+export function parseCalendarCreateCommand(messageText = "", receivedAt = new Date().toISOString()) {
+  const text = String(messageText || "").trim();
+  if (!text.startsWith(CALENDAR_CREATE_COMMAND_PREFIX)) {
+    return { matched: false, valid: false, reason: "not_calendar_create", fields: {}, draft: {}, pending: false };
+  }
+  const input = text.slice(CALENDAR_CREATE_COMMAND_PREFIX.length).trim();
+  if (!input) return { matched: true, valid: false, reason: "invalid_format", fields: {}, draft: {}, pending: false, rejected: true };
+
+  const date = parseDate(input, receivedAt);
+  const location = parseLocation(input);
+  const allDay = input.includes("全天");
+  const times = allDay ? { ok: true, matches: [] } : parseTimes(input);
+  const title = titleFrom(input, date.ok ? date.token : "", times.matches?.map((match) => match[0]) || [], location.token, allDay);
+  const draft = {
+    title,
+    location: location.location,
+    all_day: allDay,
+    date: date.ok ? dateKey(date.parts) : "",
+    start_minutes: allDay ? null : (Number.isInteger(times.startMinutes) ? times.startMinutes : null),
+    end_minutes: allDay ? null : (Number.isInteger(times.endMinutes) ? times.endMinutes : null),
+    duration_minutes: allDay ? null : (Number.isInteger(times.durationMinutes) ? times.durationMinutes : null),
+    timezone: CALENDAR_TIMEZONE,
+  };
+  const dateFatal = !date.ok && date.reason !== "missing_date" ? date.reason : "";
+  const timeFatal = !allDay && !times.ok && !["missing_start", "missing_end_or_duration"].includes(times.reason)
+    ? times.reason
+    : "";
+  return commandFromDraft(draft, dateFatal || timeFatal);
+}
+
+export function parseCalendarCreateContinuation(messageText = "") {
+  const text = String(messageText || "").trim();
+  if (!text || text.startsWith(CALENDAR_CREATE_COMMAND_PREFIX)) return { matched: false, action: "none", text };
+  if (text === "取消") return { matched: true, action: "cancel", text };
+  if (/^(?:今天|明天|下週一|下星期一|\d{4}年\d{1,2}月\d{1,2}日|\d{1,2}月\d{1,2}日)$/.test(text)) {
+    return { matched: true, action: "date", text };
+  }
+  if (text === "全天") return { matched: true, action: "all_day", text };
+  if (/^(?:[0-9一二三四五六七八九十兩]+個?小時|[0-9一二三四五六七八九十兩]+分鐘)(?:結束)?$/.test(text)) {
+    return { matched: true, action: "duration", text };
+  }
+  if (/^到?(?:凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*[0-9一二三四五六七八九十兩]{1,3}\s*(?:點|時)(?:\s*[0-5]?\d\s*分?)?(?:結束)?$/.test(text)) {
+    return { matched: true, action: text.startsWith("到") ? "end" : "time", text };
+  }
+  return { matched: false, action: "none", text };
+}
+
+function continuationEndMinutes(text, startMinutes) {
+  const match = String(text || "").match(/^到?\s*(凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*([0-9一二三四五六七八九十兩]{1,3})\s*(?:點|時)(?:\s*([0-5]?\d)\s*分?)?(?:結束)?$/);
+  if (!match) return null;
+  const period = match[1] || "";
+  const rawHour = chineseNumber(match[2]);
+  const minute = Number(match[3] || 0);
+  let endMinutes;
+  if (period) {
+    const hour = normalizeHour(period, match[2]);
+    endMinutes = Number.isInteger(hour) ? hour * 60 + minute : Number.NaN;
+  } else {
+    endMinutes = rawHour * 60 + minute;
+    if (rawHour <= 12 && endMinutes <= startMinutes) endMinutes += 12 * 60;
+  }
+  return Number.isInteger(endMinutes) && endMinutes > startMinutes && endMinutes < 24 * 60 ? endMinutes : null;
+}
+
+export function mergeCalendarCreateContinuation(pendingRecord = {}, messageText = "", receivedAt = new Date().toISOString()) {
+  const continuation = parseCalendarCreateContinuation(messageText);
+  if (!continuation.matched) {
+    return { matched: true, valid: false, reason: "continuation_rejected", fields: {}, draft: {}, pending: false, rejected: true };
+  }
+  if (continuation.action === "cancel") {
+    return { matched: true, valid: false, reason: "cancelled", fields: {}, draft: {}, pending: false, cancelled: true, rejected: false };
+  }
+  const draft = structuredClone(pendingRecord.draft || {});
+  const missingField = String(pendingRecord.missing_field || commandFromDraft(draft).reason || "");
+  if (missingField === "missing_date" && continuation.action === "date") {
+    const date = parseDate(continuation.text, receivedAt);
+    if (!date.ok) return commandFromDraft(draft, date.reason || "continuation_rejected");
+    draft.date = dateKey(date.parts);
+  } else if (missingField === "missing_start" && continuation.action === "all_day") {
+    draft.all_day = true;
+    draft.start_minutes = null;
+    draft.end_minutes = null;
+    draft.duration_minutes = null;
+  } else if (missingField === "missing_start" && ["time", "end"].includes(continuation.action)) {
+    const parsed = parseTimes(continuation.text);
+    if (!Number.isInteger(parsed.startMinutes)) return commandFromDraft(draft, parsed.reason || "continuation_rejected");
+    draft.start_minutes = parsed.startMinutes;
+    if (Number.isInteger(parsed.endMinutes)) draft.end_minutes = parsed.endMinutes;
+    if (Number.isInteger(parsed.durationMinutes)) draft.duration_minutes = parsed.durationMinutes;
+  } else if (missingField === "missing_end_or_duration" && continuation.action === "duration") {
+    const durationMinutes = parseDurationMinutes(continuation.text);
+    if (!durationMinutes || durationMinutes > CALENDAR_MAX_DURATION_MINUTES) {
+      return commandFromDraft(draft, durationMinutes > CALENDAR_MAX_DURATION_MINUTES ? "duration_over_limit" : "continuation_rejected");
+    }
+    draft.duration_minutes = durationMinutes;
+    draft.end_minutes = draft.start_minutes + durationMinutes;
+  } else if (missingField === "missing_end_or_duration" && ["end", "time"].includes(continuation.action)) {
+    const endMinutes = continuationEndMinutes(continuation.text, draft.start_minutes);
+    if (!endMinutes) return commandFromDraft(draft, "ambiguous_end");
+    draft.end_minutes = endMinutes;
+    draft.duration_minutes = endMinutes - draft.start_minutes;
+  } else {
+    return commandFromDraft(draft, "continuation_rejected");
+  }
+  return commandFromDraft(draft);
 }
 
 async function sha256(value) {
@@ -288,6 +427,42 @@ export function calendarAcceptanceKey(safeEventHash = "") {
   return `${CALENDAR_ACCEPTANCE_PREFIX}:${safeEventHash}`;
 }
 
+export function calendarPendingKey(actorHash = "") {
+  return `${CALENDAR_PENDING_PREFIX}:${actorHash}`;
+}
+
+export function createCalendarPendingRecord({ identity, command, nowMs = Date.now() }) {
+  return {
+    schema: CALENDAR_PENDING_SCHEMA,
+    status: "pending",
+    actor_hash: identity.actor_hash,
+    source_event_hash: identity.safe_event_hash,
+    missing_field: String(command.reason || ""),
+    draft: structuredClone(command.draft || {}),
+    created_at_ms: Number(nowMs),
+    updated_at_ms: Number(nowMs),
+    expires_at_ms: Number(nowMs) + CALENDAR_CREATE_TTL_SECONDS * 1000,
+  };
+}
+
+export function parseCalendarPendingRecord(raw = "", expectedActorHash = "", nowMs = Date.now()) {
+  try {
+    const record = JSON.parse(raw);
+    if (record?.schema !== CALENDAR_PENDING_SCHEMA || record.status !== "pending") return null;
+    if (!/^[a-f0-9]{64}$/.test(String(record.actor_hash || ""))) return null;
+    if (expectedActorHash && record.actor_hash !== expectedActorHash) return null;
+    if (!/^[a-f0-9]{64}$/.test(String(record.source_event_hash || ""))) return null;
+    if (!record.draft || typeof record.draft !== "object" || Array.isArray(record.draft)) return null;
+    const expiresAt = Number(record.expires_at_ms || 0);
+    return {
+      ...record,
+      expired: !Number.isFinite(expiresAt) || expiresAt <= Number(nowMs),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function createCalendarAcceptanceRecord({ identity, command, replyToken, receivedAt }) {
   return {
     schema: CALENDAR_ACCEPTANCE_SCHEMA,
@@ -300,6 +475,10 @@ export function createCalendarAcceptanceRecord({ identity, command, replyToken, 
     calendar_alias: CALENDAR_ALIAS,
     timezone: CALENDAR_TIMEZONE,
     canonical: command.valid ? structuredClone(command.fields) : {},
+    pending_context: command.pending === true,
+    pending_draft: command.pending ? structuredClone(command.draft || {}) : {},
+    continuation: command.continuation === true,
+    pending_source_event_hash: String(command.pending_source_event_hash || ""),
     reply_token: String(replyToken || ""),
     received_at: String(receivedAt || new Date().toISOString()),
     accepted_at: new Date().toISOString(),

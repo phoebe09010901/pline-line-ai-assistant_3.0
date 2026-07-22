@@ -1,5 +1,15 @@
 # CODEX_NOTES
 
+## Calendar Create Follow-up Continuity Fix - 2026-07-22
+
+- Gate: `CALENDAR_CREATE_FOLLOWUP_CONTINUITY_FIX`; implementation Worker turn `019f8858-871f-78c0-b829-92ecad131282`; fresh TEST turn `019f8872-1f35-7de2-9b0b-16e78d93c7a5`.
+- Root cause and repair: missing same-actor pending context before general routing; partial draft now saves before clarification under a stable hashed actor key with TTL 600, preserves title/start, merges date/duration/end, and clears on success/cancel/expiry.
+- Formal marker `CALENDAR-CREATE-FOLLOWUP-20260722-NEWFIX-141153`: A/B/C and D cancel PASS, Google primary readback PASS, cleanup PASS, post-cleanup active count 0, existing Calendar effect 0.
+- Case E remains evidence-layer qualified: isolated retry 15/15 PASS, duplicate Calendar write 0, duplicate LINE final 0; live identical webhook replay was unsafe and not run.
+- Memo offline regression 39/39 PASS; production Memo effect 0. No internal identifiers appeared in LINE.
+- Published n8n `fe757d90-b40b-4234-af4d-6162aded24a4`; Worker deployment `814fcaca-2040-4323-aced-6e176073c178`; sanitized export SHA-256 `141aad725558c5b8e431db639daf281efacf83e8331d8260180f87ea2a768bcc`.
+- Gate closes here. Calendar Search/Update/Delete are not started.
+
 ## Memo Core Stable Checkpoint - 2026-07-22
 
 - Checkpoint: `MEMO_CORE_STABLE_CHECKPOINT_20260722`.
