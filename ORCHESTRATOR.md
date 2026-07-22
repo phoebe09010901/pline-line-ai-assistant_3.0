@@ -1,5 +1,23 @@
 # PLine Orchestrator State
 
+## Memo Core stable checkpoint — 2026-07-22
+
+- Project: `菲比 LINE 智能助理_03`
+- Canonical path: `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`
+- Fixed lane: `PLine｜RELEASE｜階段收尾與上線檢查`
+- Checkpoint: `MEMO_CORE_STABLE_CHECKPOINT_20260722`
+- Controller state: `STOP_AFTER_CHECKPOINT`
+- Active Gate: none
+- `MEMO_DELETE_GATE_STATUS=completed`
+- `MEMO_CORE_STATUS=completed_and_frozen`
+- `MEMO_CHECKPOINT_STATUS=recorded`
+- `CALENDAR_CREATE_GATE_STATUS=queued_not_started`
+- n8n workflow/Published: `kcMcBQos5cxsnWU1` / `271add4b-71e9-4f06-82c6-38f7d1ca765c`
+- Worker source/deployment: `859e55663fa3c53000b79e9025fe78e795f91bf5` / `5f707990-60df-4331-8598-d6716da56e11`
+- Formal Gate readback: isolated active 0 / archive 6; existing formal Memo effect 0; duplicate success final 0; permanent delete 0; Calendar effect 0
+- Checkpoint artifact: `checkpoints/MEMO_CORE_STABLE_CHECKPOINT_20260722.md`
+- Resume rule: verify the checkpoint commit, branch, and `memo-core-stable-20260722` tag first. Do not start `CALENDAR_CREATE_GATE` without a separate explicit Gate authorization.
+
 ## Daily closeout — 2026-07-21
 
 - Project: `菲比 LINE 智能助理_03`

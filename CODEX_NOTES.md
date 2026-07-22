@@ -1,5 +1,18 @@
 # CODEX_NOTES
 
+## Memo Core Stable Checkpoint - 2026-07-22
+
+- Checkpoint: `MEMO_CORE_STABLE_CHECKPOINT_20260722`.
+- Fixed thread/turn: `019f8709-63a4-7482-b804-ddea7b8940cf` / `019f879c-06eb-7ef0-b467-12d9a9612364`.
+- Formal Delete Gate evidence remains PASS for single, sequence selection, bounded multi/range, and current-search-all against the same valid actor snapshot. Whole-database Delete All remains disabled and not formally verified.
+- Published n8n was rechecked as `271add4b-71e9-4f06-82c6-38f7d1ca765c`; the one saved sanitized snapshot is 137/136 with empty pin data, zero stored credential IDs/names/values, and checksum `4a3bae95603eb3ff91fe05a161fb6123a2d98726f214a0156207199ad6be668a`.
+- Worker source `859e556` remained unchanged through intake HEAD `9e2423f`; deployment `5f707990-60df-4331-8598-d6716da56e11` was active at 100% and health metadata parity PASS.
+- Checkpoint rerun passed Worker 71/71, isolated contract 12/12, and the current no-side-effect Memo/n8n offline suites.
+- Formal fixture/readback state retained: created 6, active 0, archive 6, existing formal Memo effect 0, duplicate Delete 0, duplicate LINE success final 0, permanent delete 0, Calendar effect 0.
+- Google was not part of the Gate and is `not_applicable`; no Google event or Calendar Gate was opened.
+- Known ingress hardening note remains recorded separately: shared-secret rejection occurs in `Normalize Input`, not at an HTTP 401/403 Webhook boundary. This checkpoint did not modify that behavior.
+- Final states: Memo Delete completed, Memo Core completed/frozen, checkpoint recorded, Calendar Create queued/not started.
+
 ## Memo Core Completion Milestone - 2026-07-21 22:52 Asia/Taipei
 
 - Marker: `MEMO_CORE_COMPLETED_20260721_2252`.

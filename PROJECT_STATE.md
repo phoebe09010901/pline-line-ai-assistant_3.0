@@ -1,5 +1,19 @@
 # PROJECT_STATE
 
+## MEMO_CORE_STABLE_CHECKPOINT_20260722 — 2026-07-22 Asia/Taipei
+
+- `MEMO_DELETE_GATE_STATUS=completed`.
+- `MEMO_CORE_STATUS=completed_and_frozen`.
+- `MEMO_CHECKPOINT_STATUS=recorded`.
+- `CALENDAR_CREATE_GATE_STATUS=queued_not_started`.
+- Stable evidence is recorded in `checkpoints/MEMO_CORE_STABLE_CHECKPOINT_20260722.md` with one sanitized Published workflow snapshot and SHA-256 checksum.
+- Formal n8n identity: workflow `kcMcBQos5cxsnWU1`, Published `271add4b-71e9-4f06-82c6-38f7d1ca765c`; current live history matched the formal Gate version.
+- Formal Worker identity: source commit `859e55663fa3c53000b79e9025fe78e795f91bf5`, deployment `5f707990-60df-4331-8598-d6716da56e11`, active at 100% traffic; health metadata parity PASS.
+- Memo Create/Search/Modify/Single Delete/sequence selection/bounded batch Delete are recorded only to their evidence level. Current-search-all is PASS only for a valid same-actor snapshot; whole-database Delete All remains unsupported and not formally verified.
+- Latest Delete Gate evidence: isolated fixtures active 0 / archive 6, existing formal Memo effect 0, duplicate Delete 0, duplicate success final 0, permanent delete 0, Calendar effect 0.
+- This checkpoint did not change Memo code/runtime, create a fixture, send LINE, Publish, Deploy, change credentials, start Monitor, or operate Calendar.
+- Next Gate remains `CALENDAR_CREATE_GATE`, queued and not started.
+
 ## MEMO_DELETE_SELECTION_REPAIR_GATE — 2026-07-22 Asia/Taipei
 
 - `MEMO_CORE_STATUS=completed_and_frozen`.

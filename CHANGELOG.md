@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2026-07-22 - Memo Core Stable Checkpoint
+
+- Added `checkpoints/MEMO_CORE_STABLE_CHECKPOINT_20260722.md` as the single stable Memo Core evidence checkpoint.
+- Preserved the actual Published n8n workflow `kcMcBQos5cxsnWU1` version `271add4b-71e9-4f06-82c6-38f7d1ca765c` as one sanitized snapshot with SHA-256 `4a3bae95603eb3ff91fe05a161fb6123a2d98726f214a0156207199ad6be668a`.
+- Reverified Worker deployment `5f707990-60df-4331-8598-d6716da56e11` at 100% traffic and live/local health metadata parity against source commit `859e556`.
+- Recorded formal status by evidence layer: current-search-all is limited to the valid current snapshot; whole-database Delete All remains unsupported and not formally verified.
+- Retained Gate evidence active 0 / archive 6, existing formal Memo effect 0, duplicate Delete/final 0, permanent delete 0, and Calendar effect 0.
+- Set `MEMO_DELETE_GATE_STATUS=completed`, `MEMO_CORE_STATUS=completed_and_frozen`, `MEMO_CHECKPOINT_STATUS=recorded`, and `CALENDAR_CREATE_GATE_STATUS=queued_not_started`.
+- No Memo runtime change, live fixture, LINE rerun, Publish, Deploy, credential change, Monitor start, or Calendar action occurred in the checkpoint task.
+
 ## 2026-07-21 - Memo Core Completion Milestone
 
 - Added milestone marker `MEMO_CORE_COMPLETED_20260721_2252` at 2026-07-21 22:52 Asia/Taipei.

@@ -53,6 +53,8 @@ All components are `_03` TEST resources only.
 
 ## Current Status
 
+The current stable release marker is `MEMO_CORE_STABLE_CHECKPOINT_20260722`. It records the completed/frozen Memo Core after the formal Delete selection Gate, including the actual n8n Published version, Worker deployment, formal LINE/Dropbox evidence boundaries, one sanitized workflow snapshot/checksum, and the explicit distinction between current-search-all and prohibited whole-database Delete All. See `checkpoints/MEMO_CORE_STABLE_CHECKPOINT_20260722.md`. `CALENDAR_CREATE_GATE` is queued but not started.
+
 The TEST-only minimal dual-path proof is complete. The current post-release TEST extension adds a fixed local Dropbox JSON save path for `idea_create`.
 
 Dropbox idea JSON directory:
