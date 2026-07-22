@@ -201,16 +201,16 @@ function installFetch(env) {
 function snapshotRaw({ scopeHash, memoIds = MEMO_IDS, createdAt, expiresAt, currentPage = 1 }) {
   const total = memoIds.length;
   return JSON.stringify({
-    schema: "pline-v3-memo-search-selection/v2",
+    schema: "pline-v3-memo-search-selection/v3",
     scope_hash: scopeHash,
     search_event_hash: "f".repeat(64),
-    candidates: memoIds.map((memoId, index) => ({ position: index + 1, memo_id: memoId })),
+    candidates: memoIds.map((memoId, index) => ({ position: index + 1, memo_id: memoId, summary: `摘要 ${index + 1}` })),
     total,
     page_size: 10,
     page_count: total === 0 ? 0 : Math.ceil(total / 10),
     current_page: total === 0 ? 0 : currentPage,
-    delete_all_eligible: false,
-    delete_all_limit: 0,
+    delete_all_eligible: total > 0 && total <= 5,
+    delete_all_limit: 5,
     created_at: createdAt,
     expires_at: expiresAt,
   });
@@ -219,7 +219,7 @@ function snapshotRaw({ scopeHash, memoIds = MEMO_IDS, createdAt, expiresAt, curr
 test("single list and ascending range selection commands normalize to at most five indices", () => {
   assert.equal(MEMO_SEARCH_SELECTION_MAX_DELETE_ITEMS, 5);
   assert.equal(MEMO_SELECTION_WORKER_BATCH_REQUEST_LIMIT, 5);
-  assert.equal(MEMO_SELECTION_LIVE_EXECUTION_AUTHORIZED_LIMIT, 1);
+  assert.equal(MEMO_SELECTION_LIVE_EXECUTION_AUTHORIZED_LIMIT, 5);
   assert.deepEqual(parseMemoSearchSelectionDeleteCommand("刪除第 2 筆備忘錄").fields, {
     selection_mode: "single",
     selection_indices: [2],
@@ -232,14 +232,36 @@ test("single list and ascending range selection commands normalize to at most fi
     selection_mode: "range",
     selection_indices: [2, 3, 4, 5],
   });
+  assert.deepEqual(parseMemoDeterministicCommand("備忘錄刪除：第1筆").fields, {
+    selection_mode: "single",
+    selection_indices: [1],
+  });
+  assert.deepEqual(parseMemoDeterministicCommand("刪除第1筆").fields, {
+    selection_mode: "single",
+    selection_indices: [1],
+  });
+  assert.deepEqual(parseMemoDeterministicCommand("備忘錄刪除：第一筆到第五筆").fields, {
+    selection_mode: "range",
+    selection_indices: [1, 2, 3, 4, 5],
+  });
+  assert.deepEqual(parseMemoDeterministicCommand("刪除第1、3、5筆").fields, {
+    selection_mode: "multiple",
+    selection_indices: [1, 3, 5],
+  });
+  assert.deepEqual(parseMemoDeterministicCommand("備忘錄刪除：這次搜尋的全部").fields, {
+    selection_mode: "all",
+    selection_indices: [],
+  });
   const deduplicated = parseMemoSearchSelectionDeleteCommand("刪除第 5、2、4、2 筆備忘錄");
   assert.equal(deduplicated.valid, true);
   assert.deepEqual(deduplicated.fields.selection_indices, [2, 4, 5]);
-  for (const input of ["刪除全部", "全部清空", "批次刪除備忘錄", "刪除多筆備忘錄"]) {
+  for (const input of ["全部清空", "批次刪除備忘錄", "刪除多筆備忘錄"]) {
     const parsed = parseMemoDeterministicCommand(input);
     assert.equal(parsed.matched, true, input);
     assert.equal(parsed.valid, false, input);
   }
+  assert.equal(parseMemoDeterministicCommand("刪除全部").valid, true);
+  assert.equal(parseMemoDeterministicCommand("備忘錄刪除：這次搜尋的全部").fields.selection_mode, "all");
 });
 
 test("invalid empty reverse oversized and malformed selections reject safely", () => {
@@ -248,7 +270,6 @@ test("invalid empty reverse oversized and malformed selections reject safely", (
     ["刪除第 5 到第 2 筆備忘錄", "invalid_selection_range"],
     ["刪除第 1、2、3、4、5、6 筆備忘錄", "selection_too_large"],
     ["刪除第 筆備忘錄", "invalid_selection_format"],
-    ["刪除全部備忘錄", "invalid_selection_format"],
   ]) {
     const parsed = parseMemoDeterministicCommand(input);
     assert.equal(parsed.matched, true, input);
@@ -283,7 +304,7 @@ test("strict search result parsing hides ids in LINE text and stores no summarie
     "candidates", "created_at", "current_page", "delete_all_eligible", "delete_all_limit", "expires_at",
     "page_count", "page_size", "schema", "scope_hash", "search_event_hash", "total",
   ]);
-  assert.deepEqual(Object.keys(snapshot.candidates[0]).sort(), ["memo_id", "position"]);
+  assert.deepEqual(Object.keys(snapshot.candidates[0]).sort(), ["memo_id", "position", "summary"]);
 });
 
 test("selection resolution rejects missing expired out-of-range and normalizes duplicate indices", () => {
@@ -305,14 +326,14 @@ test("selection resolution rejects missing expired out-of-range and normalizes d
   assert.deepEqual(resolveMemoSearchSelectionDelete({ snapshotRaw: live, scopeHash, selectionMode: "multiple", selectionIndices: [5, 2, 4, 2], nowMs: now }).memo_ids, [MEMO_IDS[1], MEMO_IDS[3], MEMO_IDS[4]]);
   assert.deepEqual(resolveMemoSearchSelectionDelete({ snapshotRaw: live, scopeHash, selectionMode: "single", selectionIndices: [4], nowMs: now }).memo_ids, [MEMO_IDS[3]]);
   assert.deepEqual(resolveMemoSearchSelectionDelete({ snapshotRaw: live, scopeHash, selectionMode: "multiple", selectionIndices: [2, 4, 5], nowMs: now }).memo_ids, [MEMO_IDS[1], MEMO_IDS[3], MEMO_IDS[4]]);
-  assert.equal(resolveMemoSearchSelectionDelete({ snapshotRaw: live, scopeHash, selectionMode: "all", nowMs: now }).reason, "selection_all_not_supported");
+  assert.deepEqual(resolveMemoSearchSelectionDelete({ snapshotRaw: live, scopeHash, selectionMode: "all", nowMs: now }).memo_ids, MEMO_IDS);
   const one = snapshotRaw({
     scopeHash,
     memoIds: [MEMO_IDS[0]],
     createdAt: new Date(now - 1000).toISOString(),
     expiresAt: new Date(now + 1000).toISOString(),
   });
-  assert.equal(resolveMemoSearchSelectionDelete({ snapshotRaw: one, scopeHash, selectionMode: "all", nowMs: now }).reason, "selection_all_not_supported");
+  assert.deepEqual(resolveMemoSearchSelectionDelete({ snapshotRaw: one, scopeHash, selectionMode: "all", nowMs: now }).memo_ids, [MEMO_IDS[0]]);
 });
 
 test("15-item delete all rejection Replies once with zero n8n and no batch execution", async () => {
@@ -340,7 +361,7 @@ test("15-item delete all rejection Replies once with zero n8n and no batch execu
     const replyCalls = fetchImpl.calls.filter((call) => call.url.endsWith("/v2/bot/message/reply"));
     assert.equal(n8nCalls.length, 0);
     assert.equal(replyCalls.length, 1);
-    assert.equal(JSON.parse(replyCalls[0].options.body).messages[0].text, "目前不支援刪除全部，請依搜尋結果輸入最多 5 個序號。");
+    assert.match(JSON.parse(replyCalls[0].options.body).messages[0].text, /一次最多可刪除 5 筆/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -401,7 +422,12 @@ test("no recent search produces one natural rejection and zero n8n batch", async
     assert.equal(response.status, 200);
     await Promise.all(ctx.tasks);
     assert.equal(fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/")).length, 0);
-    assert.equal(fetchImpl.calls.filter((call) => call.url.endsWith("/v2/bot/message/reply")).length, 1);
+    const replyCalls = fetchImpl.calls.filter((call) => call.url.endsWith("/v2/bot/message/reply"));
+    assert.equal(replyCalls.length, 1);
+    assert.equal(
+      JSON.parse(replyCalls[0].options.body).messages[0].text,
+      "妳想刪除哪些備忘錄？請先搜尋，或告訴我關鍵字／日期。",
+    );
     assert.equal(fetchImpl.calls.filter((call) => call.url.endsWith("/v2/bot/message/push")).length, 0);
   } finally {
     globalThis.fetch = originalFetch;
@@ -436,7 +462,7 @@ test("a newer search overwrites the prior snapshot for the same hashed scope", a
   }
 });
 
-test("search snapshot then single selection dispatches one id-only batch and duplicate dispatches zero", async () => {
+test("search snapshot then single selection waits for confirmation and dispatches one id-only batch once", async () => {
   const kv = new MemoryKv();
   const env = baseEnv(kv);
   const fetchImpl = installFetch(env);
@@ -454,7 +480,7 @@ test("search snapshot then single selection dispatches one id-only batch and dup
     const snapshotText = snapshotEntry[1];
     const snapshot = parseMemoSearchSelectionSnapshot(snapshotText);
     assert.deepEqual(snapshot.candidates.map((candidate) => candidate.memo_id), MEMO_IDS);
-    for (const forbidden of [searchEvent.source.userId, searchEvent.replyToken, "摘要 1", env.N8N_SHARED_SECRET, env.N8N_MEMO_CALLBACK_SECRET]) {
+    for (const forbidden of [searchEvent.source.userId, searchEvent.replyToken, env.N8N_SHARED_SECRET, env.N8N_MEMO_CALLBACK_SECRET]) {
       assert.equal(snapshotText.includes(forbidden), false);
     }
     assert.equal(kv.putCalls.find((call) => call.key === `memo_search_selection:v1:${scopeHash}`).options.expirationTtl, 600);
@@ -467,11 +493,22 @@ test("search snapshot then single selection dispatches one id-only batch and dup
     assert.equal((await handleLineWebhook(await signedRequest(deleteEvent), env, deleteCtx)).status, 200);
     await Promise.all(deleteCtx.tasks);
 
+    assert.equal(fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/")).length, 1);
+    const confirmationPrompt = fetchImpl.calls.filter((call) => call.url.endsWith("/v2/bot/message/reply")).at(-1);
+    assert.match(JSON.parse(confirmationPrompt.options.body).messages[0].text, /確認刪除/);
+    assert.equal(String(confirmationPrompt.options.body).includes("memo-"), false);
+
+    const confirmEvent = lineEvent({ eventId: "selection-delete-confirm", text: "確認刪除" });
+    const confirmCtx = createContext();
+    assert.equal((await handleLineWebhook(await signedRequest(confirmEvent), env, confirmCtx)).status, 200);
+    await Promise.all(confirmCtx.tasks);
+
     const n8nCalls = fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/"));
     assert.equal(n8nCalls.length, 2);
     const batchPayload = JSON.parse(n8nCalls[1].options.body);
     assert.equal(batchPayload.intent, "memo_delete");
     assert.equal(batchPayload.delete_scope, "memo_search_selection_snapshot");
+    assert.equal(batchPayload.confirmation_status, "consumed");
     assert.deepEqual(batchPayload.memo_ids, [MEMO_IDS[3]]);
     assert.equal("memo_id" in batchPayload, false);
     for (const forbidden of [deleteEvent.source.userId, deleteEvent.replyToken, env.N8N_SHARED_SECRET, env.N8N_MEMO_CALLBACK_SECRET]) {
@@ -479,16 +516,16 @@ test("search snapshot then single selection dispatches one id-only batch and dup
     }
 
     const duplicateCtx = createContext();
-    assert.equal((await handleLineWebhook(await signedRequest(deleteEvent), env, duplicateCtx)).status, 200);
+    assert.equal((await handleLineWebhook(await signedRequest(confirmEvent), env, duplicateCtx)).status, 200);
     await Promise.all(duplicateCtx.tasks);
     assert.equal(fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/")).length, 2);
-    assert.equal(fetchImpl.calls.filter((call) => call.url.endsWith("/v2/bot/message/reply")).length, 2);
+    assert.equal(fetchImpl.calls.filter((call) => call.url.endsWith("/v2/bot/message/reply")).length, 3);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("list and range commands dispatch one ordered batch of at most five ids", async () => {
+test("list and range commands wait for confirmation then dispatch one ordered batch of at most five ids", async () => {
   for (const scenario of [
     { eventId: "selection-list-batch", text: "刪除第 5、2、4、2 筆備忘錄", expected: [MEMO_IDS[1], MEMO_IDS[3], MEMO_IDS[4]] },
     { eventId: "selection-range-batch", text: "刪除第 2 到第 5 筆備忘錄", expected: MEMO_IDS.slice(1, 5) },
@@ -510,6 +547,11 @@ test("list and range commands dispatch one ordered batch of at most five ids", a
       const ctx = createContext();
       assert.equal((await handleLineWebhook(await signedRequest(event), env, ctx)).status, 200);
       await Promise.all(ctx.tasks);
+      assert.equal(fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/")).length, 0, scenario.text);
+      const confirmEvent = lineEvent({ eventId: `${scenario.eventId}-confirm`, text: "確認刪除" });
+      const confirmCtx = createContext();
+      assert.equal((await handleLineWebhook(await signedRequest(confirmEvent), env, confirmCtx)).status, 200);
+      await Promise.all(confirmCtx.tasks);
       const n8nCalls = fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/"));
       assert.equal(n8nCalls.length, 1, scenario.text);
       const payload = JSON.parse(n8nCalls[0].options.body);
@@ -518,7 +560,7 @@ test("list and range commands dispatch one ordered batch of at most five ids", a
       assert.equal(payload.delete_scope, "memo_search_selection_snapshot");
 
       const duplicateCtx = createContext();
-      assert.equal((await handleLineWebhook(await signedRequest(event), env, duplicateCtx)).status, 200);
+      assert.equal((await handleLineWebhook(await signedRequest(confirmEvent), env, duplicateCtx)).status, 200);
       await Promise.all(duplicateCtx.tasks);
       assert.equal(fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/")).length, 1);
     } finally {
@@ -527,12 +569,11 @@ test("list and range commands dispatch one ordered batch of at most five ids", a
   }
 });
 
-test("invalid snapshot selections and unsupported all commands Reply once with zero n8n", async () => {
+test("invalid snapshot selections fail closed while current-snapshot all waits for confirmation", async () => {
   const now = Date.now();
   for (const scenario of [
     { eventId: "selection-out-of-range", text: "刪除第 6 筆備忘錄", snapshot: "live" },
     { eventId: "selection-too-large", text: "刪除第 1、2、3、4、5、6 筆備忘錄", snapshot: "live" },
-    { eventId: "selection-all-unsupported", text: "刪除全部", snapshot: "live" },
     { eventId: "selection-clear-all-unsupported", text: "全部清空", snapshot: "live" },
     { eventId: "selection-expired", text: "刪除第 1 筆備忘錄", snapshot: "expired" },
     { eventId: "selection-wrong-scope", text: "刪除第 1 筆備忘錄", snapshot: "wrong_scope" },
@@ -559,6 +600,122 @@ test("invalid snapshot selections and unsupported all commands Reply once with z
     } finally {
       globalThis.fetch = originalFetch;
     }
+  }
+
+  const kv = new MemoryKv();
+  const env = baseEnv(kv);
+  const allEvent = lineEvent({ eventId: "selection-all-current-snapshot", text: "備忘錄刪除：這次搜尋的全部" });
+  const scopeHash = await buildMemoSelectionScopeHash(allEvent, env);
+  kv.values.set(`memo_search_selection:v1:${scopeHash}`, snapshotRaw({
+    scopeHash,
+    createdAt: new Date(now - 2000).toISOString(),
+    expiresAt: new Date(now + 60_000).toISOString(),
+  }));
+  const fetchImpl = installFetch(env);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  try {
+    const ctx = createContext();
+    assert.equal((await handleLineWebhook(await signedRequest(allEvent), env, ctx)).status, 200);
+    await Promise.all(ctx.tasks);
+    assert.equal(fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/")).length, 0);
+    assert.match(JSON.parse(fetchImpl.calls.find((call) => call.url.endsWith("/v2/bot/message/reply")).options.body).messages[0].text, /5 筆/);
+
+    const confirmEvent = lineEvent({ eventId: "selection-all-current-snapshot-confirm", text: "確認刪除" });
+    const confirmCtx = createContext();
+    assert.equal((await handleLineWebhook(await signedRequest(confirmEvent), env, confirmCtx)).status, 200);
+    await Promise.all(confirmCtx.tasks);
+    const n8nCalls = fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/"));
+    assert.equal(n8nCalls.length, 1);
+    const payload = JSON.parse(n8nCalls[0].options.body);
+    assert.equal(payload.selection_mode, "all");
+    assert.equal(payload.confirmation_status, "consumed");
+    assert.deepEqual(payload.memo_ids, MEMO_IDS);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("expired actor-mismatched changed-snapshot and changed-candidate confirmations fail closed", async () => {
+  for (const scenario of ["expired", "actor_mismatch", "snapshot_changed", "candidate_changed"]) {
+    const kv = new MemoryKv();
+    const env = baseEnv(kv);
+    env.LINE_TEST_ADMIN_USER_IDS = "raw-user-id-selection-test,other-selection-actor";
+    const selectionEvent = lineEvent({ eventId: `confirm-guard-${scenario}-select`, text: "刪除第1筆" });
+    const scopeHash = await buildMemoSelectionScopeHash(selectionEvent, env);
+    const now = Date.now();
+    const selectionKey = `memo_search_selection:v1:${scopeHash}`;
+    const confirmationKey = `memo_delete_confirmation:v1:${scopeHash}`;
+    kv.values.set(selectionKey, snapshotRaw({
+      scopeHash,
+      createdAt: new Date(now - 1000).toISOString(),
+      expiresAt: new Date(now + 60_000).toISOString(),
+    }));
+    const fetchImpl = installFetch(env);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchImpl;
+    try {
+      const selectionCtx = createContext();
+      assert.equal((await handleLineWebhook(await signedRequest(selectionEvent), env, selectionCtx)).status, 200);
+      await Promise.all(selectionCtx.tasks);
+      assert.ok(kv.values.has(confirmationKey), scenario);
+
+      if (scenario === "expired") {
+        const pending = JSON.parse(kv.values.get(confirmationKey));
+        pending.expires_at = new Date(now - 1).toISOString();
+        kv.values.set(confirmationKey, JSON.stringify(pending));
+      } else if (scenario === "snapshot_changed") {
+        const snapshot = JSON.parse(kv.values.get(selectionKey));
+        snapshot.search_event_hash = "e".repeat(64);
+        kv.values.set(selectionKey, JSON.stringify(snapshot));
+      } else if (scenario === "candidate_changed") {
+        const snapshot = JSON.parse(kv.values.get(selectionKey));
+        snapshot.candidates[0] = { position: 1, memo_id: `memo-${"a".repeat(64)}`, summary: "不同摘要" };
+        kv.values.set(selectionKey, JSON.stringify(snapshot));
+      }
+
+      const confirmEvent = lineEvent({ eventId: `confirm-guard-${scenario}-confirm`, text: "確認刪除" });
+      if (scenario === "actor_mismatch") confirmEvent.source.userId = "other-selection-actor";
+      const confirmCtx = createContext();
+      assert.equal((await handleLineWebhook(await signedRequest(confirmEvent), env, confirmCtx)).status, 200);
+      await Promise.all(confirmCtx.tasks);
+      assert.equal(fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/")).length, 0, scenario);
+      const replyCalls = fetchImpl.calls.filter((call) => call.url.endsWith("/v2/bot/message/reply"));
+      assert.equal(replyCalls.length, 2, scenario);
+      assert.equal(String(replyCalls[1].options.body).includes("memo-"), false, scenario);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+});
+
+test("cancel consumes the pending selection without dispatching archive", async () => {
+  const kv = new MemoryKv();
+  const env = baseEnv(kv);
+  const event = lineEvent({ eventId: "selection-cancel", text: "刪除第1、3、5筆" });
+  const scopeHash = await buildMemoSelectionScopeHash(event, env);
+  const now = Date.now();
+  kv.values.set(`memo_search_selection:v1:${scopeHash}`, snapshotRaw({
+    scopeHash,
+    createdAt: new Date(now - 1000).toISOString(),
+    expiresAt: new Date(now + 60_000).toISOString(),
+  }));
+  const fetchImpl = installFetch(env);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  try {
+    const ctx = createContext();
+    await handleLineWebhook(await signedRequest(event), env, ctx);
+    await Promise.all(ctx.tasks);
+    const cancelEvent = lineEvent({ eventId: "selection-cancel-confirmation", text: "取消" });
+    const cancelCtx = createContext();
+    await handleLineWebhook(await signedRequest(cancelEvent), env, cancelCtx);
+    await Promise.all(cancelCtx.tasks);
+    assert.equal(fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/")).length, 0);
+    const pending = JSON.parse(kv.values.get(`memo_delete_confirmation:v1:${scopeHash}`));
+    assert.equal(pending.status, "cancelled");
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 
@@ -684,9 +841,10 @@ test("15-candidate snapshot stores ids only and next page dispatches exact readb
     assert.equal(snapshot.page_count, 2);
     assert.equal(snapshot.delete_all_eligible, false);
     assert.deepEqual(snapshot.candidates.map((candidate) => candidate.memo_id), FIFTEEN_MEMO_IDS);
-    for (const forbidden of ["摘要", "content", searchEvent.source.userId, searchEvent.replyToken, env.N8N_SHARED_SECRET, env.N8N_MEMO_CALLBACK_SECRET]) {
+    for (const forbidden of ["content", searchEvent.source.userId, searchEvent.replyToken, env.N8N_SHARED_SECRET, env.N8N_MEMO_CALLBACK_SECRET]) {
       assert.equal(snapshotText.includes(forbidden), false);
     }
+    assert.equal(snapshot.candidates.slice(0, 10).every((candidate) => candidate.summary), true);
 
     const pageEvent = lineEvent({ eventId: "pagination-next", text: "查看下一頁" });
     const pageCtx = createContext();
@@ -747,7 +905,7 @@ test("missing expired and out-of-range page requests Reply naturally with zero n
   }
 });
 
-test("verified multi selection dispatches one exact batch from the latest snapshot", async () => {
+test("verified multi selection dispatches one exact batch only after confirmation", async () => {
   const kv = new MemoryKv();
   const env = baseEnv(kv);
   const fetchImpl = installFetch(env);
@@ -766,17 +924,23 @@ test("verified multi selection dispatches one exact batch from the latest snapsh
     const deleteCtx = createContext();
     assert.equal((await handleLineWebhook(await signedRequest(deleteEvent), env, deleteCtx)).status, 200);
     await Promise.all(deleteCtx.tasks);
+    assert.equal(fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/")).length, 1);
+    const confirmEvent = lineEvent({ eventId: "batch-limit-delete-confirm", text: "確認刪除" });
+    const confirmCtx = createContext();
+    assert.equal((await handleLineWebhook(await signedRequest(confirmEvent), env, confirmCtx)).status, 200);
+    await Promise.all(confirmCtx.tasks);
     const n8nCalls = fetchImpl.calls.filter((call) => call.url.startsWith("https://n8n.example/"));
     assert.equal(n8nCalls.length, 2);
     assert.deepEqual(JSON.parse(n8nCalls[1].options.body).memo_ids, [MEMO_IDS[1], MEMO_IDS[3], MEMO_IDS[4]]);
-    assert.equal(fetchImpl.calls.filter((call) => call.url.endsWith("/v2/bot/message/reply")).length, 2);
+    assert.equal(fetchImpl.calls.filter((call) => call.url.endsWith("/v2/bot/message/reply")).length, 3);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("legacy internal memo-id delete remains available without becoming selection scope", () => {
+test("public delete rejects internal memo ids and requires a search selection", () => {
   const parsed = parseMemoDeterministicCommand(`備忘錄刪除：${MEMO_IDS[0]}`);
-  assert.equal(parsed.valid, true);
-  assert.deepEqual(parsed.fields, { memo_id: MEMO_IDS[0], selection_mode: "memo_id" });
+  assert.equal(parsed.valid, false);
+  assert.equal(parsed.reason, "delete_requires_search_selection");
+  assert.deepEqual(parsed.fields, {});
 });

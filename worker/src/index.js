@@ -53,6 +53,8 @@ const MEMO_SEARCH_COMMAND_PREFIX = "備忘錄搜尋：";
 const MEMO_MODIFY_COMMAND_PREFIX = "備忘錄修改：";
 const MEMO_DELETE_COMMAND_PREFIX = "備忘錄刪除：";
 const MEMO_DELETE_SELECTION_ALL_COMMAND = "刪除全部";
+const MEMO_DELETE_CONFIRM_COMMAND = "確認刪除";
+const MEMO_DELETE_CANCEL_COMMAND = "取消";
 const MEMO_SEARCH_OPERATION = "memo_search";
 const MEMO_SEARCH_PAGE_OPERATION = "memo_search_page";
 const MEMO_MODIFY_OPERATION = "memo_modify";
@@ -67,23 +69,26 @@ const MEMO_DETERMINISTIC_OPERATIONS = [
 const MEMO_ID_PATTERN = /^memo-[a-f0-9]{64}$/;
 const MEMO_CREATE_ACCEPTANCE_SCHEMA = "pline-v3-memo-create-acceptance/v1";
 const MEMO_CREATE_ACCEPTANCE_PREFIX = "memo_create:v1:acceptance";
-const MEMO_SEARCH_SELECTION_SCHEMA = "pline-v3-memo-search-selection/v2";
+const MEMO_SEARCH_SELECTION_SCHEMA = "pline-v3-memo-search-selection/v3";
 const MEMO_SEARCH_SELECTION_PREFIX = "memo_search_selection:v1";
+const MEMO_DELETE_CONFIRMATION_SCHEMA = "pline-v3-memo-delete-confirmation/v1";
+const MEMO_DELETE_CONFIRMATION_PREFIX = "memo_delete_confirmation:v1";
 export const MEMO_SEARCH_SELECTION_TTL_SECONDS = 600;
+export const MEMO_DELETE_CONFIRMATION_TTL_SECONDS = 600;
 export const MEMO_SEARCH_SELECTION_MAX_CANDIDATES = 100;
 export const MEMO_SEARCH_PAGE_SIZE = 10;
 export const MEMO_SEARCH_SELECTION_MAX_DELETE_ITEMS = 5;
 export const MEMO_SELECTION_WORKER_BATCH_REQUEST_LIMIT = 5;
-export const MEMO_SELECTION_LIVE_EXECUTION_AUTHORIZED_LIMIT = 1;
+export const MEMO_SELECTION_LIVE_EXECUTION_AUTHORIZED_LIMIT = 5;
 const MEMO_CREATE_MAX_CONTENT_LENGTH = 4000;
 const MEMO_CREATE_EMPTY_REPLY_TEXT = "請在「備忘錄：」後面輸入要記錄的內容。";
 const MEMO_CREATE_TOO_LONG_REPLY_TEXT = "這筆備忘錄內容太長了，請縮短後再試一次。";
 const MEMO_CREATE_FAILED_REPLY_TEXT = "備忘錄目前尚未完成，請稍後再試一次。";
 const MEMO_SEARCH_EMPTY_REPLY_TEXT = "請在「備忘錄搜尋：」後面輸入關鍵字，或輸入「全部」。";
 const MEMO_MODIFY_FORMAT_REPLY_TEXT = "請使用「備忘錄修改：備忘錄編號｜新內容」的格式。";
-const MEMO_DELETE_FORMAT_REPLY_TEXT = "請使用完整的備忘錄編號，例如「備忘錄刪除：memo-…」。";
-const MEMO_DELETE_SELECTION_FORMAT_REPLY_TEXT = "請使用「刪除第 2 筆備忘錄」、「刪除第 2、4、5 筆備忘錄」或「刪除第 2 到第 5 筆備忘錄」。";
-const MEMO_DELETE_SELECTION_MISSING_REPLY_TEXT = "請先搜尋備忘錄，再依搜尋結果的序號選擇要刪除的項目。";
+const MEMO_DELETE_FORMAT_REPLY_TEXT = "妳想刪除哪些備忘錄？請先搜尋，或告訴我關鍵字／日期。";
+const MEMO_DELETE_SELECTION_FORMAT_REPLY_TEXT = "請使用「刪除第1筆」、「刪除第1、3、5筆」、「第一筆到第五筆」或「這次搜尋的全部」。";
+const MEMO_DELETE_SELECTION_MISSING_REPLY_TEXT = "妳想刪除哪些備忘錄？請先搜尋，或告訴我關鍵字／日期。";
 const MEMO_DELETE_SELECTION_EXPIRED_REPLY_TEXT = "上次搜尋結果已過期，請重新搜尋後再選擇。";
 const MEMO_DELETE_SELECTION_RANGE_REPLY_TEXT = "選擇的備忘錄序號超出上次搜尋結果，請重新確認。";
 const MEMO_DELETE_SELECTION_TOO_LARGE_REPLY_TEXT = "一次最多可刪除 5 筆，請縮小序號範圍後再試一次。";
@@ -94,7 +99,11 @@ const MEMO_SEARCH_PAGE_MISSING_REPLY_TEXT = "請先搜尋備忘錄，再查看�
 const MEMO_SEARCH_PAGE_EXPIRED_REPLY_TEXT = "上次搜尋結果已過期，請重新搜尋後再翻頁。";
 const MEMO_SEARCH_PAGE_RANGE_REPLY_TEXT = "這個搜尋結果沒有該頁，請重新確認頁碼。";
 const MEMO_SEARCH_PAGE_FORMAT_REPLY_TEXT = "請輸入「查看下一頁」、「查看上一頁」或「查看第 N 頁」。";
-const MEMO_DELETE_ALL_UNSUPPORTED_REPLY_TEXT = "目前不支援刪除全部，請依搜尋結果輸入最多 5 個序號。";
+const MEMO_DELETE_CONFIRMATION_MISSING_REPLY_TEXT = "目前沒有待確認的刪除項目，請先搜尋並選擇要刪除的備忘錄。";
+const MEMO_DELETE_CONFIRMATION_EXPIRED_REPLY_TEXT = "這次刪除確認已過期，沒有變更任何備忘錄。請重新搜尋後再選擇。";
+const MEMO_DELETE_CONFIRMATION_CHANGED_REPLY_TEXT = "搜尋結果已變更，沒有刪除任何備忘錄。請重新搜尋後再選擇。";
+const MEMO_DELETE_CONFIRMATION_CONSUMED_REPLY_TEXT = "這次刪除確認已經處理過，沒有重複刪除。";
+const MEMO_DELETE_CONFIRMATION_CANCELLED_REPLY_TEXT = "已取消刪除，沒有變更任何備忘錄。";
 const MEMO_OPERATION_TOO_LONG_REPLY_TEXT = "這次輸入的內容太長了，請縮短後再試一次。";
 const MEMO_OPERATION_FAILED_REPLY_TEXT = "備忘錄操作目前尚未完成，請稍後再試一次。";
 const MEMO_SUCCESS_REPLY_MAX_LENGTH = 160;
@@ -190,6 +199,7 @@ export async function handleLineWebhook(request, env, ctx = {}) {
 
   const normalized = normalizeForN8n(event);
   const memoCommand = parseMemoDeterministicCommand(event.message?.text || "");
+  const memoDeleteConfirmation = parseMemoDeleteConfirmationCommand(event.message?.text || "");
   const adminResult = await runBoundedAckOperation(
     () => verifyAdmin(event, env),
     {
@@ -221,6 +231,19 @@ export async function handleLineWebhook(request, env, ctx = {}) {
       status: "accepted",
       reason: "admin_bootstrap_captured",
       request_id: normalized.request_id,
+    });
+  }
+
+  if (memoDeleteConfirmation.matched) {
+    return handleMemoDeleteConfirmationAcceptance({
+      event,
+      normalized,
+      confirmationAction: memoDeleteConfirmation.action,
+      env,
+      ctx,
+      correlationId,
+      ackStartedAt,
+      ackBudgetMs,
     });
   }
 
@@ -462,23 +485,45 @@ export function parseMemoCreateCommand(messageText = "") {
   return { matched: true, valid: true, content, reason: "" };
 }
 
-export function parseMemoSearchSelectionDeleteCommand(messageText = "") {
-  const text = String(messageText || "").trim();
-  if (text === MEMO_DELETE_SELECTION_ALL_COMMAND || text === "全部清空") {
-    return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "selection_all_not_supported");
-  }
+function memoSelectionOrdinal(value = "") {
+  const text = String(value || "").trim();
+  if (/^[1-9]\d*$/.test(text)) return Number(text);
+  const digits = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  if (text === "十") return 10;
+  if (text.length === 1 && digits[text]) return digits[text];
+  const match = text.match(/^([一二三四五六七八九])?十([一二三四五六七八九])?$/);
+  if (!match) return NaN;
+  return (match[1] ? digits[match[1]] : 1) * 10 + (match[2] ? digits[match[2]] : 0);
+}
 
-  if (!text.startsWith("刪除第") && !text.startsWith(MEMO_DELETE_SELECTION_ALL_COMMAND)) {
-    if (text.includes("批次刪除") || text.includes("刪除多筆")) {
-      return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "invalid_selection_format");
+export function parseMemoSearchSelectionDeleteCommand(messageText = "") {
+  const original = String(messageText || "").trim();
+  if (original === "全部清空" || original.includes("批次刪除") || original.includes("刪除多筆")) {
+    return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "invalid_selection_format");
+  }
+  let text;
+  if (original.startsWith(MEMO_DELETE_COMMAND_PREFIX)) {
+    text = original.slice(MEMO_DELETE_COMMAND_PREFIX.length).trim();
+    if (MEMO_ID_PATTERN.test(text)) {
+      return { matched: false, valid: false, intent: "", fields: {}, reason: "not_selection_delete" };
     }
+  } else if (original.startsWith("刪除")) {
+    text = original.slice("刪除".length).trim();
+  } else {
     return { matched: false, valid: false, intent: "", fields: {}, reason: "not_selection_delete" };
   }
-
-  const rangeMatch = text.match(/^刪除第\s*([1-9]\d*)\s*到第\s*([1-9]\d*)\s*筆備忘錄$/);
+  text = text.replace(/\s+/g, "");
+  if (/^(?:這次搜尋(?:結果)?的)?全部(?:備忘錄)?$/.test(text)) {
+    return memoCommandResult(MEMO_DELETE_OPERATION, true, {
+      selection_mode: "all",
+      selection_indices: [],
+    });
+  }
+  const ordinal = "(?:[1-9]\\d*|[一二三四五六七八九十]+)";
+  const rangeMatch = text.match(new RegExp(`^第?(${ordinal})筆?(?:到|至|-|～|~)第?(${ordinal})筆(?:備忘錄)?$`));
   if (rangeMatch) {
-    const start = Number(rangeMatch[1]);
-    const end = Number(rangeMatch[2]);
+    const start = memoSelectionOrdinal(rangeMatch[1]);
+    const end = memoSelectionOrdinal(rangeMatch[2]);
     if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start) {
       return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "invalid_selection_range");
     }
@@ -491,9 +536,9 @@ export function parseMemoSearchSelectionDeleteCommand(messageText = "") {
     });
   }
 
-  const listMatch = text.match(/^刪除第\s*([1-9]\d*(?:\s*、\s*[1-9]\d*)*)\s*筆備忘錄$/);
+  const listMatch = text.match(new RegExp(`^第?(${ordinal}(?:[、,，]${ordinal})+)筆(?:備忘錄)?$`));
   if (listMatch) {
-    const parsedIndices = listMatch[1].split("、").map((value) => Number(value.trim()));
+    const parsedIndices = listMatch[1].split(/[、,，]/).map((value) => memoSelectionOrdinal(value));
     if (parsedIndices.some((value) => !Number.isSafeInteger(value))) {
       return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "invalid_selection_format");
     }
@@ -507,7 +552,26 @@ export function parseMemoSearchSelectionDeleteCommand(messageText = "") {
     });
   }
 
+  const singleMatch = text.match(new RegExp(`^第?(${ordinal})筆(?:備忘錄)?$`));
+  if (singleMatch) {
+    const index = memoSelectionOrdinal(singleMatch[1]);
+    if (!Number.isSafeInteger(index)) {
+      return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "invalid_selection_format");
+    }
+    return memoCommandResult(MEMO_DELETE_OPERATION, true, {
+      selection_mode: "single",
+      selection_indices: [index],
+    });
+  }
+
   return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "invalid_selection_format");
+}
+
+export function parseMemoDeleteConfirmationCommand(messageText = "") {
+  const text = String(messageText || "").trim();
+  if (text === MEMO_DELETE_CONFIRM_COMMAND) return { matched: true, action: "confirm" };
+  if (text === MEMO_DELETE_CANCEL_COMMAND) return { matched: true, action: "cancel" };
+  return { matched: false, action: "" };
 }
 
 export function parseMemoSearchPageCommand(messageText = "") {
@@ -596,10 +660,7 @@ export function parseMemoDeterministicCommand(messageText = "") {
     if (!MEMO_ID_PATTERN.test(memoId)) {
       return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "invalid_memo_id");
     }
-    return memoCommandResult(MEMO_DELETE_OPERATION, true, {
-      memo_id: memoId,
-      selection_mode: "memo_id",
-    });
+    return memoCommandResult(MEMO_DELETE_OPERATION, false, {}, "delete_requires_search_selection");
   }
 
   const createCommand = parseMemoCreateCommand(text);
@@ -843,7 +904,9 @@ async function handleMemoDeterministicAcceptance({
         fields: {
           ...(memoCommand.fields || {}),
           resolved_memo_ids: resolution.ok ? resolution.memo_ids : [],
+          resolved_candidates: resolution.ok ? resolution.candidates : [],
           selection_snapshot_version: resolution.ok ? resolution.snapshot_version : "",
+          selection_snapshot_expires_at: resolution.ok ? resolution.snapshot_expires_at : "",
         },
       };
     } else if (memoCommand.intent === MEMO_SEARCH_PAGE_OPERATION && memoCommand.valid) {
@@ -878,7 +941,9 @@ async function handleMemoDeterministicAcceptance({
       acceptanceRecord.normalized_command = {
         ...acceptanceRecord.normalized_command,
         memo_ids: acceptedMemoCommand.fields?.resolved_memo_ids || [],
+        selection_candidates: acceptedMemoCommand.fields?.resolved_candidates || [],
         selection_snapshot_version: acceptedMemoCommand.fields?.selection_snapshot_version || "",
+        selection_snapshot_expires_at: acceptedMemoCommand.fields?.selection_snapshot_expires_at || "",
       };
     } else if (memoCommand.intent === MEMO_SEARCH_PAGE_OPERATION) {
       acceptanceRecord.normalized_command = {
@@ -948,6 +1013,7 @@ function memoCreateRecordBlocksDispatch(record = {}) {
     "dispatching",
     "dispatch_ambiguous",
     "dispatched",
+    "waiting_confirmation",
     "reply_attempt_pending",
     "final_completed",
     "final_failed",
@@ -980,6 +1046,51 @@ async function processAcceptedMemoDeterministicInBackground({
     });
     await Promise.allSettled([markAsReadTask]);
     return result;
+  }
+
+  const selectionDeleteAwaitingConfirmation = current.operation === MEMO_DELETE_OPERATION
+    && current.normalized_command?.selection_mode
+    && current.normalized_command.selection_mode !== "memo_id"
+    && current.normalized_command.confirmation_status !== "consumed";
+  if (selectionDeleteAwaitingConfirmation) {
+    const pending = createMemoDeleteConfirmationRecord(current);
+    if (!pending) {
+      const failed = await deliverMemoReplyOnce(
+        env,
+        acceptanceKey,
+        MEMO_DELETE_SELECTION_MISSING_REPLY_TEXT,
+        "final_failed",
+      );
+      await Promise.allSettled([markAsReadTask]);
+      return failed;
+    }
+    const confirmationKey = memoDeleteConfirmationKey(current.selection_scope_hash);
+    await writeMemoDeleteConfirmation(env.IDEMPOTENCY_KV, confirmationKey, pending);
+    const readback = parseMemoDeleteConfirmationRecord(await env.IDEMPOTENCY_KV.get(confirmationKey));
+    if (!readback || readback.status !== "waiting_confirmation" || readback.selection_event_hash !== current.safe_event_hash) {
+      const failed = await deliverMemoReplyOnce(
+        env,
+        acceptanceKey,
+        MEMO_DELETE_CONFIRMATION_MISSING_REPLY_TEXT,
+        "final_failed",
+      );
+      await Promise.allSettled([markAsReadTask]);
+      return failed;
+    }
+    await updateMemoCreateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, (record) => ({
+      ...record,
+      status: "waiting_confirmation",
+      dispatch_status: "waiting_confirmation",
+      updated_at: new Date().toISOString(),
+    }));
+    const prompt = await deliverMemoReplyOnce(
+      env,
+      acceptanceKey,
+      memoDeleteConfirmationPrompt(readback),
+      "final_completed",
+    );
+    await Promise.allSettled([markAsReadTask]);
+    return prompt;
   }
 
   const dispatching = {
@@ -1087,6 +1198,7 @@ export function buildMemoDeterministicN8nPayload(record = {}) {
         delete_scope: "memo_search_selection_snapshot",
         selection_mode: String(record.normalized_command.selection_mode || ""),
         selection_snapshot_version: String(record.normalized_command.selection_snapshot_version || ""),
+        confirmation_status: String(record.normalized_command.confirmation_status || ""),
         memo_ids: Array.isArray(record.normalized_command.memo_ids)
           ? record.normalized_command.memo_ids.map((memoId) => String(memoId || ""))
           : [],
@@ -1163,10 +1275,12 @@ function memoValidationReplyText(operation = "", reason = "") {
   }
   if (reason === "selection_snapshot_expired") return MEMO_DELETE_SELECTION_EXPIRED_REPLY_TEXT;
   if (reason === "selection_index_out_of_range") return MEMO_DELETE_SELECTION_RANGE_REPLY_TEXT;
-  if (reason === "selection_all_not_supported") return MEMO_DELETE_ALL_UNSUPPORTED_REPLY_TEXT;
   if (reason === "selection_too_large" || reason === "selection_batch_limit_unverified") {
     return MEMO_DELETE_SELECTION_TOO_LARGE_REPLY_TEXT;
   }
+  if (reason === "selection_summary_unavailable") return MEMO_DELETE_SELECTION_MISSING_REPLY_TEXT;
+  if (reason === "delete_requires_search_selection") return MEMO_DELETE_SELECTION_MISSING_REPLY_TEXT;
+  if (String(reason || "").startsWith("confirmation_")) return memoDeleteConfirmationFailureReply(reason);
   if (["invalid_selection_format", "invalid_selection_range", "invalid_selection_mode", "empty_selection"].includes(reason)) {
     return MEMO_DELETE_SELECTION_FORMAT_REPLY_TEXT;
   }
@@ -1207,6 +1321,212 @@ function memoCreateAcceptanceKey(safeEventHash = "") {
 
 function memoSearchSelectionKey(scopeHash = "") {
   return `${MEMO_SEARCH_SELECTION_PREFIX}:${scopeHash}`;
+}
+
+function memoDeleteConfirmationKey(scopeHash = "") {
+  return `${MEMO_DELETE_CONFIRMATION_PREFIX}:${scopeHash}`;
+}
+
+function parseMemoDeleteConfirmationRecord(raw = "") {
+  const record = parseJsonSafely(raw);
+  if (
+    !record
+    || record.schema !== MEMO_DELETE_CONFIRMATION_SCHEMA
+    || !["waiting_confirmation", "consumed", "cancelled"].includes(String(record.status || ""))
+    || !/^[a-f0-9]{64}$/.test(String(record.scope_hash || ""))
+    || !/^[a-f0-9]{64}$/.test(String(record.snapshot_version || ""))
+    || !/^[a-f0-9]{64}$/.test(String(record.selection_event_hash || ""))
+    || !["single", "multiple", "range", "all"].includes(String(record.selection_mode || ""))
+    || !Array.isArray(record.selected)
+    || record.selected.length < 1
+    || record.selected.length > MEMO_SEARCH_SELECTION_MAX_DELETE_ITEMS
+    || !Number.isFinite(Date.parse(String(record.created_at || "")))
+    || !Number.isFinite(Date.parse(String(record.expires_at || "")))
+  ) return null;
+  const selected = record.selected.map((candidate) => ({
+    position: Number(candidate?.position),
+    memo_id: String(candidate?.memo_id || ""),
+    summary: String(candidate?.summary || ""),
+  }));
+  if (
+    selected.some((candidate) => (
+      !Number.isSafeInteger(candidate.position)
+      || candidate.position < 1
+      || !MEMO_ID_PATTERN.test(candidate.memo_id)
+      || !candidate.summary
+      || candidate.summary !== safeMemoSearchSummary(candidate.summary)
+    ))
+    || new Set(selected.map((candidate) => candidate.memo_id)).size !== selected.length
+  ) return null;
+  return { ...record, selected };
+}
+
+function memoDeleteConfirmationPrompt(record = {}) {
+  const lines = (record.selected || []).map((candidate) => `${candidate.position}. ${safeMemoSearchSummary(candidate.summary)}`).join("\n");
+  return `即將刪除 ${record.selected.length} 筆備忘錄：\n${lines}\n請回覆「確認刪除」或「取消」。`;
+}
+
+function createMemoDeleteConfirmationRecord(acceptanceRecord = {}, nowMs = Date.now()) {
+  const selected = Array.isArray(acceptanceRecord.normalized_command?.selection_candidates)
+    ? acceptanceRecord.normalized_command.selection_candidates.map((candidate) => ({
+        position: Number(candidate?.position),
+        memo_id: String(candidate?.memo_id || ""),
+        summary: safeMemoSearchSummary(candidate?.summary || ""),
+      }))
+    : [];
+  const snapshotExpiryMs = Date.parse(String(acceptanceRecord.normalized_command?.selection_snapshot_expires_at || ""));
+  const expiresAtMs = Math.min(
+    Number(nowMs) + (MEMO_DELETE_CONFIRMATION_TTL_SECONDS * 1000),
+    Number.isFinite(snapshotExpiryMs) ? snapshotExpiryMs : Number(nowMs),
+  );
+  const record = {
+    schema: MEMO_DELETE_CONFIRMATION_SCHEMA,
+    status: "waiting_confirmation",
+    scope_hash: String(acceptanceRecord.selection_scope_hash || ""),
+    snapshot_version: String(acceptanceRecord.normalized_command?.selection_snapshot_version || ""),
+    selection_event_hash: String(acceptanceRecord.safe_event_hash || ""),
+    selection_mode: String(acceptanceRecord.normalized_command?.selection_mode || ""),
+    selected,
+    created_at: new Date(nowMs).toISOString(),
+    expires_at: new Date(expiresAtMs).toISOString(),
+    consumed_by_event_hash: "",
+    consumed_at: "",
+  };
+  return parseMemoDeleteConfirmationRecord(JSON.stringify(record));
+}
+
+async function writeMemoDeleteConfirmation(kv, key, record) {
+  if (!kv?.put || !key || !record) throw new Error("missing_memo_delete_confirmation_store");
+  const remainingSeconds = Math.max(1, Math.ceil((Date.parse(record.expires_at) - Date.now()) / 1000));
+  await kv.put(key, JSON.stringify(record), { expirationTtl: Math.min(MEMO_DELETE_CONFIRMATION_TTL_SECONDS, remainingSeconds) });
+  return { ok: true };
+}
+
+function memoDeleteConfirmationFailureReply(reason = "") {
+  if (reason === "confirmation_cancelled") return MEMO_DELETE_CONFIRMATION_CANCELLED_REPLY_TEXT;
+  if (reason === "confirmation_expired") return MEMO_DELETE_CONFIRMATION_EXPIRED_REPLY_TEXT;
+  if (["confirmation_snapshot_changed", "confirmation_candidate_changed"].includes(reason)) {
+    return MEMO_DELETE_CONFIRMATION_CHANGED_REPLY_TEXT;
+  }
+  if (reason === "confirmation_already_consumed") return MEMO_DELETE_CONFIRMATION_CONSUMED_REPLY_TEXT;
+  return MEMO_DELETE_CONFIRMATION_MISSING_REPLY_TEXT;
+}
+
+export async function handleMemoDeleteConfirmationAcceptance({
+  event,
+  normalized,
+  confirmationAction,
+  env,
+  ctx,
+  correlationId,
+  ackStartedAt,
+  ackBudgetMs,
+}) {
+  if (!env.IDEMPOTENCY_KV) {
+    logWebhookAckTiming(correlationId, "memo_confirmation_idempotency_failed", ackStartedAt, 503, "missing_binding");
+    return durableAckUnavailableResponse("missing_IDEMPOTENCY_KV");
+  }
+  const syntheticCommand = memoCommandResult(MEMO_DELETE_OPERATION, true, {
+    selection_mode: "confirmation",
+    selection_indices: [],
+  });
+  const identity = await buildMemoDeterministicIdentity(event, syntheticCommand, env, normalized.received_at);
+  if (!identity.ok) return durableAckUnavailableResponse("memo_confirmation_identity_unavailable");
+  const acceptanceKey = memoCreateAcceptanceKey(identity.safe_event_hash);
+  const confirmationKey = memoDeleteConfirmationKey(identity.selection_scope_hash);
+  const selectionKey = memoSearchSelectionKey(identity.selection_scope_hash);
+  const getBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "get" });
+  const read = await runBoundedAckOperation(
+    () => Promise.all([
+      env.IDEMPOTENCY_KV.get(acceptanceKey),
+      env.IDEMPOTENCY_KV.get(confirmationKey),
+      env.IDEMPOTENCY_KV.get(selectionKey),
+    ]),
+    { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: getBudgetMs, ctx },
+  );
+  if (!read.ok) return durableAckUnavailableResponse("memo_confirmation_state_unavailable");
+  const existing = parseMemoCreateAcceptanceRecord(read.value?.[0]);
+  if (existing && memoCreateRecordBlocksDispatch(existing)) {
+    logWebhookAckTiming(correlationId, "memo_confirmation_duplicate_ack", ackStartedAt, 200, "none");
+    return jsonResponse({ status: "accepted", reason: "duplicate_line_event", route: "memo_delete_confirmation" }, 200);
+  }
+
+  const pending = parseMemoDeleteConfirmationRecord(read.value?.[1]);
+  const snapshot = parseMemoSearchSelectionSnapshot(read.value?.[2]);
+  const nowMs = Date.now();
+  let rejectReason = "";
+  if (!pending || pending.scope_hash !== identity.selection_scope_hash) rejectReason = "confirmation_missing";
+  else if (pending.status === "consumed") rejectReason = "confirmation_already_consumed";
+  else if (pending.status === "cancelled") rejectReason = "confirmation_cancelled";
+  else if (Date.parse(pending.expires_at) <= nowMs) rejectReason = "confirmation_expired";
+  else if (!snapshot || snapshot.scope_hash !== pending.scope_hash || snapshot.search_event_hash !== pending.snapshot_version) {
+    rejectReason = "confirmation_snapshot_changed";
+  } else if (pending.selected.some((candidate) => {
+    const current = snapshot.candidates[candidate.position - 1];
+    return !current || current.memo_id !== candidate.memo_id || current.summary !== candidate.summary;
+  })) rejectReason = "confirmation_candidate_changed";
+
+  if (confirmationAction === "cancel" && !rejectReason) rejectReason = "confirmation_cancelled";
+  if (confirmationAction !== "confirm" && confirmationAction !== "cancel") rejectReason = "confirmation_missing";
+
+  const selected = pending?.selected || [];
+  const memoCommand = memoCommandResult(MEMO_DELETE_OPERATION, !rejectReason && confirmationAction === "confirm", {
+    selection_mode: pending?.selection_mode || "single",
+    selection_indices: selected.map((candidate) => candidate.position),
+  }, rejectReason);
+  const acceptanceRecord = createMemoCreateAcceptanceRecord({
+    identity,
+    memoCommand,
+    replyToken: normalized.reply_token,
+    correlationId,
+  });
+  acceptanceRecord.normalized_command = {
+    selection_mode: pending?.selection_mode || "single",
+    selection_indices: selected.map((candidate) => candidate.position),
+    memo_ids: selected.map((candidate) => candidate.memo_id),
+    selection_candidates: selected,
+    selection_snapshot_version: pending?.snapshot_version || "",
+    confirmation_status: !rejectReason && confirmationAction === "confirm" ? "consumed" : "rejected",
+  };
+
+  if (confirmationAction === "cancel" && pending?.status === "waiting_confirmation") {
+    await writeMemoDeleteConfirmation(env.IDEMPOTENCY_KV, confirmationKey, {
+      ...pending,
+      status: "cancelled",
+      consumed_by_event_hash: identity.safe_event_hash,
+      consumed_at: new Date(nowMs).toISOString(),
+    });
+  }
+
+  if (!rejectReason && confirmationAction === "confirm") {
+    const consumed = {
+      ...pending,
+      status: "consumed",
+      consumed_by_event_hash: identity.safe_event_hash,
+      consumed_at: new Date(nowMs).toISOString(),
+    };
+    await writeMemoCreateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, acceptanceRecord);
+    await writeMemoDeleteConfirmation(env.IDEMPOTENCY_KV, confirmationKey, consumed);
+    const readback = parseMemoDeleteConfirmationRecord(await env.IDEMPOTENCY_KV.get(confirmationKey));
+    if (!readback || readback.status !== "consumed" || readback.consumed_by_event_hash !== identity.safe_event_hash) {
+      acceptanceRecord.input_valid = false;
+      acceptanceRecord.reject_reason = "confirmation_consume_readback_failed";
+      acceptanceRecord.normalized_command.confirmation_status = "rejected";
+      await writeMemoCreateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, acceptanceRecord);
+    }
+  } else {
+    await writeMemoCreateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, acceptanceRecord);
+  }
+
+  queueBackgroundTask(ctx, processAcceptedMemoDeterministicInBackground({
+    event,
+    memoCommand,
+    env,
+    acceptanceKey,
+    validationAcceptanceRecord: acceptanceRecord.input_valid === false ? acceptanceRecord : null,
+  }));
+  logWebhookAckTiming(correlationId, "memo_confirmation_ack", ackStartedAt, 200, "none");
+  return jsonResponse({ status: "accepted", route: "memo_delete_confirmation", resumed: false }, 200);
 }
 
 function memoDeleteUsesSearchSelection(memoCommand = {}) {
@@ -1402,20 +1722,26 @@ export function parseMemoSearchSelectionSnapshot(raw = "") {
     || !Array.isArray(snapshot.candidates)
     || snapshot.candidates.length > MEMO_SEARCH_SELECTION_MAX_CANDIDATES
     || snapshot.page_size !== MEMO_SEARCH_PAGE_SIZE
-    || snapshot.delete_all_limit !== 0
+    || snapshot.delete_all_limit !== MEMO_SEARCH_SELECTION_MAX_DELETE_ITEMS
   ) return null;
   const candidates = snapshot.candidates.map((candidate) => ({
     position: Number(candidate?.position),
     memo_id: String(candidate?.memo_id || ""),
+    summary: String(candidate?.summary || ""),
   }));
   const total = Number(snapshot.total);
   const pageCount = Number(snapshot.page_count);
   const currentPage = Number(snapshot.current_page);
   const expectedPageCount = total === 0 ? 0 : Math.ceil(total / MEMO_SEARCH_PAGE_SIZE);
-  const expectedDeleteAllEligible = false;
+  const expectedDeleteAllEligible = candidates.length > 0
+    && candidates.length <= MEMO_SEARCH_SELECTION_MAX_DELETE_ITEMS;
   if (
-    snapshot.candidates.some((candidate) => !candidate || Object.keys(candidate).sort().join("|") !== "memo_id|position")
-    || candidates.some((candidate, index) => candidate.position !== index + 1 || !MEMO_ID_PATTERN.test(candidate.memo_id))
+    snapshot.candidates.some((candidate) => !candidate || Object.keys(candidate).sort().join("|") !== "memo_id|position|summary")
+    || candidates.some((candidate, index) => (
+      candidate.position !== index + 1
+      || !MEMO_ID_PATTERN.test(candidate.memo_id)
+      || (candidate.summary && candidate.summary !== safeMemoSearchSummary(candidate.summary))
+    ))
     || new Set(candidates.map((candidate) => candidate.memo_id)).size !== candidates.length
     || total !== candidates.length
     || pageCount !== expectedPageCount
@@ -1445,10 +1771,15 @@ export function resolveMemoSearchSelectionDelete({
     return { ok: false, reason: "selection_snapshot_empty", memo_ids: [] };
   }
 
-  if (!["single", "multiple", "range"].includes(selectionMode)) {
-    return { ok: false, reason: selectionMode === "all" ? "selection_all_not_supported" : "invalid_selection_mode", memo_ids: [] };
+  if (!["single", "multiple", "range", "all"].includes(selectionMode)) {
+    return { ok: false, reason: "invalid_selection_mode", memo_ids: [] };
   }
-  const rawIndices = Array.isArray(selectionIndices) ? selectionIndices.map((value) => Number(value)) : [];
+  if (selectionMode === "all" && !snapshot.delete_all_eligible) {
+    return { ok: false, reason: "selection_too_large", memo_ids: [] };
+  }
+  const rawIndices = selectionMode === "all"
+    ? snapshot.candidates.map((candidate) => candidate.position)
+    : Array.isArray(selectionIndices) ? selectionIndices.map((value) => Number(value)) : [];
   const indices = [...new Set(rawIndices)].sort((left, right) => left - right);
   if (indices.length === 0) {
     return { ok: false, reason: "empty_selection", memo_ids: [] };
@@ -1459,11 +1790,16 @@ export function resolveMemoSearchSelectionDelete({
   if (indices.length > MEMO_SELECTION_WORKER_BATCH_REQUEST_LIMIT) {
     return { ok: false, reason: "selection_batch_limit_unverified", memo_ids: [] };
   }
+  if (indices.some((index) => !snapshot.candidates[index - 1].summary)) {
+    return { ok: false, reason: "selection_summary_unavailable", memo_ids: [] };
+  }
   return {
     ok: true,
     reason: "",
     memo_ids: indices.map((index) => snapshot.candidates[index - 1].memo_id),
+    candidates: indices.map((index) => snapshot.candidates[index - 1]),
     snapshot_version: snapshot.search_event_hash,
+    snapshot_expires_at: snapshot.expires_at,
   };
 }
 
@@ -1507,6 +1843,10 @@ async function persistMemoSearchSelectionSnapshot(kv, record = {}, parsedResult 
     return { ok: false, reason: "invalid_selection_snapshot_identity" };
   }
   const createdAt = new Date(nowMs).toISOString();
+  const summaryByPosition = new Map((parsedResult.page_candidates || []).map((candidate) => [
+    Number(candidate.position),
+    safeMemoSearchSummary(candidate.summary),
+  ]));
   const snapshot = {
     schema: MEMO_SEARCH_SELECTION_SCHEMA,
     scope_hash: scopeHash,
@@ -1514,13 +1854,15 @@ async function persistMemoSearchSelectionSnapshot(kv, record = {}, parsedResult 
     candidates: (parsedResult.candidates || []).map((candidate) => ({
       position: Number(candidate.position),
       memo_id: String(candidate.memo_id || ""),
+      summary: summaryByPosition.get(Number(candidate.position)) || "",
     })),
     total: Number(parsedResult.total || 0),
     page_size: MEMO_SEARCH_PAGE_SIZE,
     page_count: Number(parsedResult.page_count || 0),
     current_page: Number(parsedResult.page || 0),
-    delete_all_eligible: false,
-    delete_all_limit: 0,
+    delete_all_eligible: Number(parsedResult.total || 0) > 0
+      && Number(parsedResult.total || 0) <= MEMO_SEARCH_SELECTION_MAX_DELETE_ITEMS,
+    delete_all_limit: MEMO_SEARCH_SELECTION_MAX_DELETE_ITEMS,
     created_at: createdAt,
     expires_at: new Date(nowMs + (MEMO_SEARCH_SELECTION_TTL_SECONDS * 1000)).toISOString(),
   };
@@ -1548,7 +1890,18 @@ async function persistMemoSearchPageSnapshotCurrentPage(kv, record = {}, parsedP
   if (expectedIds.length !== actualIds.length || expectedIds.some((memoId, index) => memoId !== actualIds[index])) {
     throw new Error("page_snapshot_candidate_mismatch");
   }
-  const next = { ...snapshot, current_page: parsedPage.page };
+  const pageSummaryByPosition = new Map(parsedPage.page_candidates.map((candidate) => [
+    Number(candidate.position),
+    safeMemoSearchSummary(candidate.summary),
+  ]));
+  const next = {
+    ...snapshot,
+    current_page: parsedPage.page,
+    candidates: snapshot.candidates.map((candidate) => ({
+      ...candidate,
+      summary: pageSummaryByPosition.get(candidate.position) || candidate.summary,
+    })),
+  };
   await kv.put(memoSearchSelectionKey(scopeHash), JSON.stringify(next), {
     expiration: Math.floor(Date.parse(snapshot.expires_at) / 1000),
   });
@@ -1686,9 +2039,11 @@ export function workerHealth(env = {}) {
         delete: MEMO_DELETE_COMMAND_PREFIX,
       },
       selection_delete_commands: [
-        "刪除第 N 筆備忘錄",
-        "刪除第 N、N 筆備忘錄",
-        "刪除第 N 到第 N 筆備忘錄",
+        "備忘錄刪除：第1筆",
+        "刪除第1筆",
+        "備忘錄刪除：第一筆到第五筆",
+        "刪除第1、3、5筆",
+        "備忘錄刪除：這次搜尋的全部",
       ],
       selection_scope: "latest_search_snapshot_same_hashed_actor_conversation",
       selection_storage: "IDEMPOTENCY_KV",
@@ -1699,7 +2054,14 @@ export function workerHealth(env = {}) {
       page_size: MEMO_SEARCH_PAGE_SIZE,
       page_commands: ["查看下一頁", "查看上一頁", "查看第 N 頁"],
       page_readback: "protected_n8n_exact_snapshot_ids_in_order",
-      delete_all_supported: false,
+      delete_all_supported: true,
+      delete_all_scope: "current_unexpired_same_actor_search_snapshot_only",
+      confirmation_required: true,
+      confirmation_phrase: MEMO_DELETE_CONFIRM_COMMAND,
+      confirmation_cancel_phrase: MEMO_DELETE_CANCEL_COMMAND,
+      confirmation_ttl_seconds: MEMO_DELETE_CONFIRMATION_TTL_SECONDS,
+      confirmation_single_consumption: true,
+      confirmation_actor_snapshot_candidate_bound: true,
       parser_supported_selection_items: MEMO_SEARCH_SELECTION_MAX_DELETE_ITEMS,
       worker_batch_request_items: MEMO_SELECTION_WORKER_BATCH_REQUEST_LIMIT,
       live_execution_authorized_selection_items: MEMO_SELECTION_LIVE_EXECUTION_AUTHORIZED_LIMIT,
@@ -1711,7 +2073,7 @@ export function workerHealth(env = {}) {
       path_from_user_input: false,
       ai_agent_bypass: true,
       durable_acceptance_before_200: true,
-      background_n8n_dispatch: true,
+      background_n8n_dispatch: "after_consumed_confirmation_only",
       callback_auth: "header_auth_only",
       callback_payload_credential_absent: true,
       monitor_or_wake_dependency: false,

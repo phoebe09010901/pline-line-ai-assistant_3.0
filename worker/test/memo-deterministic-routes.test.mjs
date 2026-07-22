@@ -178,13 +178,13 @@ test("modify route requires the exact safe memo id and preserves valid new conte
   }
 });
 
-test("delete route accepts only one complete safe memo id", () => {
+test("delete route never requires a public internal memo id", () => {
   assert.deepEqual(parseMemoDeterministicCommand(`備忘錄刪除： ${MEMO_ID} `), {
     matched: true,
-    valid: true,
+    valid: false,
     intent: "memo_delete",
-    fields: { memo_id: MEMO_ID, selection_mode: "memo_id" },
-    reason: "",
+    fields: {},
+    reason: "delete_requires_search_selection",
   });
   for (const input of [
     "備忘錄刪除：memo-abcd",
@@ -196,7 +196,7 @@ test("delete route accepts only one complete safe memo id", () => {
   }
 });
 
-test("legal search, modify, and delete bypass AI and dispatch only normalized safe payloads", async () => {
+test("legal search and modify bypass AI and dispatch only normalized safe payloads", async () => {
   const originalFetch = globalThis.fetch;
   try {
     const cases = [
@@ -217,12 +217,6 @@ test("legal search, modify, and delete bypass AI and dispatch only normalized sa
         text: `備忘錄修改：${MEMO_ID}｜更新後內容`,
         intent: "memo_modify",
         fields: { memo_id: MEMO_ID, new_content: "更新後內容" },
-      },
-      {
-        eventId: "memo-delete-route",
-        text: `備忘錄刪除：${MEMO_ID}`,
-        intent: "memo_delete",
-        fields: { memo_id: MEMO_ID },
       },
     ];
 
@@ -311,23 +305,32 @@ test("health describes only the safe deterministic command contract and no publi
       delete: "備忘錄刪除：",
     },
     selection_delete_commands: [
-      "刪除第 N 筆備忘錄",
-      "刪除第 N、N 筆備忘錄",
-      "刪除第 N 到第 N 筆備忘錄",
+      "備忘錄刪除：第1筆",
+      "刪除第1筆",
+      "備忘錄刪除：第一筆到第五筆",
+      "刪除第1、3、5筆",
+      "備忘錄刪除：這次搜尋的全部",
     ],
     selection_scope: "latest_search_snapshot_same_hashed_actor_conversation",
     selection_storage: "IDEMPOTENCY_KV",
     selection_ttl_seconds: 600,
     selection_full_candidate_limit: 100,
-    selection_snapshot_schema: "pline-v3-memo-search-selection/v2",
+    selection_snapshot_schema: "pline-v3-memo-search-selection/v3",
     selection_snapshot_sensitive_payload: false,
     page_size: 10,
     page_commands: ["查看下一頁", "查看上一頁", "查看第 N 頁"],
     page_readback: "protected_n8n_exact_snapshot_ids_in_order",
-    delete_all_supported: false,
+    delete_all_supported: true,
+    delete_all_scope: "current_unexpired_same_actor_search_snapshot_only",
+    confirmation_required: true,
+    confirmation_phrase: "確認刪除",
+    confirmation_cancel_phrase: "取消",
+    confirmation_ttl_seconds: 600,
+    confirmation_single_consumption: true,
+    confirmation_actor_snapshot_candidate_bound: true,
     parser_supported_selection_items: 5,
     worker_batch_request_items: 5,
-    live_execution_authorized_selection_items: 1,
+    live_execution_authorized_selection_items: 5,
     n8n_batch_archive_update_required: true,
     selection_batch_fail_closed_above_authorized_limit: true,
     search_reply_numbered_without_memo_id: true,
@@ -336,7 +339,7 @@ test("health describes only the safe deterministic command contract and no publi
     path_from_user_input: false,
     ai_agent_bypass: true,
     durable_acceptance_before_200: true,
-    background_n8n_dispatch: true,
+    background_n8n_dispatch: "after_consumed_confirmation_only",
     callback_auth: "header_auth_only",
     callback_payload_credential_absent: true,
     monitor_or_wake_dependency: false,

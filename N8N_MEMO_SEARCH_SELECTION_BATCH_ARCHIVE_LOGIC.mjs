@@ -177,7 +177,8 @@ export function validateBatchDeleteRequest(input = {}) {
   const selectionMode = String(input.selection_mode || '');
   const valid = input.intent === 'memo_delete'
     && input.delete_scope === 'memo_search_selection_snapshot'
-    && ['single', 'multiple', 'range'].includes(selectionMode)
+    && ['single', 'multiple', 'range', 'all'].includes(selectionMode)
+    && input.confirmation_status === 'consumed'
     && /^[a-f0-9]{64}$/.test(safeEventHash)
     && /^[a-f0-9]{64}$/.test(snapshotVersion)
     && validIso(receivedAt)
@@ -194,6 +195,7 @@ export function validateBatchDeleteRequest(input = {}) {
     operation: 'memo_delete',
     delete_scope: String(input.delete_scope || ''),
     selection_mode: selectionMode,
+    confirmation_status: valid ? 'consumed' : '',
     selection_snapshot_version: valid ? snapshotVersion : '',
     safe_event_hash: valid ? safeEventHash : '',
     received_at: valid ? receivedAt : '',
@@ -409,8 +411,8 @@ export function aggregateBatchArchive(request = {}, itemResults = []) {
     success_count: completed,
     failed_count: failed,
     reply_text: allCompleted
-      ? `好，已幫妳封存 ${completed} 筆備忘錄。`
-      : `這次已完成 ${completed} 筆，另有 ${failed} 筆未完成。`,
+      ? `這次預計刪除 ${request.memo_ids.length} 筆，成功 ${completed} 筆，未刪除 0 筆。`
+      : `這次預計刪除 ${request.memo_ids.length} 筆，成功 ${completed} 筆，未刪除 ${failed} 筆；基於安全檢查，未完成的項目沒有繼續處理。`,
   };
 }
 
@@ -433,6 +435,6 @@ export function aggregateBatchArchiveFailure(request = {}, item = {}) {
     success_count: completed,
     failed_count: failed,
     failure_class: String(item.failure_class || status || 'failed').replace(/[^a-z0-9_:-]/gi, '').slice(0, 64) || 'failed',
-    reply_text: `這次已完成 ${completed} 筆，另有 ${failed} 筆未完成。`,
+    reply_text: `這次預計刪除 ${request.memo_ids.length} 筆，成功 ${completed} 筆，未刪除 ${failed} 筆；基於安全檢查，未完成的項目沒有繼續處理。`,
   };
 }

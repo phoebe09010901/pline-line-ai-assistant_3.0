@@ -1,0 +1,39 @@
+{
+  "workflow_id": "kcMcBQos5cxsnWU1",
+  "workflow_name": "PLine｜菲比智能客服｜V3 最小 AI Agent",
+  "current_version": "6eb2ddaa-10ff-459b-9d0c-a51674db3717",
+  "published_version": "a88e1361-c4fa-4f44-b79b-a0fe9c44e7c2",
+  "node_count": 137,
+  "connection_source_count": 136,
+  "credential_node_count": 31,
+  "current_vs_published_changed_nodes": [
+    "OpenAI Chat Model"
+  ],
+  "current_vs_local_changed_nodes": [
+    "Dropbox Batch Delete Active Download",
+    "Dropbox Batch Delete Archive Readback",
+    "Dropbox Search Page Readback",
+    "Memo Batch Delete Active Extract",
+    "Memo Batch Delete Active Metadata Check",
+    "Memo Batch Delete Aggregate",
+    "Memo Batch Delete Archive Extract",
+    "Memo Batch Delete Execute Expand",
+    "Memo Batch Delete Expand",
+    "Memo Batch Delete Failure Aggregate",
+    "Memo Batch Delete Inventory Decision",
+    "Memo Batch Delete Loop",
+    "Memo Batch Delete Move Check",
+    "Memo Batch Delete Pre Move Guard",
+    "Memo Batch Delete Preflight Aggregate",
+    "Memo Batch Delete Validate",
+    "Memo Batch Delete Verify Readback",
+    "Memo Search Page Aggregate",
+    "Memo Search Page Extract JSON",
+    "Normalize Input",
+    "OpenAI Chat Model"
+  ],
+  "connection_current_vs_published_changed": false,
+  "connection_current_vs_local_changed": false,
+  "import_candidate_uses_local_contract": true,
+  "import_candidate_preserves_live_credential_references": true
+}

@@ -1,5 +1,19 @@
 # PROJECT_STATE
 
+## MEMO_DELETE_SELECTION_REPAIR_GATE — 2026-07-22 Asia/Taipei
+
+- `MEMO_CORE_STATUS=completed_and_frozen`.
+- Fixed lane: `PLine｜N8N｜n8n workflow 調整`; Gate: `MEMO_DELETE_SELECTION_REPAIR_GATE`.
+- Root cause was the Worker parser and actor/snapshot/selection-confirmation state boundary; Search already retained canonical Memo references while public Delete could not safely resolve displayed sequence numbers.
+- Worker now supports single, multi-select, Chinese-number range, and bounded current-search-all against the same actor snapshot; TTL is 600 seconds and confirmation is actor/snapshot/candidate bound and single-consumption.
+- n8n workflow `kcMcBQos5cxsnWU1` is Published as `271add4b-71e9-4f06-82c6-38f7d1ca765c`; Worker deployment is `5f707990-60df-4331-8598-d6716da56e11`.
+- Formal LINE marker `MEMO-DELETE-GATE-20260722-093823-R1` passed Create/Search, single, multi, range, current-search-all, cancel, confirmation resend, active absence, archive readback, and success-final exactly-once.
+- Marker terminal state: active 0 / archive 6; duplicate delete 0; duplicate success final 0; permanent delete 0.
+- Existing formal Memo effect 0; the retired MBATCH fixture was not touched; credential change 0; Calendar effect 0.
+- Memo deterministic routes do not depend on Monitor; final Monitor state is STOPPED / UNLOADED.
+- Full evidence: `MEMO_DELETE_SELECTION_REPAIR_GATE_REPORT_20260722.md`.
+- Next safe action: keep Memo Core frozen; Calendar remains paused and requires a separate explicit Gate.
+
 ## Memo Core Completion Milestone — 2026-07-21 22:52 Asia/Taipei
 
 - Milestone marker: `MEMO_CORE_COMPLETED_20260721_2252`.

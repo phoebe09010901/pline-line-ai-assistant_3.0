@@ -1,0 +1,10 @@
+{
+  "workflow_name": "PLine｜菲比智能客服｜V3 最小 AI Agent",
+  "workflow_id": "kcMcBQos5cxsnWU1",
+  "published_version": "271add4b-71e9-4f06-82c6-38f7d1ca765c",
+  "nodes": 137,
+  "connection_sources": 136,
+  "credential_node_count": 31,
+  "local_semantic_parity": "PASS",
+  "credential_values_stored": false
+}

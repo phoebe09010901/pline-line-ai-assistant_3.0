@@ -1,0 +1,20 @@
+{
+  "target": "菲比智能客服",
+  "marker": "MEMO-DELETE-GATE-20260722-093823-R1",
+  "fixtures_created": 6,
+  "single_archived": 1,
+  "multi_archived": 2,
+  "range_archived": 2,
+  "current_search_all_archived": 1,
+  "cancel_delete_effect": 0,
+  "confirmation_resend_delete_effect": 0,
+  "active_readback_matches": 0,
+  "archive_readback_matches": 6,
+  "valid_archived_status": 6,
+  "duplicate_delete_count": 0,
+  "duplicate_success_final_count": 0,
+  "permanent_delete_count": 0,
+  "existing_formal_memo_effect_count": 0,
+  "calendar_effect_count": 0,
+  "result": "PASS"
+}

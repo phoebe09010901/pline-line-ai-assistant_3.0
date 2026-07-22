@@ -30,7 +30,7 @@ assert.equal(Object.hasOwn(workflow, 'versionId'), false);
 
 const allowedChanged = new Set([
   ...workflow.nodes.filter((node) => node.name.includes('Batch Delete')).map((node) => node.name),
-  'Memo CRUD Finalizer Payload', 'Memo CRUD Finalizer Callback', 'Memo CRUD Callback Result',
+  'Normalize Input', 'Memo CRUD Finalizer Payload', 'Memo CRUD Finalizer Callback', 'Memo CRUD Callback Result',
 ]);
 for (const [name, node] of baselineNodes) {
   if (name === 'Dropbox Batch Delete Reentry Readback' || name === 'Memo Batch Delete Reentry Extract') continue;
@@ -67,8 +67,8 @@ for (const type of ['openAiApi', 'dropboxOAuth2Api', 'httpHeaderAuth']) {
 }
 
 const code = (name) => nodes.get(name).parameters.jsCode;
-assert.match(code('Memo Batch Delete Validate'), /\['single','multiple','range'\]/);
-assert.doesNotMatch(code('Memo Batch Delete Validate'), /'all'/);
+assert.match(code('Memo Batch Delete Validate'), /\['single','multiple','range','all'\]/);
+assert.match(code('Memo Batch Delete Validate'), /confirmation_status==='consumed'/);
 assert.match(code('Memo Batch Delete Validate'), /memoIds\.length<=5/);
 assert.match(code('Memo Batch Delete Validate'), /new Set\(memoIds\)\.size===memoIds\.length/);
 
@@ -93,7 +93,8 @@ assert.doesNotMatch(code('Memo Batch Delete Prepare Archive'), /return \[\{json:
 assert.match(code('Memo Batch Delete Preflight Aggregate'), /items\.length===request\.memo_ids\.length/);
 assert.match(code('Memo Batch Delete Failure Aggregate'), /success_count:completed/);
 assert.match(code('Memo Batch Delete Aggregate'), /success_count:count/);
-assert.match(code('Memo Batch Delete Aggregate'), /已幫您刪除/);
+assert.match(code('Memo Batch Delete Aggregate'), /預計刪除.*成功.*未刪除 0 筆/);
+assert.match(code('Memo Batch Delete Failure Aggregate'), /基於安全檢查/);
 
 const update = nodes.get('Dropbox Batch Delete Conditional Archive State');
 assert.equal(update.parameters.url, 'https://content.dropboxapi.com/2/files/upload');
@@ -114,11 +115,13 @@ assert.match(finalizer, /failure_class:failureClass/);
 assert.match(nodes.get('Memo CRUD Finalizer Callback').parameters.body, /success_count/);
 assert.match(nodes.get('Memo CRUD Finalizer Callback').parameters.body, /failure_class/);
 
-assert.deepEqual(workflow.memo_search_selection_batch_archive_contract.selection_modes, ['single', 'multiple', 'range']);
+assert.deepEqual(workflow.memo_search_selection_batch_archive_contract.selection_modes, ['single', 'multiple', 'range', 'all']);
 assert.equal(workflow.memo_search_selection_batch_archive_contract.batch_limit, 5);
 assert.equal(workflow.memo_search_selection_batch_archive_contract.preflight_all_or_none, true);
 assert.equal(workflow.memo_search_selection_batch_archive_contract.stop_after_first_execution_failure, true);
-assert.equal(workflow.memo_search_selection_batch_archive_contract.delete_all_supported, false);
+assert.equal(workflow.memo_search_selection_batch_archive_contract.delete_all_supported, true);
+assert.equal(workflow.memo_search_selection_batch_archive_contract.confirmation_required, true);
+assert.equal(workflow.memo_search_selection_batch_archive_contract.confirmation_status, 'consumed');
 
 const serialized = JSON.stringify(workflow.nodes.filter((node) => node.name.includes('Batch Delete')));
 for (const forbidden of ['reply_token', 'replyToken', 'user_id', 'finalize_token', 'raw payload', 'calendar_', 'codex_delegate', 'crud_task:v1']) {

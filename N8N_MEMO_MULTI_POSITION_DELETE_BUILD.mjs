@@ -55,18 +55,27 @@ const nativeDropbox = (name, id, parameters, position, extra = {}) => ({
 });
 
 const validate = byName('Memo Batch Delete Validate');
+const normalize = byName('Normalize Input');
+if (!normalize?.parameters?.jsCode) throw new Error('Normalize Input code missing');
+if (!normalize.parameters.jsCode.includes("confirmation_status: String(body.confirmation_status || '')")) {
+  normalize.parameters.jsCode = normalize.parameters.jsCode.replace(
+    "selection_mode: String(body.selection_mode || ''),",
+    "selection_mode: String(body.selection_mode || ''),\n    confirmation_status: String(body.confirmation_status || ''),",
+  );
+}
 validate.parameters.jsCode = lines([
   "const input=$json||{}; const delivery=input.reply_delivery_reference&&typeof input.reply_delivery_reference==='object'?input.reply_delivery_reference:{};",
   "const memoIds=Array.isArray(input.memo_ids)?input.memo_ids.map((value)=>String(value||'')):[]; const mode=String(input.selection_mode||'');",
   "const receivedAt=String(input.received_at||''); const safe=/^[A-Za-z0-9][A-Za-z0-9._:-]{7,191}$/;",
-  "const valid=input.intent==='memo_delete'&&input.delete_scope==='memo_search_selection_snapshot'&&['single','multiple','range'].includes(mode)",
+  "const valid=input.intent==='memo_delete'&&input.delete_scope==='memo_search_selection_snapshot'&&['single','multiple','range','all'].includes(mode)",
+  "&&input.confirmation_status==='consumed'",
   "&&/^[a-f0-9]{64}$/.test(String(input.safe_event_hash||''))&&/^[a-f0-9]{64}$/.test(String(input.selection_snapshot_version||''))",
   "&&/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?Z$/.test(receivedAt)&&Number.isFinite(Date.parse(receivedAt))",
   "&&memoIds.length>=1&&memoIds.length<=5&&memoIds.every((memoId)=>/^memo-[a-f0-9]{64}$/.test(memoId))&&new Set(memoIds).size===memoIds.length",
   "&&String(delivery.callback_url||'')==='https://pline-v3-test-line-gateway.phy4175.workers.dev/test/memo-finalize'",
   "&&safe.test(String(delivery.task_id||''))&&safe.test(String(delivery.request_id||''));",
   "return [{json:{valid,continue_operation:valid,intent:'memo_delete',operation:'memo_delete',delete_scope:String(input.delete_scope||''),selection_mode:mode,",
-  "selection_snapshot_version:valid?String(input.selection_snapshot_version):'',safe_event_hash:valid?String(input.safe_event_hash):'',received_at:valid?receivedAt:'',",
+  "selection_snapshot_version:valid?String(input.selection_snapshot_version):'',confirmation_status:valid?'consumed':'',safe_event_hash:valid?String(input.safe_event_hash):'',received_at:valid?receivedAt:'',",
   "memo_ids:valid?memoIds:[],callback_url:valid?String(delivery.callback_url):'',task_id:valid?String(delivery.task_id):'',request_id:valid?String(delivery.request_id):'',",
   "status:valid?'validated':'failed',failure_class:valid?'':'invalid_batch_contract',reply_text:valid?'':'無法確認要封存的備忘錄項目。'}}];",
 ]);
@@ -181,13 +190,13 @@ const failureAggregate = codeNode('Memo Batch Delete Failure Aggregate', 'pline-
   "const completed=Number.isSafeInteger(index)&&index>=0&&index<request.memo_ids.length?index:0; const failed=Math.max(1,request.memo_ids.length-completed);",
   "const status=['conflict','readback_failed'].includes(String(item.status||''))?String(item.status):'failed'; const failure=String(item.failure_class||status||'failed').replace(/[^a-z0-9_:-]/gi,'').slice(0,64)||'failed';",
   "return [{json:{intent:'memo_delete',operation:'memo_delete',status,memo_id:'',memo_ids:request.memo_ids,callback_url:request.callback_url,task_id:request.task_id,request_id:request.request_id,",
-  "success_count:completed,completed_count:completed,failed_count:failed,failure_class:failure,reply_text:'這次已完成 '+completed+' 筆，另有 '+failed+' 筆未完成。'}}];",
+  "success_count:completed,completed_count:completed,failed_count:failed,failure_class:failure,reply_text:'這次預計刪除 '+request.memo_ids.length+' 筆，成功 '+completed+' 筆，未刪除 '+failed+' 筆；基於安全檢查，未完成的項目沒有繼續處理。'}}];",
 ]), [-3376, 2860], 'runOnceForEachItem');
 const successAggregate = codeNode('Memo Batch Delete Aggregate', 'pline-v3-memo-batch-delete-aggregate', lines([
   "const request=$('Memo Batch Delete Validate').first().json||{}; const preflight=$('Memo Batch Delete Preflight Aggregate').first().json||{}; const count=request.memo_ids.length;",
   "const duplicate=Array.isArray(preflight.preflight_items)&&preflight.preflight_items.length===count&&preflight.preflight_items.every((item)=>item.item_action==='duplicate');",
   "return [{json:{intent:'memo_delete',operation:'memo_delete',status:duplicate?'duplicate':'completed',memo_id:'',memo_ids:request.memo_ids,callback_url:request.callback_url,task_id:request.task_id,request_id:request.request_id,",
-  "success_count:count,completed_count:count,failed_count:0,failure_class:'',reply_text:'已幫您刪除 '+count+' 筆備忘錄。'}}];",
+  "success_count:count,completed_count:count,failed_count:0,failure_class:'',reply_text:'這次預計刪除 '+count+' 筆，成功 '+count+' 筆，未刪除 0 筆。'}}];",
 ]), [-3376, 3160], 'runOnceForAllItems');
 
 const replace = [
@@ -261,10 +270,12 @@ connect('Memo Batch Delete Aggregate', 'Memo CRUD Finalizer Payload');
 workflow.workflow_version_name = 'Memo Multi-Position Delete Preflight and Aggregate';
 workflow.memo_search_selection_batch_archive_contract = {
   ...(workflow.memo_search_selection_batch_archive_contract || {}),
-  selection_modes: ['single', 'multiple', 'range'], batch_limit: 5,
+  selection_modes: ['single', 'multiple', 'range', 'all'], batch_limit: 5,
   preflight_all_or_none: true, preflight_readback_required: true,
   stop_after_first_execution_failure: true, resume_intermediate_archived_source: true,
-  callback_once_after_batch_terminal: true, delete_all_supported: false,
+  callback_once_after_batch_terminal: true, delete_all_supported: true,
+  delete_all_scope: 'current_unexpired_same_actor_search_snapshot_only',
+  confirmation_required: true, confirmation_status: 'consumed',
 };
 delete workflow.versionId;
 delete workflow.activeVersionId;

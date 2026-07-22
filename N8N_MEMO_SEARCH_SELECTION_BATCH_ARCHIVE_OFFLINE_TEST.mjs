@@ -39,6 +39,7 @@ function request(overrides = {}) {
     received_at: RECEIVED_AT,
     delete_scope: 'memo_search_selection_snapshot',
     selection_mode: 'multiple',
+    confirmation_status: 'consumed',
     selection_snapshot_version: 'b'.repeat(64),
     memo_ids: IDS.slice(0, 1),
     reply_delivery_reference: {
@@ -77,9 +78,9 @@ test('15-result search returns a complete ordered snapshot and only page one sum
   assert.match(result.reply_text, /\n10\. 摘要/);
 });
 
-test('selection batch authorization accepts one through five for only safe parser modes', () => {
+test('selection batch authorization accepts confirmed one through five for safe parser modes', () => {
   assert.equal(MEMO_SELECTION_BATCH_LIMIT, 5);
-  for (const mode of ['single', 'multiple', 'range']) {
+  for (const mode of ['single', 'multiple', 'range', 'all']) {
     const memoIds = IDS.slice(0, mode === 'single' ? 1 : 5);
     const validated = validateBatchDeleteRequest(request({ selection_mode: mode, memo_ids: memoIds }));
     assert.equal(validated.valid, true, mode);
@@ -88,7 +89,7 @@ test('selection batch authorization accepts one through five for only safe parse
     assert.equal(blocked.valid, false, `${mode}:2`);
     assert.deepEqual(expandBatchDeleteRequest(blocked), []);
   }
-  assert.equal(validateBatchDeleteRequest(request({ selection_mode: 'all' })).valid, false);
+  assert.equal(validateBatchDeleteRequest(request({ confirmation_status: '' })).valid, false);
   assert.equal(validateBatchDeleteRequest(request({ selection_mode: '' })).valid, false);
 });
 
@@ -122,6 +123,7 @@ test('three-item list completes only after full preflight and aggregates one suc
   assert.equal(result.status, 'completed');
   assert.equal(result.success_count, 3);
   assert.equal(result.failed_count, 0);
+  assert.equal(result.reply_text, '這次預計刪除 3 筆，成功 3 筆，未刪除 0 筆。');
   assert.match(result.reply_text, /3 筆/);
   assert.equal(result.reply_text.includes('memo-'), false);
 });
@@ -157,6 +159,7 @@ test('mid-batch failure stops the remaining suffix and returns a safe aggregate'
   assert.equal(failed.status, 'conflict');
   assert.equal(failed.success_count, 2);
   assert.equal(failed.failed_count, 3);
+  assert.equal(failed.reply_text, '這次預計刪除 5 筆，成功 2 筆，未刪除 3 筆；基於安全檢查，未完成的項目沒有繼續處理。');
   assert.equal(failed.failure_class, 'conditional_revision_conflict');
   assert.equal(failed.reply_text.includes('memo-'), false);
 });
