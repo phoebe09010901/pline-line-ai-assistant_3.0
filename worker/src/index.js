@@ -1,3 +1,20 @@
+import {
+  CALENDAR_ALIAS,
+  CALENDAR_CREATE_TTL_SECONDS,
+  CALENDAR_TIMEZONE,
+  buildCalendarCreateIdentity,
+  buildCalendarCreateN8nPayload,
+  calendarAcceptanceKey,
+  calendarFailureReplyText,
+  calendarRecordIsFinal,
+  calendarSuccessReplyText,
+  calendarValidationReplyText,
+  createCalendarAcceptanceRecord,
+  parseCalendarAcceptanceRecord,
+  parseCalendarCreateCommand,
+  validateCalendarCreateN8nResult,
+} from "./calendar-create.js";
+
 const WORKER_NAME = "pline-v3-test-line-gateway";
 const RUNTIME_KV_NAME = "pline-v3-test-runtime";
 const IDEMPOTENCY_KV_NAME = "pline-v3-test-idempotency";
@@ -198,6 +215,7 @@ export async function handleLineWebhook(request, env, ctx = {}) {
   }
 
   const normalized = normalizeForN8n(event);
+  const calendarCommand = parseCalendarCreateCommand(event.message?.text || "", normalized.received_at);
   const memoCommand = parseMemoDeterministicCommand(event.message?.text || "");
   const memoDeleteConfirmation = parseMemoDeleteConfirmationCommand(event.message?.text || "");
   const adminResult = await runBoundedAckOperation(
@@ -231,6 +249,19 @@ export async function handleLineWebhook(request, env, ctx = {}) {
       status: "accepted",
       reason: "admin_bootstrap_captured",
       request_id: normalized.request_id,
+    });
+  }
+
+  if (calendarCommand.matched) {
+    return handleCalendarCreateAcceptance({
+      event,
+      normalized,
+      calendarCommand,
+      env,
+      ctx,
+      correlationId,
+      ackStartedAt,
+      ackBudgetMs,
     });
   }
 
@@ -329,6 +360,198 @@ export async function handleLineWebhook(request, env, ctx = {}) {
     reply_mode: LINE_REPLY_MODE,
     resumed,
   });
+}
+
+async function writeCalendarAcceptance(kv, key, record) {
+  await kv.put(key, JSON.stringify(record), { expirationTtl: CALENDAR_CREATE_TTL_SECONDS });
+  return record;
+}
+
+async function updateCalendarAcceptance(kv, key, updater) {
+  const current = parseCalendarAcceptanceRecord(await kv.get(key));
+  if (!current) return null;
+  const next = updater(current);
+  await writeCalendarAcceptance(kv, key, next);
+  return next;
+}
+
+export async function handleCalendarCreateAcceptance({
+  event,
+  normalized,
+  calendarCommand,
+  env,
+  ctx,
+  correlationId,
+  ackStartedAt,
+  ackBudgetMs,
+}) {
+  if (!env.IDEMPOTENCY_KV || !env.RUNTIME_KV) {
+    logWebhookAckTiming(correlationId, "calendar_idempotency_failed", ackStartedAt, 503, "missing_binding");
+    return durableAckUnavailableResponse("missing_calendar_kv_binding");
+  }
+  const identity = await buildCalendarCreateIdentity(event);
+  if (!identity.ok) {
+    logWebhookAckTiming(correlationId, "calendar_identity_failed", ackStartedAt, 503, identity.reason);
+    return durableAckUnavailableResponse("calendar_identity_unavailable");
+  }
+  const acceptanceKey = calendarAcceptanceKey(identity.safe_event_hash);
+  const readBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "get" });
+  if (readBudgetMs <= 0) return durableAckUnavailableResponse("idempotency_get_unavailable");
+  const acceptanceRead = await runBoundedAckOperation(
+    () => env.IDEMPOTENCY_KV.get(acceptanceKey),
+    { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: readBudgetMs, ctx },
+  );
+  if (!acceptanceRead.ok) return durableAckUnavailableResponse("idempotency_get_unavailable");
+
+  let record = parseCalendarAcceptanceRecord(acceptanceRead.value);
+  let readbackOnly = false;
+  const resumed = Boolean(record);
+  if (acceptanceRead.value && !record) {
+    return jsonResponse({ status: "rejected", reason: "calendar_acceptance_conflict" }, 409);
+  }
+  if (record) {
+    if (record.actor_hash !== identity.actor_hash || record.event_reference !== identity.event_reference) {
+      return jsonResponse({ status: "rejected", reason: "calendar_identity_conflict" }, 409);
+    }
+    if (calendarRecordIsFinal(record)) {
+      return jsonResponse({ status: "accepted", reason: "duplicate_line_event", route: "calendar_create" }, 200);
+    }
+    readbackOnly = ["dispatching", "dispatch_ambiguous", "dispatched", "reply_attempt_pending"].includes(record.status);
+  } else {
+    record = createCalendarAcceptanceRecord({
+      identity,
+      command: calendarCommand,
+      replyToken: normalized.reply_token,
+      receivedAt: normalized.received_at,
+    });
+    const writeBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "put" });
+    if (writeBudgetMs <= 0) return durableAckUnavailableResponse("durable_acceptance_unavailable");
+    const acceptanceWrite = await runBoundedAckOperation(
+      () => writeCalendarAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, record),
+      { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: writeBudgetMs, ctx, keepAlive: true },
+    );
+    if (!acceptanceWrite.ok) return durableAckUnavailableResponse("durable_acceptance_unavailable");
+  }
+
+  queueBackgroundTask(ctx, processAcceptedCalendarCreateInBackground({
+    event,
+    env,
+    acceptanceKey,
+    readbackOnly,
+  }));
+  logWebhookAckTiming(correlationId, resumed ? "calendar_redelivery_resume_ack" : "calendar_message_ack", ackStartedAt, 200, "none");
+  return jsonResponse({ status: "accepted", route: "calendar_create", resumed }, 200);
+}
+
+async function deliverCalendarReplyOnce(env, acceptanceKey, userId, replyText, terminalStatus) {
+  const record = parseCalendarAcceptanceRecord(await env.IDEMPOTENCY_KV.get(acceptanceKey));
+  if (!record) return { ok: false, reason: "missing_calendar_acceptance" };
+  if (calendarRecordIsFinal(record)) {
+    return { ok: true, status: "already_finalized", duplicate_blocked: true, replied: false, pushed: false };
+  }
+  if (record.status === "reply_attempt_pending") {
+    return { ok: false, status: "delivery_ambiguous", duplicate_blocked: true, replied: false, pushed: false };
+  }
+  await writeCalendarAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, {
+    ...record,
+    status: "reply_attempt_pending",
+    reply_attempt_count: 1,
+    updated_at: new Date().toISOString(),
+  });
+  const delivery = await deliverFinalReplyFirst({
+    env,
+    deliveryKey: `calendar-final:${record.safe_event_hash}`,
+    userId,
+    replyToken: record.reply_token,
+    replyReceivedAt: record.received_at,
+    replyText,
+  });
+  const finalStatus = delivery.ok
+    ? terminalStatus
+    : delivery.status === "delivery_ambiguous"
+      ? "delivery_ambiguous"
+      : delivery.status === "reply_unavailable"
+        ? "reply_unavailable"
+        : "reply_rejected";
+  await writeCalendarAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, {
+    ...record,
+    status: finalStatus,
+    delivery_status: delivery.status,
+    reply_token: "",
+    final_completed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  return delivery;
+}
+
+async function processAcceptedCalendarCreateInBackground({ event, env, acceptanceKey, readbackOnly = false }) {
+  const markAsReadTask = markLineMessageAsReadForEvent(event, { request_id: "", gate_marker: "" }, env);
+  const record = parseCalendarAcceptanceRecord(await env.IDEMPOTENCY_KV.get(acceptanceKey));
+  if (!record) {
+    await Promise.allSettled([markAsReadTask]);
+    return { ok: false, reason: "missing_calendar_acceptance" };
+  }
+  if (!record.input_valid) {
+    const result = await deliverCalendarReplyOnce(
+      env,
+      acceptanceKey,
+      event.source?.userId || "",
+      calendarValidationReplyText(record.reject_reason),
+      "final_failed",
+    );
+    await Promise.allSettled([markAsReadTask]);
+    return result;
+  }
+
+  await updateCalendarAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, (current) => ({
+    ...current,
+    status: "dispatching",
+    dispatch_started_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }));
+  let n8nResult = null;
+  if (!readbackOnly) {
+    try {
+      n8nResult = await callN8nWebhook(buildCalendarCreateN8nPayload(record), env);
+    } catch {
+      n8nResult = null;
+    }
+  }
+  const initialValidation = n8nResult?.ok
+    ? validateCalendarCreateN8nResult(n8nResult.body, record)
+    : { ok: false, reason: "calendar_dispatch_unavailable" };
+  if (!initialValidation.ok) {
+    await updateCalendarAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, (current) => ({
+      ...current,
+      status: "dispatch_ambiguous",
+      updated_at: new Date().toISOString(),
+    }));
+    try {
+      n8nResult = await callN8nWebhook(buildCalendarCreateN8nPayload(record, { readbackOnly: true }), env);
+    } catch {
+      n8nResult = null;
+    }
+  }
+
+  const validated = n8nResult?.ok
+    ? validateCalendarCreateN8nResult(n8nResult.body, record)
+    : { ok: false, reason: "calendar_dispatch_unavailable" };
+  await updateCalendarAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, (current) => ({
+    ...current,
+    status: validated.ok ? "dispatched" : "dispatch_ambiguous",
+    readback_verified: validated.ok,
+    duplicate: validated.ok ? validated.duplicate : false,
+    updated_at: new Date().toISOString(),
+  }));
+  const result = await deliverCalendarReplyOnce(
+    env,
+    acceptanceKey,
+    event.source?.userId || "",
+    validated.ok ? calendarSuccessReplyText(record) : calendarFailureReplyText(),
+    validated.ok ? "final_completed" : "final_failed",
+  );
+  await Promise.allSettled([markAsReadTask]);
+  return result;
 }
 
 function boundedTestNumber(value, fallback) {
@@ -2089,6 +2312,23 @@ export function workerHealth(env = {}) {
       search_reply_numbered_without_memo_id: true,
       max_length: MEMO_SUCCESS_REPLY_MAX_LENGTH,
       finalizer_gates: ["header_auth", "task_state", "completed_status", "exactly_once"],
+    },
+    calendar_create: {
+      command_prefix: "行事曆新增：",
+      route_mode: "deterministic_before_ai_classification",
+      calendar_alias: CALENDAR_ALIAS,
+      timezone: CALENDAR_TIMEZONE,
+      confirmation_required_for_complete_input: false,
+      clarification_zero_calendar_write: true,
+      duration_limit_minutes: 10080,
+      state_ttl_seconds: CALENDAR_CREATE_TTL_SECONDS,
+      deterministic_event_reference: true,
+      external_writer: "n8n_google_calendar_create_with_terminal_readback",
+      retry_policy: "readback_before_any_recreate",
+      final_exactly_once: true,
+      internal_identifiers_in_line_final: false,
+      memo_dependency: false,
+      monitor_or_wake_dependency: false,
     },
     codex_monitor: {
       name: CODEX_MONITOR_NAME,

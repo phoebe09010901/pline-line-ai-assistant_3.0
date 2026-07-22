@@ -1,0 +1,16 @@
+{
+  "workflow_id": "kcMcBQos5cxsnWU1",
+  "workflow_name": "PLine｜菲比智能客服｜V3 最小 AI Agent",
+  "published_version": "a04a52cf-52bf-42f2-a40d-8cea2d8e2709",
+  "before_nodes": 144,
+  "after_nodes": 144,
+  "after_connection_sources": 143,
+  "new_node_count": 0,
+  "calendar_node_count": 3,
+  "calendar_alias": "authorized_test",
+  "calendar_backend": "primary",
+  "alias_mapping": "authorized_test_to_credential_primary",
+  "existing_credential_references_preserved": true,
+  "calendar_credential_reference_present": true,
+  "secrets_exported": false
+}

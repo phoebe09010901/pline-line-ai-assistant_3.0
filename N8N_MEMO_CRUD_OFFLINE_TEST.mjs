@@ -423,10 +423,13 @@ check('revision source uses native Dropbox OAuth and revision writes use exact p
   }
 });
 
-check('workflow has no generic CRUD Calendar codex delegation or prohibited route', () => {
-  for (const forbidden of ['google_calendar_direct', 'crud_task:v1', 'codex_delegate', 'memo_crud_route', 'calendar_create']) {
+check('workflow has no legacy generic CRUD or Calendar codex delegation', () => {
+  for (const forbidden of ['google_calendar_direct', 'crud_task:v1', 'codex_delegate', 'memo_crud_route']) {
     assert.equal(serialized.includes(forbidden), false, forbidden);
   }
+  const calendarRoute = nodes.get('Calendar Create Route');
+  assert.equal(calendarRoute.type, 'n8n-nodes-base.if');
+  assert.equal(workflow.connections['Calendar Create Route'].main[1][0].node, 'Memo Search Page Route');
 });
 
 check('workflow callback uses Header Auth reference contract and secret-free body', () => {
