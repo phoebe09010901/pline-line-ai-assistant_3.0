@@ -1,5 +1,51 @@
 # CODEX_NOTES
 
+## Calendar Core stable release checkpoint — 2026-07-22
+
+- Fixed RELEASE thread/turn: `019f8709-63a4-7482-b804-ddea7b8940cf` / `019f892c-0152-7353-8449-85879a394064`.
+- Checkpoint: `checkpoints/CALENDAR_CORE_STABLE_CHECKPOINT_20260722.md`.
+- Current runtime: n8n `kcMcBQos5cxsnWU1` / `bc6483ba-7c06-43db-91b9-88d53c07dfe3`; Worker `5aba605e-a31d-4a4f-b9ed-de301895f2cd`, active 100%.
+- Bare Delete offline test now defaults to `N8N_WORKFLOW_PLINE_V3_CALENDAR_DELETE_TOMBSTONE_FIX_LUNA_IMPORT.json`; test-source correction only.
+- Closeout regression: Worker 130/130; Create 18/18; Search 38/38; Update PASS; Delete PASS; Delete readback 6/6; Memo 85/85.
+- Saved snapshot is credential-redacted and checksum-verified. OpenAI stays `gpt-5.6-luna`, temperature `0.1`, credential reference unchanged.
+- Never upgrade isolated retry proof: `RETRY_EVIDENCE_LIMITATION: formal_same_webhook_live_replay_not_executed`.
+- Resume only after branch/tag/dirty-scope verification. Calendar Core is frozen; later features need a separate Gate.
+
+## Calendar Delete final false-negative implementation fix - 2026-07-22
+
+- Gate remains `CALENDAR_DELETE_GATE`; task `implementation_fix`; failure round 1; formal re-test pending.
+- Root cause confirmed in deployed execution: successful Google Delete produced an event tombstone with `status=cancelled`; the n8n verifier only recognized 404/not-found and therefore returned `calendar_delete_readback_still_exists`.
+- Repair is bounded to Delete precheck/absence mapping. Cancelled tombstone is success only after `safe_to_delete` or explicit `readback_only`; initial missing/changed candidate remains fail closed.
+- Workflow diff: two Delete nodes, zero connection changes, 161/160 retained. Frozen OpenAI core, credentials, primary backend, Memo and Create/Search/Update are preserved.
+- Local proof: readback 6/6, Worker 130/130, Calendar/Memo regression PASS; implementation external effects 0.
+- Published `bc6483ba-7c06-43db-91b9-88d53c07dfe3`; Worker unchanged, Deploy not required. No commit/push/checkpoint.
+- Fresh formal A/B handoff: existing `PLine｜TEST` thread `019f8709-3547-71f1-93e6-2807a4b3f51d`.
+- `RETRY_EVIDENCE_LIMITATION: formal_same_webhook_live_replay_not_executed`.
+- Full evidence: `CALENDAR_DELETE_GATE_FALSE_NEGATIVE_FIX_REPORT_20260722.md`.
+
+## Calendar Delete Gate implementation - 2026-07-22
+
+- Gate: `CALENDAR_DELETE_GATE`; status `implementation_completed_pending_formal_test`; Calendar Core checkpoint not started.
+- Delete is candidate-bound to the current actor Search snapshot or a single unique natural target, with TTL 600, public summary, explicit confirmation/cancel, original-candidate guard, terminal absence readback and readback-only ambiguous recovery.
+- Unbounded Calendar deletion is disabled. No result, ambiguity, actor mismatch, expiry, snapshot/candidate change and missing candidate fail closed with effect 0.
+- Calendar/Memo shorthand routing was isolated after one repair cycle; fresh integrated Worker 130/130 and Delete focused 12/12 PASS.
+- OpenAI core remains user-controlled and preserved: `gpt-5.6-luna`, temperature `0.1`, existing credential reference. Calendar backend remains primary/default.
+- n8n Published `29a73423-26f1-41dd-9398-bc2a62ed77b9`; Worker deployment `5aba605e-a31d-4a4f-b9ed-de301895f2cd`; local n8n Calendar/Memo regressions PASS.
+- Formal LINE Delete TEST is pending. No Calendar fixture, external Calendar mutation, LINE send, commit, push or checkpoint occurred here.
+- `RETRY_EVIDENCE_LIMITATION: formal_same_webhook_live_replay_not_executed`.
+- Full evidence: `CALENDAR_DELETE_GATE_IMPLEMENTATION_REPORT_20260722.md`.
+
+## Calendar Update Gate implementation - 2026-07-22
+
+- Gate: `CALENDAR_UPDATE_GATE`; status `implementation_completed_pending_formal_test`.
+- Update is candidate-bound to the current actor Search snapshot or a single unique keyword lookup, with TTL 600, explicit confirmation/cancel, original-candidate guard and readback-only ambiguous recovery.
+- Supported changes: title, date, start, end, duration and location. Public replies expose no internal identifiers.
+- OpenAI core remains user-controlled and preserved: `gpt-5.6-luna`, temperature `0.1`, existing credential reference. Calendar backend remains primary/default.
+- n8n Published `a2002f5e-1cbf-40a8-b79c-0c6a514d3a3f`; Worker deployment `d12384eb-98a2-416a-bc7a-3fb9707e3891`; local integrated regression 118/118 PASS.
+- Formal LINE Update TEST is pending. No Calendar fixture, LINE send, commit, push, Delete implementation or checkpoint occurred here.
+- `RETRY_EVIDENCE_LIMITATION: formal_same_webhook_live_replay_not_executed`.
+- Full evidence: `CALENDAR_UPDATE_GATE_IMPLEMENTATION_REPORT_20260722.md`.
+
 ## Calendar Create Follow-up Continuity Fix - 2026-07-22
 
 - Gate: `CALENDAR_CREATE_FOLLOWUP_CONTINUITY_FIX`; implementation Worker turn `019f8858-871f-78c0-b829-92ecad131282`; fresh TEST turn `019f8872-1f35-7de2-9b0b-16e78d93c7a5`.
@@ -22,6 +68,47 @@
 - Google was not part of the Gate and is `not_applicable`; no Google event or Calendar Gate was opened.
 - Known ingress hardening note remains recorded separately: shared-secret rejection occurs in `Normalize Input`, not at an HTTP 401/403 Webhook boundary. This checkpoint did not modify that behavior.
 - Final states: Memo Delete completed, Memo Core completed/frozen, checkpoint recorded, Calendar Create queued/not started.
+
+## Memo Delete Selection Repair Gate - 2026-07-22
+
+- Root cause: Search already retained canonical Memo references, but the public Worker Delete parser/state boundary did not map the displayed sequence forms to the same snapshot and had no active confirmation state.
+- Implemented in the formal local Worker after Orchestrator authorization: the five required natural commands, same actor/snapshot/candidate binding, TTL 600, `確認刪除` / `取消`, single consumption, and fail-closed handling for expiry, actor mismatch, snapshot/candidate change, and redelivery.
+- `全部` means only the current unexpired same-actor search snapshot and remains capped at five; it never means the whole database. Without a valid snapshot the exact clarification is returned.
+- The local n8n contract accepts only canonical references from a consumed Worker confirmation and retains revision-aware archive-only processing, terminal active-absence/archive readback, duplicate suppression, and safe partial-result reporting.
+- Local proof: Worker 71/71; isolated contract 12/12; n8n/Memo 139/139; static workflow 137/136 PASS. External writes and formal Memo effects: zero.
+- Calendar DOC/progress was preserved and Calendar remained paused/not started. No Publish, Deploy, live LINE delete, credential operation, commit, or push.
+
+
+## FIX Naming Sync - 2026-07-22
+
+- Task: `PLine｜FIX｜小修正與命名同步`.
+- Canonical project name: `菲比 LINE 智能助理_03`; routing prefix: `PLine`.
+- Current state remains `STOP_AFTER_CLOSEOUT` at `MEMO_CORE_COMPLETED_20260721`; there is no active Gate.
+- Changed only current naming/status entrypoints. Historical task names, Documents-root evidence, and dated failure snapshots were preserved.
+- Git branch and upstream both resolve to `9fdf119bd999de51a05f958d7712e0e6d2e09bda`; existing dirty files belong to prior work and were preserved.
+- No runtime, external-service, TEST, Calendar, deploy, stage, commit, or push action occurred.
+- Evidence: `FIX_EVIDENCE_NAMING_STATUS_SYNC_20260722.md`.
+
+## ARCHIVE Historical Build Record Synchronization - 2026-07-22
+
+- Task: `PLine｜ARCHIVE｜歷史建置紀錄`.
+- Current archived checkpoint: `MEMO_CORE_COMPLETED_N8N_LOCAL_RECHECK_BLOCKED_CALENDAR_NOT_STARTED`.
+- Retained the 2026-07-20 `BLOCKED_INCOMPLETE` state as a dated historical checkpoint; it is superseded by later evidence, not erased.
+- Registered the authoritative-root alignment as PASS from existing FIX evidence and the 2026-07-21 Memo Core completion from terminal closeout evidence.
+- Memo Create, keyword Search, Search All, Modify, single-position Delete, comma-list Delete, range Delete, natural user-visible finals, Reply-first, bounded ACK, idempotency, exactly-once, duplicate safety, revision-aware update, and archive-only deletion are PASS as recorded in existing evidence. This ARCHIVE task did not rerun them.
+- The 2026-07-22 local n8n checkpoint remains separately `BLOCKED` on inbound Webhook Header Auth alignment and the `Structured Output` `/s+/g` semantic defect. Current offline contracts, Worker non-retired tests, and Monitor tests pass; live n8n state was not checked.
+- Calendar and all new Gates remain `NOT_STARTED`; `刪除全部` remains unsupported; Previous Page / specific-page navigation has no fresh-live PASS recorded.
+- Scope stayed documentation-only. `EXTERNAL_ACTIONS=none`; `TESTS_RUN=none`; `DEPLOY_ACTIONS=none`; `COMMIT_PUSH=no`; `FORMAL_ALLOWED=false`; `OLD_PROJECT_ACCESS=none`.
+- Target files were already dirty before this sync: `PLine_ARCHIVE_HISTORY.md` was untracked, while `CHANGELOG.md` and `CODEX_NOTES.md` were modified. Existing content was preserved.
+
+## N8N Local Recheck - 2026-07-22
+
+- Task: `PLine｜N8N｜n8n workflow 調整`; interpreted under the Dropbox `_03` default as local evidence registration only.
+- Workflow snapshot `00451c520cb72b7c44ed7d981a48027b8b18becf988a395493653e70ff1e4680` passed current structure and topology checks at 137 nodes / 136 connection sources.
+- Current N8N offline contracts passed; Worker non-retired suites passed 69/69; Monitor suites passed 31/31.
+- Overall local verdict remains `BLOCKED`: inbound Webhook Header Auth is not established by the local export, and `Structured Output` still contains the semantic `/s+/g` defect.
+- The closeout-retired generic Worker suite remains `NOT_APPLICABLE`; do not restore `enqueueCrudTask`. Earlier 127-node and 135-node snapshot validators are historical, not current acceptance.
+- Live n8n state, draft/published parity, credentials, executions, LINE, Dropbox runtime effects, and user-visible results were not checked. Evidence: `N8N_EVIDENCE_LOCAL_RECHECK_20260722.md`.
 
 ## Memo Core Completion Milestone - 2026-07-21 22:52 Asia/Taipei
 
@@ -47,9 +134,30 @@
 - The earlier failed test prefix `MBATCH-20260721221413-7874` remains active 5 / archive 0 and requires a separately authorized cleanup decision.
 - Closeout did not Publish, Deploy, send LINE, start Monitor, change credentials, or modify runtime logic.
 
+## FIX Project Root Alignment - 2026-07-20
+
+- Task: `PLine｜FIX｜小修正與命名同步`.
+- Selected the current Dropbox `_03` workspace as the single authoritative local project root.
+- Aligned Worker, Monitor, Wrangler configuration, launchd plist, and unit-test path assertions to that root.
+- Kept `/Users/phoebe/Documents/...` references inside historical evidence/history unchanged.
+- Local verification passed, including both unit suites and Monitor health path readback; the prior `EPERM` / `BLOCKED_PATH_SCOPE` cause is resolved in FIX, while TEST still owns the acceptance rerun.
+- Monitor unit tests now remove only the exact synthetic idea files returned by the current run; the verification rerun left no matching test artifact in the project root.
+- No deploy, live smoke, LINE send, n8n/Cloudflare/KV mutation, FORMAL action, commit, or push was performed.
+- Evidence: `FIX_EVIDENCE_PROJECT_ROOT_ALIGNMENT_20260720.md`.
+
+## ARCHIVE Historical Build Record - 2026-07-20
+
+- Task: `PLine｜ARCHIVE｜歷史建置紀錄`.
+- Added `PLine_ARCHIVE_HISTORY.md`; updated companion entries in `CHANGELOG.md` and this file.
+- Historical endpoint recorded from existing `_03` evidence: RELEASE-01 and minimal dual-path completion, Dropbox exactly-once, Codex minimal closed loop, durable monitor recovery, T3002 Chat-off auto-read, and T3101/T3102 content-aware natural finals.
+- Current checkpoint remains `BLOCKED_INCOMPLETE`: Worker local tests pass, but monitor path alignment, local n8n checks, fresh Memo A6 terminal confirmation, Calendar CRUD, and latest final LINE delivery acceptance are not complete in this workspace copy.
+- Historical PASS does not imply current online health, final delivery, or user-visible acceptance; none was rechecked by this ARCHIVE task.
+- `PROJECT_STATE.md` names the original Documents path, while this task ran in the Dropbox path; path parity was not asserted.
+- Active workspace is not a Git repository. `COMMIT_PUSH=no`; `EXTERNAL_ACTIONS=none`; `FORMAL_ALLOWED=false`; `OLD_PROJECT_ACCESS=none`.
+
 ## Worker Role
 
-This thread is `PLine03｜FIX｜Worker 與程式`.
+This task is `PLine｜FIX｜小修正與命名同步`.
 
 Allowed work:
 
@@ -807,6 +915,17 @@ Date: 2026-07-18
 - Evidence: `TEST_EVIDENCE_LINE_READ_CHAT_OFF_T3002.md`.
 - Next: RELEASE can perform git status, secret scan, commit, and push if the controller is ready.
 
+## 2026-07-20 Local TEST Acceptance Recheck
+
+- Current Dropbox root is not a Git repository.
+- Worker syntax/unit tests and n8n workflow JSON parse passed.
+- Monitor syntax passed, but its unit suite attempted to write the hard-coded Documents-root smoke path and stopped with `EPERM`.
+- Monitor health still said `ready` while reporting Documents-root project/smoke/heartbeat paths; record this as `READY_BUT_PATH_MISALIGNED`, not PASS.
+- No external or live action was run and no historical marker was resent.
+- Verdict: `TEST ACCEPTANCE: BLOCKED_INCOMPLETE`.
+- Evidence: `TEST_EVIDENCE_LOCAL_ACCEPTANCE_20260720.md`.
+- Next: FIX aligns the authoritative project root; TEST reruns locally before any separately authorized live smoke.
+
 ## N8N idea_create Natural Reply
 
 - Target workflow only: `kcMcBQos5cxsnWU1`.
@@ -833,3 +952,12 @@ Date: 2026-07-18
 - Pending queues returned to `idea=0`, `codex=0`.
 - Evidence: `TEST_EVIDENCE_IDEA_CREATE_AI_NATURAL_FINAL_LIVE.md`.
 - Next: RELEASE can perform git status, secret scan, commit, and push if the controller is ready.
+## N8N Local Recheck — 2026-07-20
+
+- Scope was local recheck and evidence registration for workflow `kcMcBQos5cxsnWU1` only.
+- `N8N_JSON_STRUCTURE=PASS`: 8 unique nodes, complete connection targets, and valid Code syntax.
+- `N8N_LOCAL_HEADER_AUTH_ALIGNMENT=BLOCKED`: the local Webhook has no authentication or credential reference, while Code-level equality remains conditional on `$vars.N8N_SHARED_SECRET`.
+- `N8N_STRUCTURED_OUTPUT_SEMANTIC_CHECK=BLOCKED`: `sanitizeReply` uses `/s+/g`; no node-logic change was made in this evidence-only run.
+- Worker local tests passed. Monitor local tests were blocked because the copied monitor still writes to the old Documents project path.
+- No Save, Import, Publish, Activate, Execute, LINE, Cloudflare, external API, FORMAL, commit, or push action occurred.
+- Evidence: `N8N_EVIDENCE_LOCAL_RECHECK_20260720.md`.

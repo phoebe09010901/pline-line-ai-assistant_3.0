@@ -1,5 +1,21 @@
 # PLine Orchestrator State
 
+## Calendar Core stable checkpoint — 2026-07-22
+
+- Project/path: `菲比 LINE 智能助理_03` / `/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_03`
+- Fixed lane: `PLine｜RELEASE｜階段收尾與上線檢查`
+- Release thread/turn: `019f8709-63a4-7482-b804-ddea7b8940cf` / `019f892c-0152-7353-8449-85879a394064`
+- Checkpoint: `CALENDAR_CORE_STABLE_CHECKPOINT_20260722`; controller `STOP_AFTER_CHECKPOINT`; active Gate none
+- Create `completed`; follow-up/Search/Update/Delete `completed_with_retry_evidence_limitation`
+- `CALENDAR_CORE_STATUS=completed_and_frozen`; `CALENDAR_CHECKPOINT_STATUS=recorded`; `MEMO_CORE_STATUS=completed_and_frozen`
+- n8n workflow/Published: `kcMcBQos5cxsnWU1` / `bc6483ba-7c06-43db-91b9-88d53c07dfe3`
+- Worker: `5aba605e-a31d-4a4f-b9ed-de301895f2cd`, active 100%; final tombstone fix Worker changed no / deploy not required
+- OpenAI frozen: `gpt-5.6-luna`, temperature `0.1`, credential reference unchanged
+- Terminal boundary: Google readback PASS; bounded marker active 0; existing Calendar effect 0; Memo effect 0; duplicate LINE final 0; false-negative recurrence 0
+- `RETRY_EVIDENCE_LIMITATION: formal_same_webhook_live_replay_not_executed`
+- Artifact: `checkpoints/CALENDAR_CORE_STABLE_CHECKPOINT_20260722.md`
+- Resume: verify checkpoint commit, remote branch and `calendar-core-stable-20260722` tag; no new Calendar feature/OpenAI change without a separate Gate.
+
 ## Memo Core stable checkpoint — 2026-07-22
 
 - Project: `菲比 LINE 智能助理_03`

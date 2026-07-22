@@ -53,9 +53,13 @@ All components are `_03` TEST resources only.
 
 ## Current Status
 
-The current stable release marker is `MEMO_CORE_STABLE_CHECKPOINT_20260722`. It records the completed/frozen Memo Core after the formal Delete selection Gate, including the actual n8n Published version, Worker deployment, formal LINE/Dropbox evidence boundaries, one sanitized workflow snapshot/checksum, and the explicit distinction between current-search-all and prohibited whole-database Delete All. See `checkpoints/MEMO_CORE_STABLE_CHECKPOINT_20260722.md`. `CALENDAR_CREATE_GATE` is queued but not started.
+The current stable release marker is `CALENDAR_CORE_STABLE_CHECKPOINT_20260722`. It records completed/frozen Calendar Create, follow-up continuity, Search, Update and Delete after formal LINE/Google acceptance, including current Published and Worker identities, bounded cleanup, existing-data isolation, a sanitized snapshot/checksum, and the identical-webhook retry limitation. See `checkpoints/CALENDAR_CORE_STABLE_CHECKPOINT_20260722.md`. Calendar Core is frozen; no new Calendar feature starts here.
 
-The TEST-only minimal dual-path proof is complete. The current post-release TEST extension adds a fixed local Dropbox JSON save path for `idea_create`.
+The TEST-only minimal dual-path proof is complete. It remains the historical baseline for the current project.
+
+Memo Core was completed and frozen on 2026-07-21. Its accepted scope and archive-only limits are unchanged. Calendar Core subsequently completed its separately gated Create, follow-up, Search, Update and bounded confirmed Delete scope on 2026-07-22. See `MEMO_CORE_FREEZE_CHECKPOINT_20260721.md`, the Calendar checkpoint, and `ORCHESTRATOR.md` before resuming work.
+
+The final accepted Memo batch had five isolated fixtures, active 0 / archive 5, 9/9 expected user-visible LINE finals, Push 0, duplicate file/reply 0, and permanent delete 0. These are 2026-07-21 terminal acceptance results, not a claim that the current dirty local source tree still matches the accepted runtime.
 
 Dropbox idea JSON directory:
 

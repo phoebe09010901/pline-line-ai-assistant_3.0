@@ -19,6 +19,65 @@ import {
   parseCalendarPendingRecord,
   validateCalendarCreateN8nResult,
 } from "./calendar-create.js";
+import {
+  CALENDAR_SEARCH_TTL_SECONDS,
+  buildCalendarSearchIdentity,
+  buildCalendarSearchN8nPayload,
+  calendarSearchAcceptanceKey,
+  calendarSearchFailureReplyText,
+  calendarSearchRecordIsFinal,
+  calendarSearchReplyText,
+  calendarSearchSelectionReplyText,
+  calendarSearchSnapshotKey,
+  calendarSearchValidationReplyText,
+  createCalendarSearchAcceptanceRecord,
+  createCalendarSearchSnapshot,
+  parseCalendarSearchAcceptanceRecord,
+  parseCalendarSearchCommand,
+  parseCalendarSearchSelection,
+  parseCalendarSearchSnapshot,
+  validateCalendarSearchN8nResult,
+} from "./calendar-search.js";
+import {
+  CALENDAR_UPDATE_COMMAND_PREFIX,
+  CALENDAR_UPDATE_TTL_SECONDS,
+  applyCalendarUpdatePatch,
+  buildCalendarUpdateIdentity,
+  buildCalendarUpdateN8nPayload,
+  calendarUpdateAcceptanceKey,
+  calendarUpdateConfirmationReplyText,
+  calendarUpdatePendingKey,
+  calendarUpdateRecordIsFinal,
+  calendarUpdateReplyForReason,
+  calendarUpdateSuccessReplyText,
+  createCalendarUpdateAcceptanceRecord,
+  createCalendarUpdatePendingRecord,
+  mergeCalendarUpdatePatch,
+  parseCalendarUpdateAcceptanceRecord,
+  parseCalendarUpdateCommand,
+  parseCalendarUpdateContinuation,
+  parseCalendarUpdatePendingRecord,
+  validateCalendarUpdateN8nResult,
+} from "./calendar-update.js";
+import {
+  CALENDAR_DELETE_COMMAND_PREFIX,
+  CALENDAR_DELETE_TTL_SECONDS,
+  buildCalendarDeleteIdentity,
+  buildCalendarDeleteN8nPayload,
+  calendarDeleteAcceptanceKey,
+  calendarDeleteConfirmationReplyText,
+  calendarDeletePendingKey,
+  calendarDeleteRecordIsFinal,
+  calendarDeleteReplyForReason,
+  calendarDeleteSuccessReplyText,
+  createCalendarDeleteAcceptanceRecord,
+  createCalendarDeletePendingRecord,
+  parseCalendarDeleteAcceptanceRecord,
+  parseCalendarDeleteCommand,
+  parseCalendarDeleteContinuation,
+  parseCalendarDeletePendingRecord,
+  validateCalendarDeleteN8nResult,
+} from "./calendar-delete.js";
 
 const WORKER_NAME = "pline-v3-test-line-gateway";
 const RUNTIME_KV_NAME = "pline-v3-test-runtime";
@@ -222,6 +281,12 @@ export async function handleLineWebhook(request, env, ctx = {}) {
   const normalized = normalizeForN8n(event);
   const calendarCommand = parseCalendarCreateCommand(event.message?.text || "", normalized.received_at);
   const calendarContinuation = parseCalendarCreateContinuation(event.message?.text || "");
+  const calendarSearchCommand = parseCalendarSearchCommand(event.message?.text || "", normalized.received_at);
+  const calendarSearchSelection = parseCalendarSearchSelection(event.message?.text || "");
+  const calendarUpdateCommand = parseCalendarUpdateCommand(event.message?.text || "", normalized.received_at);
+  const calendarUpdateContinuation = parseCalendarUpdateContinuation(event.message?.text || "", normalized.received_at);
+  const calendarDeleteCommand = parseCalendarDeleteCommand(event.message?.text || "");
+  const calendarDeleteContinuation = parseCalendarDeleteContinuation(event.message?.text || "");
   const memoCommand = parseMemoDeterministicCommand(event.message?.text || "");
   const memoDeleteConfirmation = parseMemoDeleteConfirmationCommand(event.message?.text || "");
   const adminResult = await runBoundedAckOperation(
@@ -258,6 +323,64 @@ export async function handleLineWebhook(request, env, ctx = {}) {
     });
   }
 
+  const calendarDeleteRoute = await resolveCalendarDeleteRoute({
+    event,
+    normalized,
+    calendarDeleteCommand,
+    calendarDeleteContinuation,
+    env,
+    ctx,
+    ackStartedAt,
+    ackBudgetMs,
+  });
+  if (calendarDeleteRoute.unavailable) {
+    logWebhookAckTiming(correlationId, "calendar_delete_route_state_failed", ackStartedAt, 503, calendarDeleteRoute.reason);
+    return durableAckUnavailableResponse(calendarDeleteRoute.reason);
+  }
+  if (calendarDeleteRoute.matched) {
+    return handleCalendarDeleteAcceptance({
+      event,
+      normalized,
+      calendarDeleteCommand: calendarDeleteRoute.command,
+      calendarDeleteContinuation: calendarDeleteRoute.continuation,
+      identity: calendarDeleteRoute.identity,
+      env,
+      ctx,
+      correlationId,
+      ackStartedAt,
+      ackBudgetMs,
+    });
+  }
+
+  const calendarUpdateRoute = await resolveCalendarUpdateRoute({
+    event,
+    normalized,
+    calendarUpdateCommand,
+    calendarUpdateContinuation,
+    env,
+    ctx,
+    ackStartedAt,
+    ackBudgetMs,
+  });
+  if (calendarUpdateRoute.unavailable) {
+    logWebhookAckTiming(correlationId, "calendar_update_route_state_failed", ackStartedAt, 503, calendarUpdateRoute.reason);
+    return durableAckUnavailableResponse(calendarUpdateRoute.reason);
+  }
+  if (calendarUpdateRoute.matched) {
+    return handleCalendarUpdateAcceptance({
+      event,
+      normalized,
+      calendarUpdateCommand: calendarUpdateRoute.command,
+      calendarUpdateContinuation: calendarUpdateRoute.continuation,
+      identity: calendarUpdateRoute.identity,
+      env,
+      ctx,
+      correlationId,
+      ackStartedAt,
+      ackBudgetMs,
+    });
+  }
+
   const calendarRoute = await resolveCalendarCreateRoute({
     event,
     normalized,
@@ -278,6 +401,20 @@ export async function handleLineWebhook(request, env, ctx = {}) {
       normalized,
       calendarCommand: calendarRoute.command,
       identity: calendarRoute.identity,
+      env,
+      ctx,
+      correlationId,
+      ackStartedAt,
+      ackBudgetMs,
+    });
+  }
+
+  if (calendarSearchCommand.matched || calendarSearchSelection.matched) {
+    return handleCalendarSearchAcceptance({
+      event,
+      normalized,
+      calendarSearchCommand,
+      calendarSearchSelection,
       env,
       ctx,
       correlationId,
@@ -399,6 +536,620 @@ async function updateCalendarAcceptance(kv, key, updater) {
 async function deleteCalendarPending(kv, key) {
   await kv.delete(key);
   return true;
+}
+
+async function writeCalendarDeleteAcceptance(kv, key, record) {
+  await kv.put(key, JSON.stringify(record), { expirationTtl: CALENDAR_DELETE_TTL_SECONDS });
+  return record;
+}
+
+async function updateCalendarDeleteAcceptance(kv, key, updater) {
+  const current = parseCalendarDeleteAcceptanceRecord(await kv.get(key));
+  if (!current) return null;
+  const next = updater(current);
+  await writeCalendarDeleteAcceptance(kv, key, next);
+  return next;
+}
+
+export async function resolveCalendarDeleteRoute({
+  event,
+  normalized,
+  calendarDeleteCommand,
+  calendarDeleteContinuation,
+  env,
+  ctx,
+  ackStartedAt,
+  ackBudgetMs,
+}) {
+  if (calendarDeleteCommand.matched) {
+    if (!calendarDeleteCommand.explicit_calendar && calendarDeleteCommand.target?.mode === "snapshot") {
+      if (!env.IDEMPOTENCY_KV) return { matched: false, unavailable: true, reason: "missing_calendar_delete_kv_binding" };
+      const identity = await buildCalendarDeleteIdentity(event);
+      if (!identity.ok) return { matched: false, unavailable: true, reason: "calendar_delete_identity_unavailable" };
+      const readBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "get" });
+      const snapshotRead = await runBoundedAckOperation(
+        () => env.IDEMPOTENCY_KV.get(calendarSearchSnapshotKey(identity.actor_hash)),
+        { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: readBudgetMs, ctx },
+      );
+      if (!snapshotRead.ok) return { matched: false, unavailable: true, reason: "calendar_delete_snapshot_read_unavailable" };
+      if (!snapshotRead.value) return { matched: false, unavailable: false };
+      return {
+        matched: true,
+        command: calendarDeleteCommand,
+        continuation: { matched: false, action: "none" },
+        identity,
+        unavailable: false,
+      };
+    }
+    return {
+      matched: true,
+      command: calendarDeleteCommand,
+      continuation: { matched: false, action: "none" },
+      identity: null,
+      unavailable: false,
+    };
+  }
+  if (!calendarDeleteContinuation.matched) return { matched: false, unavailable: false };
+  if (!env.IDEMPOTENCY_KV) return { matched: false, unavailable: true, reason: "missing_calendar_delete_kv_binding" };
+  const identity = await buildCalendarDeleteIdentity(event);
+  if (!identity.ok) return { matched: false, unavailable: true, reason: "calendar_delete_identity_unavailable" };
+  const readBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "get" });
+  const pendingRead = await runBoundedAckOperation(
+    () => env.IDEMPOTENCY_KV.get(calendarDeletePendingKey(identity.actor_hash)),
+    { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: readBudgetMs, ctx },
+  );
+  if (!pendingRead.ok) return { matched: false, unavailable: true, reason: "calendar_delete_pending_read_unavailable" };
+  if (!pendingRead.value) {
+    if (calendarDeleteContinuation.action !== "confirm") return { matched: false, unavailable: false };
+    const acceptanceRead = await runBoundedAckOperation(
+      () => env.IDEMPOTENCY_KV.get(calendarDeleteAcceptanceKey(identity.safe_event_hash)),
+      { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: readBudgetMs, ctx },
+    );
+    if (!acceptanceRead.ok) return { matched: false, unavailable: true, reason: "calendar_delete_acceptance_unavailable" };
+    if (!parseCalendarDeleteAcceptanceRecord(acceptanceRead.value)) return { matched: false, unavailable: false };
+  }
+  return {
+    matched: true,
+    command: { matched: false, valid: false },
+    continuation: calendarDeleteContinuation,
+    identity,
+    unavailable: false,
+  };
+}
+
+export async function handleCalendarDeleteAcceptance({
+  event,
+  normalized,
+  calendarDeleteCommand,
+  calendarDeleteContinuation,
+  identity: providedIdentity,
+  env,
+  ctx,
+  correlationId,
+  ackStartedAt,
+  ackBudgetMs,
+}) {
+  if (!env.IDEMPOTENCY_KV || !env.RUNTIME_KV) return durableAckUnavailableResponse("missing_calendar_delete_kv_binding");
+  const identity = providedIdentity || await buildCalendarDeleteIdentity(event);
+  if (!identity.ok) return durableAckUnavailableResponse("calendar_delete_identity_unavailable");
+  const acceptanceKey = calendarDeleteAcceptanceKey(identity.safe_event_hash);
+  const readBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "get" });
+  const acceptanceRead = await runBoundedAckOperation(
+    () => env.IDEMPOTENCY_KV.get(acceptanceKey),
+    { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: readBudgetMs, ctx },
+  );
+  if (!acceptanceRead.ok) return durableAckUnavailableResponse("calendar_delete_acceptance_unavailable");
+  const existing = parseCalendarDeleteAcceptanceRecord(acceptanceRead.value);
+  if (acceptanceRead.value && !existing) return jsonResponse({ status: "rejected", reason: "calendar_delete_acceptance_conflict" }, 409);
+  if (existing) {
+    return jsonResponse({
+      status: "accepted",
+      reason: calendarDeleteRecordIsFinal(existing) ? "duplicate_line_event" : "calendar_delete_already_processing",
+      route: "calendar_delete",
+    }, 200);
+  }
+  const record = createCalendarDeleteAcceptanceRecord({
+    identity,
+    command: calendarDeleteCommand,
+    continuation: calendarDeleteContinuation,
+    replyToken: normalized.reply_token,
+    receivedAt: normalized.received_at,
+  });
+  const writeBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "put" });
+  const acceptanceWrite = await runBoundedAckOperation(
+    () => writeCalendarDeleteAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, record),
+    { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: writeBudgetMs, ctx, keepAlive: true },
+  );
+  if (!acceptanceWrite.ok) return durableAckUnavailableResponse("calendar_delete_acceptance_unavailable");
+  queueBackgroundTask(ctx, processAcceptedCalendarDeleteInBackground({ event, env, acceptanceKey }));
+  logWebhookAckTiming(correlationId, "calendar_delete_message_ack", ackStartedAt, 200, "none");
+  return jsonResponse({ status: "accepted", route: "calendar_delete" }, 200);
+}
+
+async function deliverCalendarDeleteReplyOnce(env, acceptanceKey, userId, replyText, terminalStatus) {
+  const record = parseCalendarDeleteAcceptanceRecord(await env.IDEMPOTENCY_KV.get(acceptanceKey));
+  if (!record) return { ok: false, reason: "missing_calendar_delete_acceptance" };
+  if (calendarDeleteRecordIsFinal(record)) {
+    return { ok: true, status: "already_finalized", duplicate_blocked: true, replied: false, pushed: false };
+  }
+  if (record.status === "reply_attempt_pending") {
+    return { ok: false, status: "delivery_ambiguous", duplicate_blocked: true, replied: false, pushed: false };
+  }
+  await writeCalendarDeleteAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, {
+    ...record,
+    status: "reply_attempt_pending",
+    reply_attempt_count: 1,
+    updated_at: new Date().toISOString(),
+  });
+  const delivery = await deliverFinalReplyFirst({
+    env,
+    deliveryKey: `calendar-delete-final:${record.safe_event_hash}`,
+    userId,
+    replyToken: record.reply_token,
+    replyReceivedAt: record.received_at,
+    replyText,
+  });
+  const finalStatus = delivery.ok
+    ? terminalStatus
+    : delivery.status === "delivery_ambiguous"
+      ? "delivery_ambiguous"
+      : delivery.status === "reply_unavailable"
+        ? "reply_unavailable"
+        : "reply_rejected";
+  await writeCalendarDeleteAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, {
+    ...record,
+    status: finalStatus,
+    delivery_status: delivery.status,
+    reply_token: "",
+    final_completed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  return delivery;
+}
+
+async function calendarDeleteTargetFromCommand(record, env) {
+  const target = record.target || {};
+  const snapshotKey = calendarSearchSnapshotKey(record.actor_hash);
+  if (target.mode === "snapshot") {
+    const snapshot = parseCalendarSearchSnapshot(
+      await env.IDEMPOTENCY_KV.get(snapshotKey),
+      record.actor_hash,
+      Date.parse(record.received_at || "") || Date.now(),
+    );
+    if (!snapshot) return { ok: false, reason: "missing_snapshot" };
+    if (snapshot.expired) return { ok: false, reason: "snapshot_expired" };
+    const candidate = snapshot.candidates[Number(target.position) - 1];
+    if (!candidate) return { ok: false, reason: "candidate_missing" };
+    return { ok: true, candidate, sourceSnapshotHash: snapshot.source_event_hash };
+  }
+  const lookupRecord = {
+    safe_event_hash: record.safe_event_hash,
+    canonical: { scope: "keyword", query: String(target.query || ""), time_min: "", time_max: "" },
+  };
+  let n8nResult = null;
+  try {
+    n8nResult = await callN8nWebhook(buildCalendarSearchN8nPayload(lookupRecord), env);
+  } catch {
+    n8nResult = null;
+  }
+  const validated = n8nResult?.ok
+    ? validateCalendarSearchN8nResult(n8nResult.body, lookupRecord)
+    : { ok: false, reason: "calendar_search_dispatch_unavailable" };
+  if (!validated.ok) return { ok: false, reason: "failed" };
+  const snapshot = createCalendarSearchSnapshot({
+    identity: { actor_hash: record.actor_hash, safe_event_hash: record.safe_event_hash },
+    candidates: validated.candidates,
+  });
+  await env.IDEMPOTENCY_KV.put(snapshotKey, JSON.stringify(snapshot), { expirationTtl: CALENDAR_SEARCH_TTL_SECONDS });
+  if (validated.candidates.length === 0) return { ok: false, reason: "no_result" };
+  if (validated.candidates.length !== 1) return { ok: false, reason: "ambiguous_target" };
+  return { ok: true, candidate: validated.candidates[0], sourceSnapshotHash: snapshot.source_event_hash };
+}
+
+async function calendarDeleteSnapshotStillMatches(pending, env, nowMs) {
+  const snapshot = parseCalendarSearchSnapshot(
+    await env.IDEMPOTENCY_KV.get(calendarSearchSnapshotKey(pending.actor_hash)),
+    pending.actor_hash,
+    nowMs,
+  );
+  if (!snapshot || snapshot.expired || snapshot.source_event_hash !== pending.source_snapshot_hash) return false;
+  return snapshot.candidates.some((candidate) => candidate.event_reference === pending.event_reference);
+}
+
+async function processAcceptedCalendarDeleteInBackground({ event, env, acceptanceKey }) {
+  const markAsReadTask = markLineMessageAsReadForEvent(event, { request_id: "", gate_marker: "" }, env);
+  const record = parseCalendarDeleteAcceptanceRecord(await env.IDEMPOTENCY_KV.get(acceptanceKey));
+  if (!record) {
+    await Promise.allSettled([markAsReadTask]);
+    return { ok: false, reason: "missing_calendar_delete_acceptance" };
+  }
+  const pendingKey = calendarDeletePendingKey(record.actor_hash);
+  let replyText = "";
+  let terminalStatus = "final_failed";
+
+  if (!record.input_valid) {
+    replyText = calendarDeleteReplyForReason(record.reject_reason);
+  } else if (record.continuation_action) {
+    const nowMs = Date.parse(record.received_at || "") || Date.now();
+    const pending = parseCalendarDeletePendingRecord(await env.IDEMPOTENCY_KV.get(pendingKey), record.actor_hash, nowMs);
+    if (!pending) {
+      replyText = calendarDeleteReplyForReason("missing_pending");
+    } else if (pending.expired) {
+      await env.IDEMPOTENCY_KV.delete(pendingKey);
+      replyText = calendarDeleteReplyForReason("expired");
+    } else if (record.continuation_action === "cancel") {
+      await env.IDEMPOTENCY_KV.delete(pendingKey);
+      replyText = calendarDeleteReplyForReason("cancelled");
+      terminalStatus = "final_completed";
+    } else if (record.continuation_action === "confirm") {
+      if (!await calendarDeleteSnapshotStillMatches(pending, env, nowMs)) {
+        await env.IDEMPOTENCY_KV.delete(pendingKey);
+        replyText = calendarDeleteReplyForReason("snapshot_changed");
+      } else {
+        await updateCalendarDeleteAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, (current) => ({
+          ...current,
+          status: "dispatching",
+          updated_at: new Date().toISOString(),
+        }));
+        let n8nResult = null;
+        try {
+          n8nResult = await callN8nWebhook(buildCalendarDeleteN8nPayload(pending), env);
+        } catch {
+          n8nResult = null;
+        }
+        let validated = n8nResult?.ok
+          ? validateCalendarDeleteN8nResult(n8nResult.body, pending)
+          : { ok: false, reason: "calendar_delete_dispatch_unavailable" };
+        if (!validated.ok) {
+          await updateCalendarDeleteAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, (current) => ({
+            ...current,
+            status: "dispatch_ambiguous",
+            updated_at: new Date().toISOString(),
+          }));
+          try {
+            n8nResult = await callN8nWebhook(buildCalendarDeleteN8nPayload(pending, { readbackOnly: true }), env);
+          } catch {
+            n8nResult = null;
+          }
+          validated = n8nResult?.ok
+            ? validateCalendarDeleteN8nResult(n8nResult.body, pending)
+            : { ok: false, reason: "calendar_delete_dispatch_unavailable" };
+        }
+        await env.IDEMPOTENCY_KV.delete(pendingKey);
+        replyText = validated.ok ? calendarDeleteSuccessReplyText(pending) : calendarDeleteReplyForReason("failed");
+        terminalStatus = validated.ok ? "final_completed" : "final_failed";
+      }
+    }
+  } else {
+    const resolved = await calendarDeleteTargetFromCommand(record, env);
+    if (!resolved.ok) {
+      replyText = calendarDeleteReplyForReason(resolved.reason);
+    } else {
+      const pending = createCalendarDeletePendingRecord({
+        identity: { actor_hash: record.actor_hash, safe_event_hash: record.safe_event_hash },
+        candidate: resolved.candidate,
+        sourceSnapshotHash: resolved.sourceSnapshotHash,
+        nowMs: Date.parse(record.received_at || "") || Date.now(),
+      });
+      await env.IDEMPOTENCY_KV.put(pendingKey, JSON.stringify(pending), { expirationTtl: CALENDAR_DELETE_TTL_SECONDS });
+      replyText = calendarDeleteConfirmationReplyText(pending);
+      terminalStatus = "final_completed";
+    }
+  }
+
+  const result = await deliverCalendarDeleteReplyOnce(
+    env,
+    acceptanceKey,
+    event.source?.userId || "",
+    replyText,
+    terminalStatus,
+  );
+  await Promise.allSettled([markAsReadTask]);
+  return result;
+}
+
+async function writeCalendarUpdateAcceptance(kv, key, record) {
+  await kv.put(key, JSON.stringify(record), { expirationTtl: CALENDAR_UPDATE_TTL_SECONDS });
+  return record;
+}
+
+async function updateCalendarUpdateAcceptance(kv, key, updater) {
+  const current = parseCalendarUpdateAcceptanceRecord(await kv.get(key));
+  if (!current) return null;
+  const next = updater(current);
+  await writeCalendarUpdateAcceptance(kv, key, next);
+  return next;
+}
+
+export async function resolveCalendarUpdateRoute({
+  event,
+  normalized,
+  calendarUpdateCommand,
+  calendarUpdateContinuation,
+  env,
+  ctx,
+  ackStartedAt,
+  ackBudgetMs,
+}) {
+  if (calendarUpdateCommand.matched) {
+    return {
+      matched: true,
+      command: calendarUpdateCommand,
+      continuation: { matched: false, action: "none" },
+      identity: null,
+      unavailable: false,
+    };
+  }
+  if (!calendarUpdateContinuation.matched) return { matched: false, unavailable: false };
+  if (!env.IDEMPOTENCY_KV) return { matched: false, unavailable: true, reason: "missing_calendar_update_kv_binding" };
+  const identity = await buildCalendarUpdateIdentity(event);
+  if (!identity.ok) return { matched: false, unavailable: true, reason: "calendar_update_identity_unavailable" };
+  const readBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "get" });
+  const pendingRead = await runBoundedAckOperation(
+    () => env.IDEMPOTENCY_KV.get(calendarUpdatePendingKey(identity.actor_hash)),
+    { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: readBudgetMs, ctx },
+  );
+  if (!pendingRead.ok) return { matched: false, unavailable: true, reason: "calendar_update_pending_read_unavailable" };
+  if (!pendingRead.value && calendarUpdateContinuation.action !== "confirm") {
+    return { matched: false, unavailable: false };
+  }
+  return {
+    matched: true,
+    command: { matched: false, valid: false },
+    continuation: calendarUpdateContinuation,
+    identity,
+    unavailable: false,
+  };
+}
+
+export async function handleCalendarUpdateAcceptance({
+  event,
+  normalized,
+  calendarUpdateCommand,
+  calendarUpdateContinuation,
+  identity: providedIdentity,
+  env,
+  ctx,
+  correlationId,
+  ackStartedAt,
+  ackBudgetMs,
+}) {
+  if (!env.IDEMPOTENCY_KV || !env.RUNTIME_KV) return durableAckUnavailableResponse("missing_calendar_update_kv_binding");
+  const identity = providedIdentity || await buildCalendarUpdateIdentity(event);
+  if (!identity.ok) return durableAckUnavailableResponse("calendar_update_identity_unavailable");
+  const acceptanceKey = calendarUpdateAcceptanceKey(identity.safe_event_hash);
+  const readBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "get" });
+  const acceptanceRead = await runBoundedAckOperation(
+    () => env.IDEMPOTENCY_KV.get(acceptanceKey),
+    { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: readBudgetMs, ctx },
+  );
+  if (!acceptanceRead.ok) return durableAckUnavailableResponse("calendar_update_acceptance_unavailable");
+  const existing = parseCalendarUpdateAcceptanceRecord(acceptanceRead.value);
+  if (acceptanceRead.value && !existing) return jsonResponse({ status: "rejected", reason: "calendar_update_acceptance_conflict" }, 409);
+  if (existing) {
+    return jsonResponse({
+      status: "accepted",
+      reason: calendarUpdateRecordIsFinal(existing) ? "duplicate_line_event" : "calendar_update_already_processing",
+      route: "calendar_update",
+    }, 200);
+  }
+  const record = createCalendarUpdateAcceptanceRecord({
+    identity,
+    command: calendarUpdateCommand,
+    continuation: calendarUpdateContinuation,
+    replyToken: normalized.reply_token,
+    receivedAt: normalized.received_at,
+  });
+  const writeBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "put" });
+  const acceptanceWrite = await runBoundedAckOperation(
+    () => writeCalendarUpdateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, record),
+    { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: writeBudgetMs, ctx, keepAlive: true },
+  );
+  if (!acceptanceWrite.ok) return durableAckUnavailableResponse("calendar_update_acceptance_unavailable");
+  queueBackgroundTask(ctx, processAcceptedCalendarUpdateInBackground({ event, env, acceptanceKey }));
+  logWebhookAckTiming(correlationId, "calendar_update_message_ack", ackStartedAt, 200, "none");
+  return jsonResponse({ status: "accepted", route: "calendar_update" }, 200);
+}
+
+async function deliverCalendarUpdateReplyOnce(env, acceptanceKey, userId, replyText, terminalStatus) {
+  const record = parseCalendarUpdateAcceptanceRecord(await env.IDEMPOTENCY_KV.get(acceptanceKey));
+  if (!record) return { ok: false, reason: "missing_calendar_update_acceptance" };
+  if (calendarUpdateRecordIsFinal(record)) {
+    return { ok: true, status: "already_finalized", duplicate_blocked: true, replied: false, pushed: false };
+  }
+  if (record.status === "reply_attempt_pending") {
+    return { ok: false, status: "delivery_ambiguous", duplicate_blocked: true, replied: false, pushed: false };
+  }
+  await writeCalendarUpdateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, {
+    ...record,
+    status: "reply_attempt_pending",
+    reply_attempt_count: 1,
+    updated_at: new Date().toISOString(),
+  });
+  const delivery = await deliverFinalReplyFirst({
+    env,
+    deliveryKey: `calendar-update-final:${record.safe_event_hash}`,
+    userId,
+    replyToken: record.reply_token,
+    replyReceivedAt: record.received_at,
+    replyText,
+  });
+  const finalStatus = delivery.ok
+    ? terminalStatus
+    : delivery.status === "delivery_ambiguous"
+      ? "delivery_ambiguous"
+      : delivery.status === "reply_unavailable"
+        ? "reply_unavailable"
+        : "reply_rejected";
+  await writeCalendarUpdateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, {
+    ...record,
+    status: finalStatus,
+    delivery_status: delivery.status,
+    reply_token: "",
+    final_completed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  return delivery;
+}
+
+async function calendarUpdateTargetFromCommand(record, env) {
+  const target = record.target || {};
+  const snapshotKey = calendarSearchSnapshotKey(record.actor_hash);
+  if (target.mode === "snapshot") {
+    const snapshot = parseCalendarSearchSnapshot(
+      await env.IDEMPOTENCY_KV.get(snapshotKey),
+      record.actor_hash,
+      Date.parse(record.received_at || "") || Date.now(),
+    );
+    if (!snapshot) return { ok: false, reason: "missing_snapshot" };
+    if (snapshot.expired) return { ok: false, reason: "snapshot_expired" };
+    const candidate = snapshot.candidates[Number(target.position) - 1];
+    if (!candidate) return { ok: false, reason: "candidate_missing" };
+    return { ok: true, candidate, sourceSnapshotHash: snapshot.source_event_hash };
+  }
+  const lookupRecord = {
+    safe_event_hash: record.safe_event_hash,
+    canonical: { scope: "keyword", query: String(target.query || ""), time_min: "", time_max: "" },
+  };
+  let n8nResult = null;
+  try {
+    n8nResult = await callN8nWebhook(buildCalendarSearchN8nPayload(lookupRecord), env);
+  } catch {
+    n8nResult = null;
+  }
+  const validated = n8nResult?.ok
+    ? validateCalendarSearchN8nResult(n8nResult.body, lookupRecord)
+    : { ok: false, reason: "calendar_search_dispatch_unavailable" };
+  if (!validated.ok) return { ok: false, reason: "failed" };
+  const snapshot = createCalendarSearchSnapshot({
+    identity: { actor_hash: record.actor_hash, safe_event_hash: record.safe_event_hash },
+    candidates: validated.candidates,
+  });
+  await env.IDEMPOTENCY_KV.put(snapshotKey, JSON.stringify(snapshot), { expirationTtl: CALENDAR_SEARCH_TTL_SECONDS });
+  if (validated.candidates.length === 0) return { ok: false, reason: "no_result" };
+  if (validated.candidates.length !== 1) return { ok: false, reason: "ambiguous_target" };
+  return { ok: true, candidate: validated.candidates[0], sourceSnapshotHash: snapshot.source_event_hash };
+}
+
+async function calendarUpdateSnapshotStillMatches(pending, env, nowMs) {
+  const snapshot = parseCalendarSearchSnapshot(
+    await env.IDEMPOTENCY_KV.get(calendarSearchSnapshotKey(pending.actor_hash)),
+    pending.actor_hash,
+    nowMs,
+  );
+  if (!snapshot || snapshot.expired || snapshot.source_event_hash !== pending.source_snapshot_hash) return false;
+  return snapshot.candidates.some((candidate) => candidate.event_reference === pending.event_reference);
+}
+
+async function processAcceptedCalendarUpdateInBackground({ event, env, acceptanceKey }) {
+  const markAsReadTask = markLineMessageAsReadForEvent(event, { request_id: "", gate_marker: "" }, env);
+  const record = parseCalendarUpdateAcceptanceRecord(await env.IDEMPOTENCY_KV.get(acceptanceKey));
+  if (!record) {
+    await Promise.allSettled([markAsReadTask]);
+    return { ok: false, reason: "missing_calendar_update_acceptance" };
+  }
+  const pendingKey = calendarUpdatePendingKey(record.actor_hash);
+  let replyText = "";
+  let terminalStatus = "final_failed";
+
+  if (!record.input_valid) {
+    replyText = calendarUpdateReplyForReason(record.reject_reason);
+  } else if (record.continuation_action) {
+    const nowMs = Date.parse(record.received_at || "") || Date.now();
+    const pending = parseCalendarUpdatePendingRecord(await env.IDEMPOTENCY_KV.get(pendingKey), record.actor_hash, nowMs);
+    if (!pending) {
+      replyText = calendarUpdateReplyForReason("missing_pending");
+    } else if (pending.expired) {
+      await env.IDEMPOTENCY_KV.delete(pendingKey);
+      replyText = calendarUpdateReplyForReason("expired");
+    } else if (record.continuation_action === "cancel") {
+      await env.IDEMPOTENCY_KV.delete(pendingKey);
+      replyText = calendarUpdateReplyForReason("cancelled");
+      terminalStatus = "final_completed";
+    } else if (record.continuation_action === "change") {
+      const patch = mergeCalendarUpdatePatch(pending.patch, record.patch);
+      const applied = applyCalendarUpdatePatch(pending.candidate, patch);
+      const next = createCalendarUpdatePendingRecord({
+        identity: { actor_hash: record.actor_hash, safe_event_hash: record.safe_event_hash },
+        candidate: pending.candidate,
+        desired: applied.ok ? applied.desired : null,
+        patch,
+        sourceSnapshotHash: pending.source_snapshot_hash,
+        nowMs,
+      });
+      await env.IDEMPOTENCY_KV.put(pendingKey, JSON.stringify(next), { expirationTtl: CALENDAR_UPDATE_TTL_SECONDS });
+      replyText = applied.ok ? calendarUpdateConfirmationReplyText(next) : calendarUpdateReplyForReason(applied.reason);
+      terminalStatus = "final_completed";
+    } else if (record.continuation_action === "confirm") {
+      if (pending.status !== "awaiting_confirmation" || !pending.desired) {
+        replyText = calendarUpdateReplyForReason("missing_changes");
+      } else if (!await calendarUpdateSnapshotStillMatches(pending, env, nowMs)) {
+        await env.IDEMPOTENCY_KV.delete(pendingKey);
+        replyText = calendarUpdateReplyForReason("snapshot_changed");
+      } else {
+        await updateCalendarUpdateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, (current) => ({
+          ...current,
+          status: "dispatching",
+          updated_at: new Date().toISOString(),
+        }));
+        let n8nResult = null;
+        try {
+          n8nResult = await callN8nWebhook(buildCalendarUpdateN8nPayload(pending), env);
+        } catch {
+          n8nResult = null;
+        }
+        let validated = n8nResult?.ok
+          ? validateCalendarUpdateN8nResult(n8nResult.body, pending)
+          : { ok: false, reason: "calendar_update_dispatch_unavailable" };
+        if (!validated.ok) {
+          await updateCalendarUpdateAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, (current) => ({
+            ...current,
+            status: "dispatch_ambiguous",
+            updated_at: new Date().toISOString(),
+          }));
+          try {
+            n8nResult = await callN8nWebhook(buildCalendarUpdateN8nPayload(pending, { readbackOnly: true }), env);
+          } catch {
+            n8nResult = null;
+          }
+          validated = n8nResult?.ok
+            ? validateCalendarUpdateN8nResult(n8nResult.body, pending)
+            : { ok: false, reason: "calendar_update_dispatch_unavailable" };
+        }
+        await env.IDEMPOTENCY_KV.delete(pendingKey);
+        replyText = validated.ok ? calendarUpdateSuccessReplyText(pending) : calendarUpdateReplyForReason("failed");
+        terminalStatus = validated.ok ? "final_completed" : "final_failed";
+      }
+    }
+  } else {
+    const resolved = await calendarUpdateTargetFromCommand(record, env);
+    if (!resolved.ok) {
+      replyText = calendarUpdateReplyForReason(resolved.reason);
+    } else {
+      const applied = applyCalendarUpdatePatch(resolved.candidate, record.patch);
+      const pending = createCalendarUpdatePendingRecord({
+        identity: { actor_hash: record.actor_hash, safe_event_hash: record.safe_event_hash },
+        candidate: resolved.candidate,
+        desired: applied.ok && record.command_reason !== "missing_changes" ? applied.desired : null,
+        patch: record.patch,
+        sourceSnapshotHash: resolved.sourceSnapshotHash,
+        nowMs: Date.parse(record.received_at || "") || Date.now(),
+      });
+      await env.IDEMPOTENCY_KV.put(pendingKey, JSON.stringify(pending), { expirationTtl: CALENDAR_UPDATE_TTL_SECONDS });
+      replyText = pending.desired ? calendarUpdateConfirmationReplyText(pending) : calendarUpdateReplyForReason(applied.ok ? "missing_changes" : applied.reason);
+      terminalStatus = "final_completed";
+    }
+  }
+
+  const result = await deliverCalendarUpdateReplyOnce(
+    env,
+    acceptanceKey,
+    event.source?.userId || "",
+    replyText,
+    terminalStatus,
+  );
+  await Promise.allSettled([markAsReadTask]);
+  return result;
 }
 
 export async function resolveCalendarCreateRoute({
@@ -720,6 +1471,185 @@ async function processAcceptedCalendarCreateInBackground({ event, env, acceptanc
     event.source?.userId || "",
     validated.ok ? calendarSuccessReplyText(record) : calendarFailureReplyText(),
     validated.ok ? "final_completed" : "final_failed",
+  );
+  await Promise.allSettled([markAsReadTask]);
+  return result;
+}
+
+async function writeCalendarSearchAcceptance(kv, key, record) {
+  await kv.put(key, JSON.stringify(record), { expirationTtl: CALENDAR_SEARCH_TTL_SECONDS });
+  return record;
+}
+
+async function updateCalendarSearchAcceptance(kv, key, updater) {
+  const current = parseCalendarSearchAcceptanceRecord(await kv.get(key));
+  if (!current) return null;
+  const next = updater(current);
+  await writeCalendarSearchAcceptance(kv, key, next);
+  return next;
+}
+
+export async function handleCalendarSearchAcceptance({
+  event,
+  normalized,
+  calendarSearchCommand,
+  calendarSearchSelection,
+  env,
+  ctx,
+  correlationId,
+  ackStartedAt,
+  ackBudgetMs,
+}) {
+  if (!env.IDEMPOTENCY_KV || !env.RUNTIME_KV) {
+    return durableAckUnavailableResponse("missing_calendar_search_kv_binding");
+  }
+  const identity = await buildCalendarSearchIdentity(event);
+  if (!identity.ok) return durableAckUnavailableResponse("calendar_search_identity_unavailable");
+  const acceptanceKey = calendarSearchAcceptanceKey(identity.safe_event_hash);
+  const readBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "get" });
+  if (readBudgetMs <= 0) return durableAckUnavailableResponse("calendar_search_acceptance_unavailable");
+  const acceptanceRead = await runBoundedAckOperation(
+    () => env.IDEMPOTENCY_KV.get(acceptanceKey),
+    { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: readBudgetMs, ctx },
+  );
+  if (!acceptanceRead.ok) return durableAckUnavailableResponse("calendar_search_acceptance_unavailable");
+  const existing = parseCalendarSearchAcceptanceRecord(acceptanceRead.value);
+  if (acceptanceRead.value && !existing) {
+    return jsonResponse({ status: "rejected", reason: "calendar_search_acceptance_conflict" }, 409);
+  }
+  if (existing) {
+    const reason = calendarSearchRecordIsFinal(existing)
+      ? "duplicate_line_event"
+      : "calendar_search_already_processing";
+    return jsonResponse({ status: "accepted", reason, route: "calendar_search" }, 200);
+  }
+
+  const record = createCalendarSearchAcceptanceRecord({
+    identity,
+    command: calendarSearchCommand,
+    selection: calendarSearchSelection,
+    replyToken: normalized.reply_token,
+    receivedAt: normalized.received_at,
+  });
+  const writeBudgetMs = memoAckRemainingBudgetMs({ startedAt: ackStartedAt, budgetMs: ackBudgetMs, phase: "put" });
+  if (writeBudgetMs <= 0) return durableAckUnavailableResponse("calendar_search_acceptance_unavailable");
+  const acceptanceWrite = await runBoundedAckOperation(
+    () => writeCalendarSearchAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, record),
+    { startedAt: ackStartedAt, budgetMs: ackBudgetMs, maxOperationMs: writeBudgetMs, ctx, keepAlive: true },
+  );
+  if (!acceptanceWrite.ok) return durableAckUnavailableResponse("calendar_search_acceptance_unavailable");
+
+  queueBackgroundTask(ctx, processAcceptedCalendarSearchInBackground({
+    event,
+    env,
+    acceptanceKey,
+  }));
+  logWebhookAckTiming(correlationId, "calendar_search_message_ack", ackStartedAt, 200, "none");
+  return jsonResponse({ status: "accepted", route: "calendar_search", resumed: false }, 200);
+}
+
+async function deliverCalendarSearchReplyOnce(env, acceptanceKey, userId, replyText, terminalStatus) {
+  const record = parseCalendarSearchAcceptanceRecord(await env.IDEMPOTENCY_KV.get(acceptanceKey));
+  if (!record) return { ok: false, reason: "missing_calendar_search_acceptance" };
+  if (calendarSearchRecordIsFinal(record)) {
+    return { ok: true, status: "already_finalized", duplicate_blocked: true, replied: false, pushed: false };
+  }
+  if (record.status === "reply_attempt_pending") {
+    return { ok: false, status: "delivery_ambiguous", duplicate_blocked: true, replied: false, pushed: false };
+  }
+  await writeCalendarSearchAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, {
+    ...record,
+    status: "reply_attempt_pending",
+    reply_attempt_count: 1,
+    updated_at: new Date().toISOString(),
+  });
+  const delivery = await deliverFinalReplyFirst({
+    env,
+    deliveryKey: `calendar-search-final:${record.safe_event_hash}`,
+    userId,
+    replyToken: record.reply_token,
+    replyReceivedAt: record.received_at,
+    replyText,
+  });
+  const finalStatus = delivery.ok
+    ? terminalStatus
+    : delivery.status === "delivery_ambiguous"
+      ? "delivery_ambiguous"
+      : delivery.status === "reply_unavailable"
+        ? "reply_unavailable"
+        : "reply_rejected";
+  await writeCalendarSearchAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, {
+    ...record,
+    status: finalStatus,
+    delivery_status: delivery.status,
+    reply_token: "",
+    final_completed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  return delivery;
+}
+
+async function processAcceptedCalendarSearchInBackground({ event, env, acceptanceKey }) {
+  const markAsReadTask = markLineMessageAsReadForEvent(event, { request_id: "", gate_marker: "" }, env);
+  const record = parseCalendarSearchAcceptanceRecord(await env.IDEMPOTENCY_KV.get(acceptanceKey));
+  if (!record) {
+    await Promise.allSettled([markAsReadTask]);
+    return { ok: false, reason: "missing_calendar_search_acceptance" };
+  }
+  const snapshotKey = calendarSearchSnapshotKey(record.actor_hash);
+  let replyText = "";
+  let terminalStatus = "final_failed";
+
+  if (!record.input_valid) {
+    replyText = calendarSearchValidationReplyText(record.reject_reason);
+  } else if (record.selection_position > 0) {
+    const snapshot = parseCalendarSearchSnapshot(
+      await env.IDEMPOTENCY_KV.get(snapshotKey),
+      record.actor_hash,
+      Date.parse(record.received_at || "") || Date.now(),
+    );
+    replyText = snapshot
+      ? calendarSearchSelectionReplyText(snapshot, record.selection_position)
+      : calendarSearchValidationReplyText("missing_snapshot");
+    terminalStatus = snapshot && !snapshot.expired && snapshot.candidates[record.selection_position - 1]
+      ? "final_completed"
+      : "final_failed";
+  } else {
+    await env.IDEMPOTENCY_KV.delete(snapshotKey);
+    await updateCalendarSearchAcceptance(env.IDEMPOTENCY_KV, acceptanceKey, (current) => ({
+      ...current,
+      status: "dispatching",
+      updated_at: new Date().toISOString(),
+    }));
+    let n8nResult = null;
+    try {
+      n8nResult = await callN8nWebhook(buildCalendarSearchN8nPayload(record), env);
+    } catch {
+      n8nResult = null;
+    }
+    const validated = n8nResult?.ok
+      ? validateCalendarSearchN8nResult(n8nResult.body, record)
+      : { ok: false, reason: "calendar_search_dispatch_unavailable" };
+    if (validated.ok) {
+      const identity = {
+        actor_hash: record.actor_hash,
+        safe_event_hash: record.safe_event_hash,
+      };
+      const snapshot = createCalendarSearchSnapshot({ identity, candidates: validated.candidates });
+      await env.IDEMPOTENCY_KV.put(snapshotKey, JSON.stringify(snapshot), { expirationTtl: CALENDAR_SEARCH_TTL_SECONDS });
+      replyText = calendarSearchReplyText(validated.candidates);
+      terminalStatus = "final_completed";
+    } else {
+      replyText = calendarSearchFailureReplyText();
+    }
+  }
+
+  const result = await deliverCalendarSearchReplyOnce(
+    env,
+    acceptanceKey,
+    event.source?.userId || "",
+    replyText,
+    terminalStatus,
   );
   await Promise.allSettled([markAsReadTask]);
   return result;
@@ -2506,6 +3436,71 @@ export function workerHealth(env = {}) {
       internal_identifiers_in_line_final: false,
       memo_dependency: false,
       monitor_or_wake_dependency: false,
+    },
+    calendar_search: {
+      command_examples: ["搜尋今天", "搜尋明天", "搜尋本週", "行事曆搜尋：名稱關鍵字", "第一個", "第二個"],
+      route_mode: "deterministic_read_only_before_ai_classification",
+      calendar_alias: CALENDAR_ALIAS,
+      calendar_backend: "primary",
+      timezone: CALENDAR_TIMEZONE,
+      snapshot_storage: "IDEMPOTENCY_KV",
+      snapshot_scope: "same_actor_safe_hash_latest_search",
+      snapshot_ttl_seconds: CALENDAR_SEARCH_TTL_SECONDS,
+      max_numbered_results: 10,
+      sequence_selection: true,
+      external_reader: "n8n_google_calendar_get_all",
+      calendar_write_effect: 0,
+      calendar_update_effect: 0,
+      calendar_delete_effect: 0,
+      final_exactly_once: true,
+      internal_identifiers_in_line_final: false,
+      create_pending_context_independent: true,
+      memo_dependency: false,
+    },
+    calendar_update: {
+      command_prefix: CALENDAR_UPDATE_COMMAND_PREFIX,
+      route_mode: "deterministic_actor_snapshot_before_ai_classification",
+      calendar_alias: CALENDAR_ALIAS,
+      calendar_backend: "primary",
+      timezone: CALENDAR_TIMEZONE,
+      target_selection: ["current_search_snapshot_sequence", "single_unique_keyword_result"],
+      editable_fields: ["title", "date", "start", "end", "duration", "location"],
+      pending_storage: "IDEMPOTENCY_KV",
+      pending_scope: "same_actor_safe_hash_selected_candidate",
+      pending_ttl_seconds: CALENDAR_UPDATE_TTL_SECONDS,
+      confirmation_required: true,
+      confirmation_phrase: "確認修改",
+      cancel_phrase: "取消",
+      original_candidate_match_required: true,
+      ambiguous_or_missing_target_write_effect: 0,
+      external_writer: "n8n_google_calendar_patch_with_terminal_readback",
+      retry_policy: "readback_only_after_ambiguous_update",
+      final_exactly_once: true,
+      internal_identifiers_in_line_final: false,
+      calendar_delete_effect: 0,
+      memo_dependency: false,
+    },
+    calendar_delete: {
+      command_prefix: CALENDAR_DELETE_COMMAND_PREFIX,
+      route_mode: "deterministic_actor_snapshot_before_ai_classification",
+      calendar_alias: CALENDAR_ALIAS,
+      calendar_backend: "primary",
+      timezone: CALENDAR_TIMEZONE,
+      target_selection: ["current_search_snapshot_sequence", "single_unique_keyword_result"],
+      pending_storage: "IDEMPOTENCY_KV",
+      pending_scope: "same_actor_safe_hash_selected_candidate",
+      pending_ttl_seconds: CALENDAR_DELETE_TTL_SECONDS,
+      confirmation_required: true,
+      confirmation_phrase: "確認刪除",
+      cancel_phrases: ["取消", "不要刪", "不要刪除"],
+      unbounded_delete_allowed: false,
+      original_candidate_match_required: true,
+      ambiguous_or_missing_target_delete_effect: 0,
+      external_writer: "n8n_google_calendar_delete_with_terminal_absence_readback",
+      retry_policy: "readback_only_after_ambiguous_delete",
+      final_exactly_once: true,
+      internal_identifiers_in_line_final: false,
+      memo_dependency: false,
     },
     codex_monitor: {
       name: CODEX_MONITOR_NAME,

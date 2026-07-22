@@ -1,20 +1,25 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const workflow = JSON.parse(fs.readFileSync('N8N_WORKFLOW_PLINE_V3_TEST_AI_AGENT.json', 'utf8'));
+const workflowPath = process.argv[2] || 'N8N_WORKFLOW_PLINE_V3_TEST_AI_AGENT.json';
+const workflow = JSON.parse(fs.readFileSync(workflowPath, 'utf8'));
 const baseline = JSON.parse(fs.readFileSync(
   'checkpoints/workflows/PLine_V3_MEMO_CORE_STABLE_PUBLISHED_271add4b_SANITIZED.json',
   'utf8',
 ));
 
-assert.equal(workflow.nodes.length, 144);
-assert.equal(Object.keys(workflow.connections).length, 143);
+const expectedUpdateDelta = workflow.calendar_update_gate_contract ? 7 : 0;
+const expectedDeleteDelta = workflow.calendar_delete_gate_contract ? 7 : 0;
+assert.equal(workflow.nodes.length, 147 + expectedUpdateDelta + expectedDeleteDelta);
+assert.equal(Object.keys(workflow.connections).length, 146 + expectedUpdateDelta + expectedDeleteDelta);
 assert.deepEqual(workflow.pinData, {});
-assert.equal(workflow.calendar_create_gate_contract.calendar_alias, 'authorized_test');
-assert.equal(workflow.calendar_create_gate_contract.calendar_backend, 'primary');
-assert.equal(workflow.calendar_create_gate_contract.alias_mapping, 'authorized_test_to_credential_primary');
-assert.equal(workflow.calendar_create_gate_contract.timezone, 'Asia/Taipei');
-assert.equal(workflow.calendar_create_gate_contract.memo_nodes_changed, false);
+if (workflow.calendar_create_gate_contract) {
+  assert.equal(workflow.calendar_create_gate_contract.calendar_alias, 'authorized_test');
+  assert.equal(workflow.calendar_create_gate_contract.calendar_backend, 'primary');
+  assert.equal(workflow.calendar_create_gate_contract.alias_mapping, 'authorized_test_to_credential_primary');
+  assert.equal(workflow.calendar_create_gate_contract.timezone, 'Asia/Taipei');
+  assert.equal(workflow.calendar_create_gate_contract.memo_nodes_changed, false);
+}
 
 const byName = new Map(workflow.nodes.map((node) => [node.name, node]));
 const baselineByName = new Map(baseline.nodes.map((node) => [node.name, node]));
@@ -31,10 +36,12 @@ for (const name of calendarNames) assert.ok(byName.has(name), `missing ${name}`)
 
 const googleNodes = calendarNames.map((name) => byName.get(name)).filter((node) => node.type === 'n8n-nodes-base.googleCalendar');
 assert.equal(googleNodes.length, 3);
+const createCredential = JSON.stringify(googleNodes[0].credentials);
+assert.ok(googleNodes[0].credentials?.googleCalendarOAuth2Api);
 for (const node of googleNodes) {
   assert.equal(node.parameters.calendar.cachedResultName, 'primary');
   assert.equal(node.parameters.calendar.value, 'primary');
-  assert.deepEqual(node.credentials, { googleCalendarOAuth2Api: { redacted: true } });
+  assert.equal(JSON.stringify(node.credentials), createCredential);
 }
 assert.equal(byName.get('Calendar Read Existing').parameters.operation, 'get');
 assert.equal(byName.get('Calendar Terminal Readback').parameters.operation, 'get');
@@ -62,6 +69,18 @@ assert.deepEqual(
   baseline.connections['Normalize Input'].main[0],
 );
 assert.deepEqual(
+  workflow.connections['Normalize Input'].main[0],
+  [{ node: workflow.calendar_delete_gate_contract
+    ? 'Calendar Delete Route'
+    : workflow.calendar_update_gate_contract
+      ? 'Calendar Update Route'
+      : 'Calendar Search Route', type: 'main', index: 0 }],
+);
+assert.deepEqual(
+  workflow.connections['Calendar Search Route'].main[1],
+  [{ node: 'Calendar Create Route', type: 'main', index: 0 }],
+);
+assert.deepEqual(
   workflow.connections['Calendar Create Needed Route'].main[1],
   [{ node: 'Respond to Webhook', type: 'main', index: 0 }],
 );
@@ -71,4 +90,4 @@ for (const forbidden of ['accessToken', 'refreshToken', 'clientSecret', 'replyTo
   assert.equal(serialized.includes(`"${forbidden}":`), false, `unsafe field ${forbidden}`);
 }
 
-console.log('N8N_CALENDAR_CREATE_OFFLINE_TEST PASS 16/16');
+console.log('N8N_CALENDAR_CREATE_OFFLINE_TEST PASS 18/18');
